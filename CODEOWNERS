@@ -1,0 +1,7 @@
+# Global code owners
+* @redactly/maintainers
+
+# Specific areas
+/pkg/ @redactly/maintainers
+/cmd/ @redactly/maintainers
+/.github/ @redactly/maintainers
