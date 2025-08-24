@@ -49,8 +49,18 @@ jobs:
         curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.58.0
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
     
+    - name: Verify Go environment for linter
+      run: |
+        go env
+        go mod graph
+        pwd
+        ls -la
+    
     - name: Run linter
-      run: golangci-lint run --timeout=5m
+      run: |
+        export GOPATH=$(go env GOPATH)
+        export GOROOT=$(go env GOROOT)
+        golangci-lint run --timeout=5m --verbose
 
   security-scan:
     name: Security Scan
