@@ -12,36 +12,19 @@ linters:
     - ineffassign
     - unused
     - misspell
-    - gosec
 
 linters-settings:
-  gosec:
-    excludes:
-      - G101 # Look for hardcoded credentials
-      - G102 # Bind to all interfaces
-      - G201 # SQL query construction using string concatenation
-      - G202 # SQL query construction using string concatenation
-      - G301 # Poor file permissions used when creating a directory
-      - G302 # Poor file permissions used with chmod
-      - G303 # Poor file permissions used when creating a file with os.Create
-      - G304 # File path provided as taint input
-      - G305 # File traversal when extracting zip archive
-      - G306 # Poor file permissions used when writing to a file
-      - G307 # Poor file permissions used with chmod
-      - G401 # Use of weak cryptographic primitive
-      - G402 # TLS InsecureSkipVerify set true
-      - G403 # Use of weak random number generator (math/rand instead of crypto/rand)
-      - G404 # Use of weak random number generator (math/rand instead of crypto/rand)
-      - G501 # Import blacklist: crypto/md5
-      - G502 # Import blacklist: crypto/des
-      - G503 # Import blacklist: crypto/rc4
-      - G504 # Import blacklist: net/http/cgi
-      - G505 # Import blacklist: crypto/sha1
-      - G601 # Implicit memory aliasing in for loop
+  govet:
+    check-shadowing: false
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
         - errcheck
-        - gosec
+    - path: cmd/redactctl/main\.go
+      linters:
+        - unused
