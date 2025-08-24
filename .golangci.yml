@@ -20,6 +20,8 @@ linters-settings:
   errcheck:
     check-type-assertions: false
     check-blank: false
+  staticcheck:
+    go-version: '1.25'
 
 issues:
   exclude-rules:
