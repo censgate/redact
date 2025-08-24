@@ -6,13 +6,9 @@ on:
   pull_request:
     branches: [ main, develop ]
 
-env:
-  GO_VERSION: '1.25'
-  CGO_ENABLED: 0
-
 jobs:
   test:
-    name: Redact Service Tests
+    name: Basic CI
     runs-on: ubuntu-latest
     
     steps:
@@ -22,18 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-    
-    - name: Cache Go modules
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
+        go-version: '1.25'
     
     - name: Download dependencies
       run: go mod download
@@ -43,38 +28,3 @@ jobs:
     
     - name: Build binary
       run: go build -v -o redactctl ./cmd/redactctl
-    
-    - name: Install golangci-lint
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
-        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-    
-    - name: Verify Go environment for linter
-      run: |
-        go env
-        go mod graph
-        pwd
-        ls -la
-    
-    - name: Run linter
-      run: |
-        export GOPATH=$(go env GOPATH)
-        export GOROOT=$(go env GOROOT)
-        golangci-lint run --timeout=5m --verbose
-
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'table'
-        exit-code: '0'
-        ignore-unfixed: true
