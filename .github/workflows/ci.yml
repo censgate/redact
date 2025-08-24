@@ -44,11 +44,13 @@ jobs:
     - name: Build binary
       run: go build -v -o redactctl ./cmd/redactctl
     
+    - name: Install golangci-lint
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+    
     - name: Run linter
-      uses: golangci/golangci-lint-action@v3.5.0
-      with:
-        version: v1.55.2
-        args: --timeout=5m
+      run: golangci-lint run --timeout=5m
 
   security-scan:
     name: Security Scan
