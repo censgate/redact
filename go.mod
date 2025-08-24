@@ -1,3 +1,3 @@
 module github.com/redactly/redact
 
-go 1.24.6
+go 1.25
