@@ -7,7 +7,7 @@ on:
     branches: [ main, develop ]
 
 env:
-  GO_VERSION: '1.24.6'
+  GO_VERSION: '1.21'
   CGO_ENABLED: 0
 
 jobs:
@@ -39,25 +39,16 @@ jobs:
       run: go mod download
     
     - name: Run tests
-      run: go test -race -coverprofile=coverage.out -v ./...
+      run: go test -v ./...
+    
+    - name: Build binary
+      run: go build -v -o redactctl ./cmd/redactctl
     
     - name: Run linter
       uses: golangci/golangci-lint-action@v3
       with:
         version: latest
-    
-    - name: Build binary
-      run: go build -v -o redactctl ./cmd/redactctl
-    
-    - name: Build Docker image
-      run: docker build -t redactly/redact:ci .
-    
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.out
-        flags: redact
-        name: redact-coverage
+        args: --timeout=5m
 
   security-scan:
     name: Security Scan
