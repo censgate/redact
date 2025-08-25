@@ -23,7 +23,6 @@ const (
 	TypeDate          RedactionType = "date"
 	TypeTime          RedactionType = "time"
 	TypeLink          RedactionType = "link"
-	TypeStrictLink    RedactionType = "strict_link"
 	TypeZipCode       RedactionType = "zip_code"
 	TypePoBox         RedactionType = "po_box"
 	TypeBTCAddress    RedactionType = "btc_address"
@@ -112,8 +111,6 @@ func (re *RedactionEngine) initDefaultPatterns() {
 	// Link patterns (URLs)
 	re.patterns[TypeLink] = regexp.MustCompile(`\b(?:https?://|www\.)[^\s<>"{}|\\^` + "`" + `\[\]]+`)
 
-	// Strict link patterns (more restrictive URLs)
-	re.patterns[TypeStrictLink] = regexp.MustCompile(`\bhttps?://(?:[-\w.])+(?:\:[0-9]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?\b`)
 
 	// ZIP code patterns (US format)
 	re.patterns[TypeZipCode] = regexp.MustCompile(`\b\d{5}(?:-\d{4})?\b`)
@@ -253,7 +250,6 @@ func (re *RedactionEngine) generateReplacement(redactionType RedactionType, orig
 		return "[TIME_REDACTED]"
 	case TypeLink:
 		return "[LINK_REDACTED]"
-	case TypeStrictLink:
 		return "[STRICT_LINK_REDACTED]"
 	case TypeZipCode:
 		return "[ZIP_CODE_REDACTED]"
