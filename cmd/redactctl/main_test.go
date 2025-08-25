@@ -11,3 +11,4 @@ func TestMain(t *testing.T) {
 		t.Log("Redact service main package compiled successfully")
 	})
 }
+
