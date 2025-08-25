@@ -90,14 +90,14 @@ func (re *RedactionEngine) initDefaultPatterns() {
 	// Email patterns
 	re.patterns[TypeEmail] = regexp.MustCompile(`(?i)\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`)
 
-	// Phone number patterns (US format)
-	re.patterns[TypePhone] = regexp.MustCompile(`(?i)(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})`)
+	// Phone number patterns (US format) - more restrictive to avoid GUID conflicts
+	re.patterns[TypePhone] = regexp.MustCompile(`\b(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b`)
 
 	// Credit card patterns - simplified pattern for testing
 	re.patterns[TypeCreditCard] = regexp.MustCompile(`\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b`)
 
-	// SSN patterns (US format) - simplified for Go regexp compatibility
-	re.patterns[TypeSSN] = regexp.MustCompile(`\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b`)
+	// SSN patterns (US format) - match exactly XXX-XX-XXXX format to avoid ZIP conflicts
+	re.patterns[TypeSSN] = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
 
 	// IP address patterns (IPv4)
 	re.patterns[TypeIPAddress] = regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
@@ -112,8 +112,8 @@ func (re *RedactionEngine) initDefaultPatterns() {
 	re.patterns[TypeLink] = regexp.MustCompile(`\b(?:https?://|www\.)[^\s<>"{}|\\^` + "`" + `\[\]]+`)
 
 
-	// ZIP code patterns (US format)
-	re.patterns[TypeZipCode] = regexp.MustCompile(`\b\d{5}(?:-\d{4})?\b`)
+	// ZIP code patterns (US format) - only match full ZIP+4 format to avoid conflicts
+	re.patterns[TypeZipCode] = regexp.MustCompile(`\b\d{5}-\d{4}\b`)
 
 	// PO Box patterns
 	re.patterns[TypePoBox] = regexp.MustCompile(`\b(?:P\.?O\.?\s*Box|Post\s*Office\s*Box|PO\s*Box)\s+\d+\b`)
@@ -250,7 +250,6 @@ func (re *RedactionEngine) generateReplacement(redactionType RedactionType, orig
 		return "[TIME_REDACTED]"
 	case TypeLink:
 		return "[LINK_REDACTED]"
-		return "[STRICT_LINK_REDACTED]"
 	case TypeZipCode:
 		return "[ZIP_CODE_REDACTED]"
 	case TypePoBox:

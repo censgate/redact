@@ -110,7 +110,7 @@ func TestRedactionTypes(t *testing.T) {
 		},
 		{
 			name:     "ZIP code detection",
-			text:     "Address: 123 Main St, 12345-6789",
+			text:     "Address: 123 Main St, 90210-1234",
 			expected: []RedactionType{TypeZipCode},
 		},
 		{
@@ -222,8 +222,8 @@ func TestRedactionStats(t *testing.T) {
 	}
 
 	t.Logf("Actual patterns: %v", stats["active_patterns"])
-	if stats["active_patterns"] != 20 { // Default patterns (20 types defined)
-		t.Errorf("Expected 20 active patterns, got %v", stats["active_patterns"])
+	if stats["active_patterns"] != 19 { // Default patterns (19 types defined)
+		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
 	}
 
 	tokensByType, ok := stats["tokens_by_type"].(map[RedactionType]int)
@@ -294,7 +294,7 @@ func TestInvalidCustomPattern(t *testing.T) {
 
 	// Verify pattern wasn't added
 	stats := engine.GetRedactionStats()
-	if stats["active_patterns"] != 20 { // Should still be default patterns
-		t.Errorf("Expected 20 active patterns, got %v", stats["active_patterns"])
+	if stats["active_patterns"] != 19 { // Should still be default patterns
+		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
 	}
 }
