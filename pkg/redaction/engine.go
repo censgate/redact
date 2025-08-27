@@ -1,16 +1,32 @@
 package redaction
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // RedactionType represents the type of sensitive data
 type RedactionType string
+
+// ContextDomain represents the context domain for enhanced detection
+type ContextDomain string
+
+const (
+	DomainMedical   ContextDomain = "medical"
+	DomainFinancial ContextDomain = "financial"
+	DomainLegal     ContextDomain = "legal"
+	DomainGeneral   ContextDomain = "general"
+)
 
 const (
 	TypeEmail         RedactionType = "email"
@@ -55,32 +71,53 @@ type Redaction struct {
 	Replacement string        `json:"replacement"`
 	Confidence  float64       `json:"confidence"`
 	Context     string        `json:"context,omitempty"`
+	Domain      ContextDomain `json:"domain,omitempty"`
 }
 
 // RedactionEngine handles PII/PHI detection and redaction
 type RedactionEngine struct {
-	patterns map[RedactionType]*regexp.Regexp
-	tokens   map[string]TokenInfo
-	mutex    sync.RWMutex
+	patterns       map[RedactionType]*regexp.Regexp
+	contextPatterns map[ContextDomain]map[string]*regexp.Regexp
+	tokens         map[string]TokenInfo
+	mutex          sync.RWMutex
+	masterKey      []byte
+	keyVersion     int
 }
 
 // TokenInfo stores information about a redaction token
 type TokenInfo struct {
-	OriginalText  string        `json:"original_text"`
+	EncryptedData []byte        `json:"encrypted_data"`
 	RedactionType RedactionType `json:"redaction_type"`
 	Created       time.Time     `json:"created"`
 	Expires       time.Time     `json:"expires"`
+	KeyVersion    int           `json:"key_version"`
+	Nonce         []byte        `json:"nonce"`
+}
+
+// ContextAnalysisResult represents the result of context analysis
+type ContextAnalysisResult struct {
+	Domain     ContextDomain `json:"domain"`
+	Confidence float64       `json:"confidence"`
+	Keywords   []string      `json:"keywords"`
 }
 
 // NewRedactionEngine creates a new redaction engine
 func NewRedactionEngine() *RedactionEngine {
 	engine := &RedactionEngine{
-		patterns: make(map[RedactionType]*regexp.Regexp),
-		tokens:   make(map[string]TokenInfo),
+		patterns:        make(map[RedactionType]*regexp.Regexp),
+		contextPatterns: make(map[ContextDomain]map[string]*regexp.Regexp),
+		tokens:          make(map[string]TokenInfo),
+		keyVersion:      1,
 	}
+
+	// Initialize master key for encryption
+	engine.initMasterKey()
 
 	// Initialize default patterns
 	engine.initDefaultPatterns()
+
+	// Initialize context-aware patterns
+	engine.initContextPatterns()
 
 	return engine
 }
@@ -146,6 +183,48 @@ func (re *RedactionEngine) initDefaultPatterns() {
 	re.patterns[TypeGitRepo] = regexp.MustCompile(`\b(?:git@|https?://)(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[a-zA-Z0-9_.-]+)*\.git\b`)
 }
 
+// initMasterKey initializes the master encryption key
+func (re *RedactionEngine) initMasterKey() {
+	// In production, this should come from a secure key management system
+	// For now, we'll generate a random key and derive it properly
+	salt := make([]byte, 32)
+	rand.Read(salt)
+	
+	// Use a default passphrase - in production this should come from environment or KMS
+	passphrase := "redactly-master-key-v1"
+	re.masterKey = pbkdf2.Key([]byte(passphrase), salt, 10000, 32, sha256.New)
+}
+
+// initContextPatterns initializes context-aware detection patterns
+func (re *RedactionEngine) initContextPatterns() {
+	// Medical domain patterns
+	re.contextPatterns[DomainMedical] = map[string]*regexp.Regexp{
+		"diagnosis":    regexp.MustCompile(`(?i)\b(diagnosed?\s+with|diagnosis\s+of|suffers?\s+from)\s+([a-zA-Z\s]{2,30})`),
+		"medication":   regexp.MustCompile(`(?i)\b(prescribed|taking|medication|drug)\s+([a-zA-Z0-9\s]{2,20}mg?)`),
+		"procedure":    regexp.MustCompile(`(?i)\b(surgery|procedure|operation|treatment)\s+([a-zA-Z\s]{2,30})`),
+		"vital_signs":  regexp.MustCompile(`(?i)\b(blood\s+pressure|bp|heart\s+rate|hr|temperature|temp)\s*:?\s*([0-9/\s]{2,10})`),
+		"lab_results":  regexp.MustCompile(`(?i)\b(glucose|cholesterol|hemoglobin|hgb|white\s+blood\s+cell|wbc)\s*:?\s*([0-9\.\s]{1,10})`),
+	}
+
+	// Financial domain patterns
+	re.contextPatterns[DomainFinancial] = map[string]*regexp.Regexp{
+		"account":      regexp.MustCompile(`(?i)\b(account\s+number|acct\s+#?|account\s+#)\s*:?\s*([0-9\-\s]{6,20})`),
+		"routing":      regexp.MustCompile(`(?i)\b(routing\s+number|routing\s+#|aba\s+number)\s*:?\s*([0-9]{9})`),
+		"loan":         regexp.MustCompile(`(?i)\b(loan\s+number|loan\s+id|mortgage\s+#)\s*:?\s*([0-9A-Z\-]{6,20})`),
+		"investment":   regexp.MustCompile(`(?i)\b(portfolio|investment\s+account|brokerage)\s+([0-9A-Z\-]{6,20})`),
+		"transaction":  regexp.MustCompile(`(?i)\b(transaction\s+id|txn\s+#|reference\s+#)\s*:?\s*([0-9A-Z\-]{6,20})`),
+	}
+
+	// Legal domain patterns
+	re.contextPatterns[DomainLegal] = map[string]*regexp.Regexp{
+		"case_number":  regexp.MustCompile(`(?i)\b(case\s+number|case\s+#|docket\s+#)\s*:?\s*([0-9A-Z\-]{6,20})`),
+		"court":        regexp.MustCompile(`(?i)\b(court\s+of|superior\s+court|district\s+court)\s+([a-zA-Z\s]{2,30})`),
+		"attorney":     regexp.MustCompile(`(?i)\b(attorney|lawyer|counsel)\s+([A-Z][a-zA-Z\.\s]{2,30})`),
+		"contract":     regexp.MustCompile(`(?i)\b(contract\s+number|agreement\s+#|policy\s+#)\s*:?\s*([0-9A-Z\-]{6,20})`),
+		"defendant":    regexp.MustCompile(`(?i)\b(defendant|plaintiff|party)\s+([A-Z][a-zA-Z\.\s]{2,30})`),
+	}
+}
+
 // AddCustomPattern adds a custom detection pattern
 func (re *RedactionEngine) AddCustomPattern(name string, pattern string) error {
 	compiled, err := regexp.Compile(pattern)
@@ -157,6 +236,63 @@ func (re *RedactionEngine) AddCustomPattern(name string, pattern string) error {
 	return nil
 }
 
+// AnalyzeContext analyzes the text to determine the most likely context domain
+func (re *RedactionEngine) AnalyzeContext(text string) ContextAnalysisResult {
+	lowerText := strings.ToLower(text)
+	domainScores := make(map[ContextDomain]float64)
+	domainKeywords := make(map[ContextDomain][]string)
+
+	// Medical keywords
+	medicalKeywords := []string{"patient", "doctor", "physician", "hospital", "clinic", "medical", "health", "treatment", "diagnosis", "medication", "surgery", "symptoms", "condition"}
+	for _, keyword := range medicalKeywords {
+		if strings.Contains(lowerText, keyword) {
+			domainScores[DomainMedical] += 1.0
+			domainKeywords[DomainMedical] = append(domainKeywords[DomainMedical], keyword)
+		}
+	}
+
+	// Financial keywords
+	financialKeywords := []string{"bank", "account", "loan", "credit", "debit", "payment", "transaction", "investment", "portfolio", "mortgage", "finance", "money", "balance"}
+	for _, keyword := range financialKeywords {
+		if strings.Contains(lowerText, keyword) {
+			domainScores[DomainFinancial] += 1.0
+			domainKeywords[DomainFinancial] = append(domainKeywords[DomainFinancial], keyword)
+		}
+	}
+
+	// Legal keywords
+	legalKeywords := []string{"court", "judge", "attorney", "lawyer", "case", "lawsuit", "contract", "agreement", "legal", "law", "defendant", "plaintiff", "verdict"}
+	for _, keyword := range legalKeywords {
+		if strings.Contains(lowerText, keyword) {
+			domainScores[DomainLegal] += 1.0
+			domainKeywords[DomainLegal] = append(domainKeywords[DomainLegal], keyword)
+		}
+	}
+
+	// Find the domain with the highest score
+	var bestDomain ContextDomain = DomainGeneral
+	var bestScore float64 = 0
+	for domain, score := range domainScores {
+		if score > bestScore {
+			bestDomain = domain
+			bestScore = score
+		}
+	}
+
+	// Calculate confidence as percentage of total words
+	wordCount := float64(len(strings.Fields(text)))
+	confidence := bestScore / wordCount
+	if confidence > 1.0 {
+		confidence = 1.0
+	}
+
+	return ContextAnalysisResult{
+		Domain:     bestDomain,
+		Confidence: confidence,
+		Keywords:   domainKeywords[bestDomain],
+	}
+}
+
 // RedactText performs redaction on the input text
 func (re *RedactionEngine) RedactText(text string) *RedactionResult {
 	result := &RedactionResult{
@@ -166,7 +302,10 @@ func (re *RedactionEngine) RedactText(text string) *RedactionResult {
 		Timestamp:    time.Now(),
 	}
 
-	// Process each redaction type
+	// Analyze context to improve detection accuracy
+	contextAnalysis := re.AnalyzeContext(text)
+
+	// Process standard redaction patterns
 	for redactionType, pattern := range re.patterns {
 		matches := pattern.FindAllStringIndex(text, -1)
 
@@ -183,9 +322,42 @@ func (re *RedactionEngine) RedactText(text string) *RedactionResult {
 				Replacement: re.generateReplacement(redactionType, original),
 				Confidence:  0.95, // High confidence for regex matches
 				Context:     re.extractContext(text, start, end),
+				Domain:      contextAnalysis.Domain,
 			}
 
 			result.Redactions = append(result.Redactions, redaction)
+		}
+	}
+
+	// Process context-aware patterns if domain was detected
+	if contextAnalysis.Domain != DomainGeneral {
+		if domainPatterns, exists := re.contextPatterns[contextAnalysis.Domain]; exists {
+			for patternName, pattern := range domainPatterns {
+				matches := pattern.FindAllStringSubmatch(text, -1)
+				matchIndices := pattern.FindAllStringSubmatchIndex(text, -1)
+
+				for i, match := range matches {
+					if len(match) >= 3 && len(matchIndices[i]) >= 6 {
+						// Extract the sensitive part (usually the second capture group)
+						start, end := matchIndices[i][4], matchIndices[i][5]
+						original := match[2]
+
+						// Create context-aware redaction
+						redaction := Redaction{
+							Type:        RedactionType(fmt.Sprintf("%s_%s", contextAnalysis.Domain, patternName)),
+							Start:       start,
+							End:         end,
+							Original:    original,
+							Replacement: fmt.Sprintf("[%s_%s_REDACTED]", strings.ToUpper(string(contextAnalysis.Domain)), strings.ToUpper(patternName)),
+							Confidence:  0.85 + (contextAnalysis.Confidence * 0.1), // Higher confidence with better context
+							Context:     re.extractContext(text, start, end),
+							Domain:      contextAnalysis.Domain,
+						}
+
+						result.Redactions = append(result.Redactions, redaction)
+					}
+				}
+			}
 		}
 	}
 
@@ -208,13 +380,13 @@ func (re *RedactionEngine) RedactText(text string) *RedactionResult {
 	}
 
 	if len(result.Redactions) > 0 {
-		result.Token = re.generateToken(result)
+		result.Token = re.generateSecureToken(result)
 	}
 
 	return result
 }
 
-// RestoreText restores redacted text using a token
+// RestoreText restores redacted text using a secure token
 func (re *RedactionEngine) RestoreText(token string) (string, error) {
 	re.mutex.RLock()
 	tokenInfo, exists := re.tokens[token]
@@ -224,7 +396,18 @@ func (re *RedactionEngine) RestoreText(token string) (string, error) {
 		return "", fmt.Errorf("invalid or expired token")
 	}
 
-	return tokenInfo.OriginalText, nil
+	// Check if token has expired
+	if time.Now().After(tokenInfo.Expires) {
+		return "", fmt.Errorf("token has expired")
+	}
+
+	// Decrypt the original text
+	originalText, err := re.decryptData(tokenInfo.EncryptedData, tokenInfo.Nonce)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt token data: %v", err)
+	}
+
+	return originalText, nil
 }
 
 // generateReplacement generates a replacement string for redacted content
@@ -284,19 +467,91 @@ func (re *RedactionEngine) extractContext(text string, start, end int) string {
 	return text[contextStart:contextEnd]
 }
 
-// generateToken generates a unique token for reversible redaction
-func (re *RedactionEngine) generateToken(result *RedactionResult) string {
+// generateSecureToken generates a cryptographically secure token for reversible redaction
+func (re *RedactionEngine) generateSecureToken(result *RedactionResult) string {
+	// Generate random token ID
+	tokenBytes := make([]byte, 16)
+	rand.Read(tokenBytes)
+	token := hex.EncodeToString(tokenBytes)
+
+	// Encrypt the original text
+	nonce := make([]byte, 12) // 96-bit nonce for GCM
+	rand.Read(nonce)
+	
+	encryptedData, err := re.encryptData(result.OriginalText, nonce)
+	if err != nil {
+		// Fallback to generating a new token if encryption fails
+		return re.generateFallbackToken(result)
+	}
+
+	// Store encrypted token information
+	tokenInfo := TokenInfo{
+		EncryptedData: encryptedData,
+		RedactionType: result.Redactions[0].Type, // Store first redaction type
+		Created:       time.Now(),
+		Expires:       time.Now().Add(24 * time.Hour), // Token expires in 24 hours
+		KeyVersion:    re.keyVersion,
+		Nonce:         nonce,
+	}
+
+	re.mutex.Lock()
+	re.tokens[token] = tokenInfo
+	re.mutex.Unlock()
+
+	return token
+}
+
+// encryptData encrypts data using AES-GCM with the master key
+func (re *RedactionEngine) encryptData(plaintext string, nonce []byte) ([]byte, error) {
+	block, err := aes.NewCipher(re.masterKey)
+	if err != nil {
+		return nil, err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	ciphertext := gcm.Seal(nil, nonce, []byte(plaintext), nil)
+	return ciphertext, nil
+}
+
+// decryptData decrypts data using AES-GCM with the master key
+func (re *RedactionEngine) decryptData(ciphertext []byte, nonce []byte) (string, error) {
+	block, err := aes.NewCipher(re.masterKey)
+	if err != nil {
+		return "", err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+
+	return string(plaintext), nil
+}
+
+// generateFallbackToken generates a fallback token if encryption fails
+func (re *RedactionEngine) generateFallbackToken(result *RedactionResult) string {
 	// Generate random token
 	bytes := make([]byte, 16)
 	rand.Read(bytes)
 	token := hex.EncodeToString(bytes)
 
-	// Store token information
+	// Store unencrypted as fallback (not recommended for production)
 	tokenInfo := TokenInfo{
-		OriginalText:  result.OriginalText,
-		RedactionType: result.Redactions[0].Type, // Store first redaction type
+		EncryptedData: []byte(result.OriginalText), // Store as plaintext fallback
+		RedactionType: result.Redactions[0].Type,
 		Created:       time.Now(),
-		Expires:       time.Now().Add(24 * time.Hour), // Token expires in 24 hours
+		Expires:       time.Now().Add(24 * time.Hour),
+		KeyVersion:    0, // Indicates unencrypted
+		Nonce:         nil,
 	}
 
 	re.mutex.Lock()
@@ -314,18 +569,28 @@ func (re *RedactionEngine) GetRedactionStats() map[string]interface{} {
 	stats := make(map[string]interface{})
 	stats["total_tokens"] = len(re.tokens)
 	stats["active_patterns"] = len(re.patterns)
+	stats["context_patterns"] = len(re.contextPatterns)
+	stats["key_version"] = re.keyVersion
 
 	// Count tokens by type
 	typeCounts := make(map[RedactionType]int)
+	encryptedCount := 0
+	
 	for _, tokenInfo := range re.tokens {
 		typeCounts[tokenInfo.RedactionType]++
+		if tokenInfo.KeyVersion > 0 {
+			encryptedCount++
+		}
 	}
+	
 	stats["tokens_by_type"] = typeCounts
+	stats["encrypted_tokens"] = encryptedCount
+	stats["unencrypted_tokens"] = len(re.tokens) - encryptedCount
 
 	return stats
 }
 
-// CleanupExpiredTokens removes expired tokens
+// CleanupExpiredTokens removes expired tokens and securely clears memory
 func (re *RedactionEngine) CleanupExpiredTokens() int {
 	re.mutex.Lock()
 	defer re.mutex.Unlock()
@@ -335,12 +600,43 @@ func (re *RedactionEngine) CleanupExpiredTokens() int {
 
 	for token, tokenInfo := range re.tokens {
 		if now.After(tokenInfo.Expires) {
+			// Securely clear encrypted data before deletion
+			for i := range tokenInfo.EncryptedData {
+				tokenInfo.EncryptedData[i] = 0
+			}
+			for i := range tokenInfo.Nonce {
+				tokenInfo.Nonce[i] = 0
+			}
+			
 			delete(re.tokens, token)
 			removed++
 		}
 	}
 
 	return removed
+}
+
+// RotateKeys rotates the encryption keys (for enhanced security)
+func (re *RedactionEngine) RotateKeys() error {
+	re.mutex.Lock()
+	defer re.mutex.Unlock()
+
+	// Generate new master key
+	salt := make([]byte, 32)
+	rand.Read(salt)
+	
+	passphrase := fmt.Sprintf("redactly-master-key-v%d", re.keyVersion+1)
+	newMasterKey := pbkdf2.Key([]byte(passphrase), salt, 10000, 32, sha256.New)
+
+	// In a production system, you would:
+	// 1. Re-encrypt all existing tokens with the new key
+	// 2. Store old keys for a transition period
+	// 3. Integrate with a proper Key Management Service (KMS)
+	
+	re.masterKey = newMasterKey
+	re.keyVersion++
+
+	return nil
 }
 
 // Helper functions
