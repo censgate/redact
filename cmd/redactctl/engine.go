@@ -200,7 +200,7 @@ func runEngineTest(args []string) {
 	if len(result.Redactions) > 0 {
 		fmt.Println("\nDetected patterns:")
 		for i, r := range result.Redactions {
-			fmt.Printf("  %d. Type: %s, Original: %q, Confidence: %.2f\n", 
+			fmt.Printf("  %d. Type: %s, Original: %q, Confidence: %.2f\n",
 				i+1, r.Type, r.Original, r.Confidence)
 			if r.Context != "" {
 				fmt.Printf("      Context: %s\n", r.Context)

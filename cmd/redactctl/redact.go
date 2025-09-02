@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	inputFile    string
-	outputFile   string
-	outputFormat string
-	enableTypes  []string
-	disableTypes []string
-	showRedactStats    bool
-	batchMode    bool
+	inputFile       string
+	outputFile      string
+	outputFormat    string
+	enableTypes     []string
+	disableTypes    []string
+	showRedactStats bool
+	batchMode       bool
 )
 
 // redactCmd represents the redact command
