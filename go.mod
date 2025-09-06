@@ -1,4 +1,4 @@
-module github.com/redactly/redact
+module github.com/censgate/redact
 
 go 1.25
 

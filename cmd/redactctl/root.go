@@ -17,8 +17,8 @@ var (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "redactctl",
-	Short: "Redactly Redaction Engine - CLI for PII/PHI detection and redaction",
-	Long: `redactctl is a command-line tool for the Redactly redaction engine.
+	Short: "Censgate Redaction Engine - CLI for PII/PHI detection and redaction",
+	Long: `redactctl is a command-line tool for the Censgate redaction engine.
 It provides advanced PII/PHI detection, context-aware redaction, and secure
 tokenization capabilities with support for multiple output formats.
 
@@ -71,4 +71,3 @@ func initConfig() {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}
 }
-

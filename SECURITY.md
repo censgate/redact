@@ -2,7 +2,7 @@
 
 ## Reporting Security Vulnerabilities
 
-We take security seriously. If you discover a security vulnerability, please report it to our security team at security@redactly.com.
+We take security seriously. If you discover a security vulnerability, please report it to our security team at security@censgate.com.
 
 ## Supported Versions
 
