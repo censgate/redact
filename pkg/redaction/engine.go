@@ -13,28 +13,28 @@ import (
 type RedactionType string
 
 const (
-	TypeEmail         RedactionType = "email"
-	TypePhone         RedactionType = "phone"
-	TypeCreditCard    RedactionType = "credit_card"
-	TypeSSN           RedactionType = "ssn"
-	TypeAddress       RedactionType = "address"
-	TypeName          RedactionType = "name"
-	TypeIPAddress     RedactionType = "ip_address"
-	TypeDate          RedactionType = "date"
-	TypeTime          RedactionType = "time"
-	TypeLink          RedactionType = "link"
-	TypeZipCode       RedactionType = "zip_code"
-	TypePoBox         RedactionType = "po_box"
-	TypeBTCAddress    RedactionType = "btc_address"
-	TypeMD5Hex        RedactionType = "md5_hex"
-	TypeSHA1Hex       RedactionType = "sha1_hex"
-	TypeSHA256Hex     RedactionType = "sha256_hex"
-	TypeGUID          RedactionType = "guid"
-	TypeISBN          RedactionType = "isbn"
-	TypeMACAddress    RedactionType = "mac_address"
-	TypeIBAN          RedactionType = "iban"
-	TypeGitRepo       RedactionType = "git_repo"
-	TypeCustom        RedactionType = "custom"
+	TypeEmail      RedactionType = "email"
+	TypePhone      RedactionType = "phone"
+	TypeCreditCard RedactionType = "credit_card"
+	TypeSSN        RedactionType = "ssn"
+	TypeAddress    RedactionType = "address"
+	TypeName       RedactionType = "name"
+	TypeIPAddress  RedactionType = "ip_address"
+	TypeDate       RedactionType = "date"
+	TypeTime       RedactionType = "time"
+	TypeLink       RedactionType = "link"
+	TypeZipCode    RedactionType = "zip_code"
+	TypePoBox      RedactionType = "po_box"
+	TypeBTCAddress RedactionType = "btc_address"
+	TypeMD5Hex     RedactionType = "md5_hex"
+	TypeSHA1Hex    RedactionType = "sha1_hex"
+	TypeSHA256Hex  RedactionType = "sha256_hex"
+	TypeGUID       RedactionType = "guid"
+	TypeISBN       RedactionType = "isbn"
+	TypeMACAddress RedactionType = "mac_address"
+	TypeIBAN       RedactionType = "iban"
+	TypeGitRepo    RedactionType = "git_repo"
+	TypeCustom     RedactionType = "custom"
 )
 
 // RedactionResult represents the result of a redaction operation
@@ -90,14 +90,14 @@ func (re *RedactionEngine) initDefaultPatterns() {
 	// Email patterns
 	re.patterns[TypeEmail] = regexp.MustCompile(`(?i)\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`)
 
-	// Phone number patterns (US format)
-	re.patterns[TypePhone] = regexp.MustCompile(`(?i)(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})`)
+	// Phone number patterns (US format) - with word boundaries to avoid GUID conflicts
+	re.patterns[TypePhone] = regexp.MustCompile(`\b(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b`)
 
 	// Credit card patterns - simplified pattern for testing
 	re.patterns[TypeCreditCard] = regexp.MustCompile(`\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b`)
 
-	// SSN patterns (US format) - simplified for Go regexp compatibility
-	re.patterns[TypeSSN] = regexp.MustCompile(`\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b`)
+	// SSN patterns (US format) - more specific to avoid ZIP+4 conflicts
+	re.patterns[TypeSSN] = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
 
 	// IP address patterns (IPv4)
 	re.patterns[TypeIPAddress] = regexp.MustCompile(`\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b`)
@@ -111,9 +111,8 @@ func (re *RedactionEngine) initDefaultPatterns() {
 	// Link patterns (URLs)
 	re.patterns[TypeLink] = regexp.MustCompile(`\b(?:https?://|www\.)[^\s<>"{}|\\^` + "`" + `\[\]]+`)
 
-
-	// ZIP code patterns (US format)
-	re.patterns[TypeZipCode] = regexp.MustCompile(`\b\d{5}(?:-\d{4})?\b`)
+	// ZIP code patterns (US format) - more specific to avoid SSN conflicts
+	re.patterns[TypeZipCode] = regexp.MustCompile(`\b\d{5}-\d{4}\b`)
 
 	// PO Box patterns
 	re.patterns[TypePoBox] = regexp.MustCompile(`\b(?:P\.?O\.?\s*Box|Post\s*Office\s*Box|PO\s*Box)\s+\d+\b`)
@@ -342,6 +341,20 @@ func (re *RedactionEngine) CleanupExpiredTokens() int {
 	}
 
 	return removed
+}
+
+// RotateKeys rotates the encryption keys (placeholder implementation)
+func (re *RedactionEngine) RotateKeys() error {
+	re.mutex.Lock()
+	defer re.mutex.Unlock()
+
+	// In a real implementation, this would:
+	// 1. Generate new encryption keys
+	// 2. Re-encrypt existing tokens with new keys
+	// 3. Update key version
+	// For now, this is a placeholder that simulates key rotation
+
+	return nil
 }
 
 // Helper functions
