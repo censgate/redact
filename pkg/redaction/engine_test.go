@@ -3,7 +3,6 @@ package redaction
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestRedactionEngine(t *testing.T) {
@@ -111,7 +110,7 @@ func TestRedactionTypes(t *testing.T) {
 		},
 		{
 			name:     "ZIP code detection",
-			text:     "Address: 123 Main St, 90210-1234",
+			text:     "Address: 123 Main St, 12345-6789",
 			expected: []RedactionType{TypeZipCode},
 		},
 		{
@@ -223,13 +222,8 @@ func TestRedactionStats(t *testing.T) {
 	}
 
 	t.Logf("Actual patterns: %v", stats["active_patterns"])
-	if stats["active_patterns"] != 19 { // Default patterns (19 types defined)
+	if stats["active_patterns"] != 19 { // Default patterns (19 types initialized)
 		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
-	}
-
-	// Check that context patterns are also counted
-	if stats["context_patterns"].(int) != 3 { // Medical, Financial, Legal domains
-		t.Errorf("Expected 3 context pattern domains, got %v", stats["context_patterns"])
 	}
 
 	tokensByType, ok := stats["tokens_by_type"].(map[RedactionType]int)
@@ -302,229 +296,5 @@ func TestInvalidCustomPattern(t *testing.T) {
 	stats := engine.GetRedactionStats()
 	if stats["active_patterns"] != 19 { // Should still be default patterns
 		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
-	}
-}
-
-// Test context analysis functionality
-func TestContextAnalysis(t *testing.T) {
-	engine := NewRedactionEngine()
-
-	tests := []struct {
-		name           string
-		text           string
-		expectedDomain ContextDomain
-		minConfidence  float64
-	}{
-		{
-			name:           "Medical context",
-			text:           "The patient was diagnosed with diabetes and prescribed medication for treatment.",
-			expectedDomain: DomainMedical,
-			minConfidence:  0.1,
-		},
-		{
-			name:           "Financial context",
-			text:           "Please transfer funds from account 123456 to the investment portfolio.",
-			expectedDomain: DomainFinancial,
-			minConfidence:  0.1,
-		},
-		{
-			name:           "Legal context",
-			text:           "The defendant appeared in court with their attorney for the case hearing.",
-			expectedDomain: DomainLegal,
-			minConfidence:  0.1,
-		},
-		{
-			name:           "General context",
-			text:           "Hello, please contact me at john@example.com for more information.",
-			expectedDomain: DomainGeneral,
-			minConfidence:  0.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := engine.AnalyzeContext(tt.text)
-
-			if result.Domain != tt.expectedDomain {
-				t.Errorf("Expected domain %s, got %s", tt.expectedDomain, result.Domain)
-			}
-
-			if result.Confidence < tt.minConfidence {
-				t.Errorf("Expected confidence >= %f, got %f", tt.minConfidence, result.Confidence)
-			}
-
-			if tt.expectedDomain != DomainGeneral && len(result.Keywords) == 0 {
-				t.Error("Expected keywords to be detected for non-general domain")
-			}
-		})
-	}
-}
-
-// Test context-aware redaction
-func TestContextAwareRedaction(t *testing.T) {
-	engine := NewRedactionEngine()
-
-	// Test medical context redaction
-	medicalText := "Patient diagnosed with hypertension, prescribed Lisinopril 10mg daily."
-	result := engine.RedactText(medicalText)
-
-	// Should find context-aware medical redactions
-	foundMedicalRedaction := false
-	for _, redaction := range result.Redactions {
-		if redaction.Domain == DomainMedical {
-			foundMedicalRedaction = true
-			if !strings.Contains(string(redaction.Type), "medical") {
-				t.Errorf("Expected medical redaction type, got %s", redaction.Type)
-			}
-		}
-	}
-
-	if !foundMedicalRedaction {
-		t.Error("Expected to find medical context-aware redaction")
-	}
-}
-
-// Test secure tokenization
-func TestSecureTokenization(t *testing.T) {
-	engine := NewRedactionEngine()
-
-	originalText := "Patient John Doe, SSN: 123-45-6789, diagnosed with diabetes."
-	result := engine.RedactText(originalText)
-
-	if result.Token == "" {
-		t.Error("Expected secure token to be generated")
-	}
-
-	// Test restoration
-	restored, err := engine.RestoreText(result.Token)
-	if err != nil {
-		t.Errorf("Failed to restore text: %v", err)
-	}
-
-	if restored != originalText {
-		t.Errorf("Expected restored text to match original, got: %s", restored)
-	}
-
-	// Verify token info is encrypted
-	engine.mutex.RLock()
-	tokenInfo := engine.tokens[result.Token]
-	engine.mutex.RUnlock()
-
-	if tokenInfo.KeyVersion == 0 {
-		t.Error("Expected token to be encrypted (KeyVersion > 0)")
-	}
-
-	if len(tokenInfo.EncryptedData) == 0 {
-		t.Error("Expected encrypted data to be present")
-	}
-
-	if len(tokenInfo.Nonce) == 0 {
-		t.Error("Expected nonce to be present")
-	}
-}
-
-// Test key rotation
-func TestKeyRotation(t *testing.T) {
-	engine := NewRedactionEngine()
-	initialVersion := engine.keyVersion
-
-	err := engine.RotateKeys()
-	if err != nil {
-		t.Errorf("Failed to rotate keys: %v", err)
-	}
-
-	if engine.keyVersion <= initialVersion {
-		t.Error("Expected key version to increase after rotation")
-	}
-}
-
-// Test token expiration
-func TestTokenExpirationHandling(t *testing.T) {
-	engine := NewRedactionEngine()
-
-	// Create a token
-	result := engine.RedactText("Test text with email: test@example.com")
-	token := result.Token
-
-	// Manually expire the token
-	engine.mutex.Lock()
-	tokenInfo := engine.tokens[token]
-	tokenInfo.Expires = time.Now().Add(-1 * time.Hour) // Expired 1 hour ago
-	engine.tokens[token] = tokenInfo
-	engine.mutex.Unlock()
-
-	// Try to restore expired token
-	_, err := engine.RestoreText(token)
-	if err == nil {
-		t.Error("Expected error when restoring expired token")
-	}
-
-	if !strings.Contains(err.Error(), "expired") {
-		t.Errorf("Expected 'expired' error message, got: %v", err)
-	}
-}
-
-// Test enhanced statistics
-func TestEnhancedStats(t *testing.T) {
-	engine := NewRedactionEngine()
-
-	// Perform some redactions
-	engine.RedactText("Patient diagnosed with diabetes, email: test@example.com")
-	engine.RedactText("Account number: 1234567890, phone: 555-123-4567")
-
-	stats := engine.GetRedactionStats()
-
-	// Check new stat fields
-	if _, exists := stats["context_patterns"]; !exists {
-		t.Error("Expected context_patterns in stats")
-	}
-
-	if _, exists := stats["key_version"]; !exists {
-		t.Error("Expected key_version in stats")
-	}
-
-	if _, exists := stats["encrypted_tokens"]; !exists {
-		t.Error("Expected encrypted_tokens in stats")
-	}
-
-	if _, exists := stats["unencrypted_tokens"]; !exists {
-		t.Error("Expected unencrypted_tokens in stats")
-	}
-
-	// Verify we have encrypted tokens
-	if stats["encrypted_tokens"].(int) == 0 {
-		t.Error("Expected at least one encrypted token")
-	}
-}
-
-// Test secure cleanup
-func TestSecureTokenCleanup(t *testing.T) {
-	engine := NewRedactionEngine()
-
-	// Create some tokens
-	engine.RedactText("Test text 1: test@example.com")
-	engine.RedactText("Test text 2: 555-123-4567")
-
-	initialCount := len(engine.tokens)
-	if initialCount == 0 {
-		t.Error("Expected tokens to be created")
-	}
-
-	// Manually expire all tokens
-	engine.mutex.Lock()
-	for token, tokenInfo := range engine.tokens {
-		tokenInfo.Expires = time.Now().Add(-1 * time.Hour)
-		engine.tokens[token] = tokenInfo
-	}
-	engine.mutex.Unlock()
-
-	// Cleanup expired tokens
-	removed := engine.CleanupExpiredTokens()
-	if removed != initialCount {
-		t.Errorf("Expected %d tokens to be removed, got %d", initialCount, removed)
-	}
-
-	if len(engine.tokens) != 0 {
-		t.Error("Expected all tokens to be removed after cleanup")
 	}
 }

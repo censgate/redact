@@ -1,0 +1,51 @@
+# Redactly Redact - Default Configuration
+# This file contains default configuration values
+
+redaction:
+  engine:
+    enabled_types:
+      - "email"
+      - "phone"
+      - "ssn"
+      - "credit_card"
+      - "name"
+      - "address"
+      - "date_time"
+      - "link"
+      - "zip_code"
+      - "po_box"
+      - "btc_address"
+      - "md5_hex"
+      - "sha1_hex"
+      - "sha256_hex"
+      - "guid"
+      - "isbn"
+      - "mac_address"
+      - "iban"
+      - "git_repo"
+    confidence_threshold: 0.8
+    max_tokens: 1000
+    token_expiry: "24h"
+    
+  context:
+    analysis_enabled: true
+    domains:
+      - "medical"
+      - "financial"
+      - "legal"
+      - "general"
+
+encryption:
+  key_rotation_interval: "720h"  # 30 days
+  pbkdf2_iterations: 10000
+  key_version: 1
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+cli:
+  default_format: "text"
+  batch_size: 100
+  progress_enabled: true
