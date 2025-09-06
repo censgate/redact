@@ -1,7 +1,7 @@
 # Global code owners
-* @redactly/maintainers
+* @censgate/maintainers
 
 # Specific areas
-/pkg/ @redactly/maintainers
-/cmd/ @redactly/maintainers
-/.github/ @redactly/maintainers
+/pkg/ @censgate/maintainers
+/cmd/ @censgate/maintainers
+/.github/ @censgate/maintainers

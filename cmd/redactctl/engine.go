@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/redactly/redact/config"
-	"github.com/redactly/redact/pkg/redaction"
+	"github.com/censgate/redact/config"
+	"github.com/censgate/redact/pkg/redaction"
 	"github.com/spf13/cobra"
 )
 

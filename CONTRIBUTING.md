@@ -1,6 +1,6 @@
-# Contributing to Redactly
+# Contributing to Censgate
 
-Thank you for your interest in contributing to Redactly!
+Thank you for your interest in contributing to Censgate!
 
 ## Development Setup
 
