@@ -76,7 +76,7 @@ var engineTestCmd = &cobra.Command{
 	Short: "Test pattern matching against text",
 	Long:  "Test how the redaction engine would process specific text without actually performing redaction.",
 	Args:  cobra.MinimumNArgs(1),
-	Run: func(_ *cobra.Command, _ []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		runEngineTest(args)
 	},
 }
