@@ -32,7 +32,7 @@ jobs:
     - name: Run linting
       uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v2.4.0
         
     - name: Build binary
       run: go build -v -o redactctl ./cmd/redactctl
