@@ -14,6 +14,7 @@ import (
 // RedactionType represents the type of sensitive data
 type RedactionType string
 
+// Redaction type constants for different types of sensitive data
 const (
 	TypeEmail      RedactionType = "email"
 	TypePhone      RedactionType = "phone"

@@ -8,6 +8,7 @@ import (
 // RedactionMode defines how redaction should be performed
 type RedactionMode string
 
+// Redaction mode constants for different redaction strategies
 const (
 	ModeReplace  RedactionMode = "replace"  // Replace with placeholder
 	ModeMask     RedactionMode = "mask"     // Replace with mask characters

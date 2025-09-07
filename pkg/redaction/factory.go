@@ -8,6 +8,7 @@ import (
 // ProviderType represents the type of redaction provider
 type ProviderType string
 
+// Provider type constants for different redaction provider implementations
 const (
 	ProviderTypeBasic       ProviderType = "basic"
 	ProviderTypePolicyAware ProviderType = "policy_aware"
