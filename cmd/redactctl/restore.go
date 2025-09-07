@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -81,7 +82,7 @@ func runRestore(args []string) {
 	engine := redaction.NewRedactionEngine()
 
 	// Restore original text
-	originalText, err := engine.RestoreText(targetToken)
+	restoreResult, err := engine.RestoreText(context.Background(), targetToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error restoring text: %v\n", err)
 		os.Exit(1)
@@ -89,17 +90,17 @@ func runRestore(args []string) {
 
 	// Output restored text
 	if restoreOut != "" {
-		if err := os.WriteFile(restoreOut, []byte(originalText), 0644); err != nil {
+		if err := os.WriteFile(restoreOut, []byte(restoreResult.OriginalText), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing to output file: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Fprintf(os.Stderr, "Restored text written to: %s\n", restoreOut)
 	} else {
-		fmt.Print(originalText)
+		fmt.Print(restoreResult.OriginalText)
 	}
 
 	// Log success
 	if logLevel == "debug" || cfg.Logging.Level == "debug" {
-		fmt.Fprintf(os.Stderr, "Successfully restored %d characters from token: %s\n", len(originalText), targetToken)
+		fmt.Fprintf(os.Stderr, "Successfully restored %d characters from token: %s\n", len(restoreResult.OriginalText), targetToken)
 	}
 }

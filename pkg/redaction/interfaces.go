@@ -197,16 +197,3 @@ type ValidationError struct {
 	Message string `json:"message"`
 	Code    string `json:"code"`
 }
-
-// RedactionMode defines how redaction should be performed
-type RedactionMode string
-
-const (
-	ModeReplace  RedactionMode = "replace"  // Replace with placeholder
-	ModeMask     RedactionMode = "mask"     // Replace with mask characters
-	ModeRemove   RedactionMode = "remove"   // Remove entirely
-	ModeTokenize RedactionMode = "tokenize" // Replace with reversible token
-	ModeHash     RedactionMode = "hash"     // Replace with hash
-	ModeEncrypt  RedactionMode = "encrypt"  // Replace with encrypted value
-	ModeLLM      RedactionMode = "llm"      // Use LLM for context-aware redaction
-)

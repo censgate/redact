@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -190,7 +191,15 @@ func runEngineTest(args []string) {
 	fmt.Println("========================================")
 
 	// Perform redaction
-	result := engine.RedactText(testText)
+	result, err := engine.RedactText(context.Background(), &redaction.RedactionRequest{
+		Text:       testText,
+		Mode:       redaction.ModeReplace,
+		Reversible: true,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Redaction failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Printf("Original: %s\n", result.OriginalText)
 	fmt.Printf("Redacted: %s\n", result.RedactedText)
@@ -209,12 +218,12 @@ func runEngineTest(args []string) {
 	}
 
 	// Test restoration
-	if result.Token != "" {
-		fmt.Println("\n🔄 Testing token restoration...")
-		restored, err := engine.RestoreText(result.Token)
+		if result.Token != "" {
+			fmt.Println("\n🔄 Testing token restoration...")
+			restoreResult, err := engine.RestoreText(context.Background(), result.Token)
 		if err != nil {
 			fmt.Printf("❌ Restoration failed: %v\n", err)
-		} else if restored == result.OriginalText {
+		} else if restoreResult.OriginalText == result.OriginalText {
 			fmt.Println("✅ Token restoration successful")
 		} else {
 			fmt.Println("❌ Token restoration mismatch")

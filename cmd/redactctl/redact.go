@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -103,7 +104,15 @@ func runRedact(args []string) {
 	}
 
 	// Perform redaction
-	result := engine.RedactText(inputText)
+	result, err := engine.RedactText(context.Background(), &redaction.RedactionRequest{
+		Text:       inputText,
+		Mode:       redaction.ModeReplace,
+		Reversible: true,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Redaction failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Output results
 	if err := outputResults(result, cfg); err != nil {

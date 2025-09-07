@@ -179,10 +179,6 @@ func (re *RedactionEngine) AddCustomPattern(name string, pattern string) error {
 	return nil
 }
 
-// RedactText performs redaction on the input text (legacy method for backward compatibility)
-func (re *RedactionEngine) RedactText(text string) *RedactionResult {
-	return re.redactTextInternal(text)
-}
 
 // restoreTextInternal restores redacted text using a token (internal method)
 func (re *RedactionEngine) restoreTextInternal(token string) (string, error) {
@@ -416,6 +412,11 @@ func (re *RedactionEngine) GetCapabilities() *ProviderCapabilities {
 			"context_extraction": true,
 		},
 	}
+}
+
+// GetStats implements RedactionProvider interface
+func (re *RedactionEngine) GetStats() map[string]interface{} {
+	return re.GetRedactionStats()
 }
 
 // Cleanup implements RedactionProvider interface

@@ -1,6 +1,7 @@
 package redaction
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -11,7 +12,13 @@ func TestRedactionEngine(t *testing.T) {
 	// Test basic redaction
 	text := "Hello, my email is john.doe@example.com and my phone is (555) 123-4567"
 
-	result := engine.RedactText(text)
+	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+		Text: text,
+		Mode: ModeReplace,
+	})
+	if err != nil {
+		t.Fatalf("RedactText failed: %v", err)
+	}
 
 	if len(result.Redactions) != 2 {
 		t.Errorf("Expected 2 redactions, got %d", len(result.Redactions))
@@ -142,7 +149,13 @@ func TestRedactionTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := engine.RedactText(tt.text)
+			result, err := engine.RedactText(context.Background(), &RedactionRequest{
+				Text: tt.text,
+				Mode: ModeReplace,
+			})
+			if err != nil {
+				t.Fatalf("RedactText failed: %v", err)
+			}
 
 			if len(result.Redactions) != len(tt.expected) {
 				t.Errorf("Expected %d redactions, got %d", len(tt.expected), len(result.Redactions))
@@ -170,20 +183,27 @@ func TestReversibleRedaction(t *testing.T) {
 	engine := NewRedactionEngine()
 
 	originalText := "Email: test@example.com, Phone: 555-123-4567"
-	result := engine.RedactText(originalText)
+	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+		Text:       originalText,
+		Mode:       ModeReplace,
+		Reversible: true,
+	})
+	if err != nil {
+		t.Fatalf("RedactText failed: %v", err)
+	}
 
 	if result.Token == "" {
 		t.Error("Expected token to be generated")
 	}
 
 	// Restore the text
-	restored, err := engine.RestoreText(result.Token)
+	restoreResult, err := engine.RestoreText(context.Background(), result.Token)
 	if err != nil {
 		t.Errorf("Failed to restore text: %v", err)
 	}
 
-	if restored != originalText {
-		t.Errorf("Expected restored text to match original, got: %s", restored)
+	if restoreResult.OriginalText != originalText {
+		t.Errorf("Expected restored text to match original, got: %s", restoreResult.OriginalText)
 	}
 }
 
@@ -197,7 +217,20 @@ func TestCustomPatterns(t *testing.T) {
 	}
 
 	text := "User ID: ID-123456"
-	result := engine.RedactText(text)
+	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+		Text: text,
+		Mode: ModeReplace,
+		CustomPatterns: []CustomPattern{
+			{
+				Name:        "custom_id",
+				Pattern:     `\bID-\d{6}\b`,
+				Replacement: "[CUSTOM_ID_REDACTED]",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RedactText failed: %v", err)
+	}
 
 	if len(result.Redactions) != 1 {
 		t.Errorf("Expected 1 redaction, got %d", len(result.Redactions))
@@ -212,8 +245,16 @@ func TestRedactionStats(t *testing.T) {
 	engine := NewRedactionEngine()
 
 	// Perform some redactions
-	engine.RedactText("Email: test@example.com")
-	engine.RedactText("Phone: 555-123-4567")
+	engine.RedactText(context.Background(), &RedactionRequest{
+		Text:       "Email: test@example.com",
+		Mode:       ModeReplace,
+		Reversible: true,
+	})
+	engine.RedactText(context.Background(), &RedactionRequest{
+		Text:       "Phone: 555-123-4567",
+		Mode:       ModeReplace,
+		Reversible: true,
+	})
 
 	stats := engine.GetRedactionStats()
 
@@ -244,7 +285,14 @@ func TestTokenExpiration(t *testing.T) {
 	engine := NewRedactionEngine()
 
 	// Perform redaction to generate token
-	result := engine.RedactText("Email: test@example.com")
+	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+		Text:       "Email: test@example.com",
+		Mode:       ModeReplace,
+		Reversible: true,
+	})
+	if err != nil {
+		t.Fatalf("RedactText failed: %v", err)
+	}
 	if result.Token == "" {
 		t.Error("Expected token to be generated")
 	}
@@ -256,7 +304,7 @@ func TestTokenExpiration(t *testing.T) {
 	}
 
 	// Token should still be valid
-	_, err := engine.RestoreText(result.Token)
+	_, err = engine.RestoreText(context.Background(), result.Token)
 	if err != nil {
 		t.Errorf("Token should still be valid: %v", err)
 	}
@@ -266,7 +314,13 @@ func TestRedactionContext(t *testing.T) {
 	engine := NewRedactionEngine()
 
 	text := "This is a test email: test@example.com and some other text"
-	result := engine.RedactText(text)
+	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+		Text: text,
+		Mode: ModeReplace,
+	})
+	if err != nil {
+		t.Fatalf("RedactText failed: %v", err)
+	}
 
 	if len(result.Redactions) != 1 {
 		t.Errorf("Expected 1 redaction, got %d", len(result.Redactions))
