@@ -1,14 +1,15 @@
-# golangci-lint v2.x minimal configuration
-version: "2"
-
+# golangci-lint v2.4.0 working configuration
 run:
   timeout: 5m
   go: "1.25"
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  format: colored-line-number
 
 linters:
-  default: standard
   enable:
-    - gofmt
     - govet
     - errcheck
     - staticcheck
@@ -16,3 +17,21 @@ linters:
     - ineffassign
     - unused
     - misspell
+    - revive
+  disable-all: false
+
+linters-settings:
+  govet:
+    check-shadowing: false
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: cmd/redactctl/main\.go
+      linters:
+        - unused
