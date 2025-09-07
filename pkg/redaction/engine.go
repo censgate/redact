@@ -1,6 +1,7 @@
 package redaction
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -58,10 +59,15 @@ type Redaction struct {
 }
 
 // RedactionEngine handles PII/PHI detection and redaction
+// Implements RedactionProvider interface
 type RedactionEngine struct {
 	patterns map[RedactionType]*regexp.Regexp
 	tokens   map[string]TokenInfo
 	mutex    sync.RWMutex
+	
+	// Configuration
+	maxTextLength int
+	defaultTTL    time.Duration
 }
 
 // TokenInfo stores information about a redaction token
@@ -75,8 +81,25 @@ type TokenInfo struct {
 // NewRedactionEngine creates a new redaction engine
 func NewRedactionEngine() *RedactionEngine {
 	engine := &RedactionEngine{
-		patterns: make(map[RedactionType]*regexp.Regexp),
-		tokens:   make(map[string]TokenInfo),
+		patterns:      make(map[RedactionType]*regexp.Regexp),
+		tokens:        make(map[string]TokenInfo),
+		maxTextLength: 1024 * 1024, // 1MB default
+		defaultTTL:    24 * time.Hour,
+	}
+
+	// Initialize default patterns
+	engine.initDefaultPatterns()
+
+	return engine
+}
+
+// NewRedactionEngineWithConfig creates a new redaction engine with custom configuration
+func NewRedactionEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *RedactionEngine {
+	engine := &RedactionEngine{
+		patterns:      make(map[RedactionType]*regexp.Regexp),
+		tokens:        make(map[string]TokenInfo),
+		maxTextLength: maxTextLength,
+		defaultTTL:    defaultTTL,
 	}
 
 	// Initialize default patterns
@@ -156,65 +179,13 @@ func (re *RedactionEngine) AddCustomPattern(name string, pattern string) error {
 	return nil
 }
 
-// RedactText performs redaction on the input text
+// RedactText performs redaction on the input text (legacy method for backward compatibility)
 func (re *RedactionEngine) RedactText(text string) *RedactionResult {
-	result := &RedactionResult{
-		OriginalText: text,
-		RedactedText: text,
-		Redactions:   []Redaction{},
-		Timestamp:    time.Now(),
-	}
-
-	// Process each redaction type
-	for redactionType, pattern := range re.patterns {
-		matches := pattern.FindAllStringIndex(text, -1)
-
-		for _, match := range matches {
-			start, end := match[0], match[1]
-			original := text[start:end]
-
-			// Create redaction
-			redaction := Redaction{
-				Type:        redactionType,
-				Start:       start,
-				End:         end,
-				Original:    original,
-				Replacement: re.generateReplacement(redactionType, original),
-				Confidence:  0.95, // High confidence for regex matches
-				Context:     re.extractContext(text, start, end),
-			}
-
-			result.Redactions = append(result.Redactions, redaction)
-		}
-	}
-
-	// Apply redactions in reverse order to maintain indices
-	// We need to track offset changes as we modify the text
-	offset := 0
-	for i := len(result.Redactions) - 1; i >= 0; i-- {
-		redaction := result.Redactions[i]
-		adjustedStart := redaction.Start + offset
-		adjustedEnd := redaction.End + offset
-
-		if adjustedStart >= 0 && adjustedEnd <= len(result.RedactedText) {
-			result.RedactedText = result.RedactedText[:adjustedStart] +
-				redaction.Replacement +
-				result.RedactedText[adjustedEnd:]
-
-			// Update offset for next redaction
-			offset += len(redaction.Replacement) - (redaction.End - redaction.Start)
-		}
-	}
-
-	if len(result.Redactions) > 0 {
-		result.Token = re.generateToken(result)
-	}
-
-	return result
+	return re.redactTextInternal(text)
 }
 
-// RestoreText restores redacted text using a token
-func (re *RedactionEngine) RestoreText(token string) (string, error) {
+// restoreTextInternal restores redacted text using a token (internal method)
+func (re *RedactionEngine) restoreTextInternal(token string) (string, error) {
 	re.mutex.RLock()
 	tokenInfo, exists := re.tokens[token]
 	re.mutex.RUnlock()
@@ -370,4 +341,199 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// Interface implementation methods
+
+// RedactText implements RedactionProvider interface
+func (re *RedactionEngine) RedactText(ctx context.Context, request *RedactionRequest) (*RedactionResult, error) {
+	if request == nil {
+		return nil, fmt.Errorf("redaction request cannot be nil")
+	}
+	
+	// Validate text length
+	if len(request.Text) > re.maxTextLength {
+		return nil, fmt.Errorf("text length exceeds maximum allowed size: %d", re.maxTextLength)
+	}
+	
+	// Use existing redaction logic but with enhanced request handling
+	result := re.redactTextInternal(request.Text)
+	
+	// Apply custom patterns if provided
+	if len(request.CustomPatterns) > 0 {
+		result = re.applyCustomPatterns(result, request.CustomPatterns)
+	}
+	
+	// Handle TTL for tokens
+	if request.Reversible && len(result.Redactions) > 0 {
+		ttl := request.TTL
+		if ttl == 0 {
+			ttl = re.defaultTTL
+		}
+		result.Token = re.generateTokenWithTTL(result, ttl)
+	}
+	
+	return result, nil
+}
+
+// RestoreText implements RedactionProvider interface  
+func (re *RedactionEngine) RestoreText(ctx context.Context, token string) (*RestoreResult, error) {
+	originalText, err := re.restoreTextInternal(token)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &RestoreResult{
+		OriginalText: originalText,
+		Token:        token,
+		RestoredAt:   time.Now(),
+		Metadata:     map[string]interface{}{"provider": "RedactionEngine"},
+	}, nil
+}
+
+// GetCapabilities implements RedactionProvider interface
+func (re *RedactionEngine) GetCapabilities() *ProviderCapabilities {
+	supportedTypes := make([]RedactionType, 0, len(re.patterns))
+	for redactionType := range re.patterns {
+		supportedTypes = append(supportedTypes, redactionType)
+	}
+	
+	return &ProviderCapabilities{
+		Name:                "RedactionEngine",
+		Version:             "1.0.0",
+		SupportedTypes:      supportedTypes,
+		SupportedModes:      []RedactionMode{ModeReplace, ModeMask, ModeRemove, ModeTokenize},
+		SupportsReversible:  true,
+		SupportsCustom:      true,
+		SupportsLLM:         false,
+		SupportsPolicies:    false,
+		SupportsMultiTenant: false,
+		MaxTextLength:       re.maxTextLength,
+		Features: map[string]bool{
+			"pattern_matching": true,
+			"token_restoration": true,
+			"custom_patterns": true,
+			"context_extraction": true,
+		},
+	}
+}
+
+// Cleanup implements RedactionProvider interface
+func (re *RedactionEngine) Cleanup() error {
+	removed := re.CleanupExpiredTokens()
+	if removed > 0 {
+		// Log cleanup if needed
+	}
+	return nil
+}
+
+// Helper methods for interface implementation
+
+// redactTextInternal performs the core redaction logic (renamed from RedactText)
+func (re *RedactionEngine) redactTextInternal(text string) *RedactionResult {
+	result := &RedactionResult{
+		OriginalText: text,
+		RedactedText: text,
+		Redactions:   []Redaction{},
+		Timestamp:    time.Now(),
+	}
+
+	// Process each redaction type
+	for redactionType, pattern := range re.patterns {
+		matches := pattern.FindAllStringIndex(text, -1)
+
+		for _, match := range matches {
+			start, end := match[0], match[1]
+			original := text[start:end]
+
+			// Create redaction
+			redaction := Redaction{
+				Type:        redactionType,
+				Start:       start,
+				End:         end,
+				Original:    original,
+				Replacement: re.generateReplacement(redactionType, original),
+				Confidence:  0.95, // High confidence for regex matches
+				Context:     re.extractContext(text, start, end),
+			}
+
+			result.Redactions = append(result.Redactions, redaction)
+		}
+	}
+
+	// Apply redactions in reverse order to maintain indices
+	offset := 0
+	for i := len(result.Redactions) - 1; i >= 0; i-- {
+		redaction := result.Redactions[i]
+		adjustedStart := redaction.Start + offset
+		adjustedEnd := redaction.End + offset
+
+		if adjustedStart >= 0 && adjustedEnd <= len(result.RedactedText) {
+			result.RedactedText = result.RedactedText[:adjustedStart] +
+				redaction.Replacement +
+				result.RedactedText[adjustedEnd:]
+
+			// Update offset for next redaction
+			offset += len(redaction.Replacement) - (redaction.End - redaction.Start)
+		}
+	}
+
+	return result
+}
+
+// applyCustomPatterns applies custom patterns to the redaction result
+func (re *RedactionEngine) applyCustomPatterns(result *RedactionResult, patterns []CustomPattern) *RedactionResult {
+	for _, pattern := range patterns {
+		compiled, err := regexp.Compile(pattern.Pattern)
+		if err != nil {
+			continue // Skip invalid patterns
+		}
+		
+		matches := compiled.FindAllStringIndex(result.RedactedText, -1)
+		for _, match := range matches {
+			start, end := match[0], match[1]
+			original := result.RedactedText[start:end]
+			
+			replacement := pattern.Replacement
+			if replacement == "" {
+				replacement = "[CUSTOM_REDACTED]"
+			}
+			
+			redaction := Redaction{
+				Type:        TypeCustom,
+				Start:       start,
+				End:         end,
+				Original:    original,
+				Replacement: replacement,
+				Confidence:  pattern.Confidence,
+				Context:     re.extractContext(result.RedactedText, start, end),
+			}
+			
+			result.Redactions = append(result.Redactions, redaction)
+		}
+	}
+	
+	return result
+}
+
+// generateTokenWithTTL generates a token with custom TTL
+func (re *RedactionEngine) generateTokenWithTTL(result *RedactionResult, ttl time.Duration) string {
+	// Generate random token
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	token := hex.EncodeToString(bytes)
+
+	// Store token information with custom TTL
+	tokenInfo := TokenInfo{
+		OriginalText:  result.OriginalText,
+		RedactionType: result.Redactions[0].Type, // Store first redaction type
+		Created:       time.Now(),
+		Expires:       time.Now().Add(ttl),
+	}
+
+	re.mutex.Lock()
+	re.tokens[token] = tokenInfo
+	re.mutex.Unlock()
+
+	return token
 }
