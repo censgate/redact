@@ -7,12 +7,12 @@ import (
 )
 
 func TestRedactionEngine(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	// Test basic redaction
 	text := "Hello, my email is john.doe@example.com and my phone is (555) 123-4567"
 
-	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &Request{
 		Text: text,
 		Mode: ModeReplace,
 	})
@@ -62,94 +62,94 @@ func TestRedactionEngine(t *testing.T) {
 	}
 }
 
-func TestRedactionTypes(t *testing.T) {
-	engine := NewRedactionEngine()
+func TestTypes(t *testing.T) {
+	engine := NewEngine()
 
 	tests := []struct {
 		name     string
 		text     string
-		expected []RedactionType
+		expected []Type
 	}{
 		{
 			name:     "Email detection",
 			text:     "Contact me at test@example.com",
-			expected: []RedactionType{TypeEmail},
+			expected: []Type{TypeEmail},
 		},
 		{
 			name:     "Phone detection",
 			text:     "Call me at 555-123-4567",
-			expected: []RedactionType{TypePhone},
+			expected: []Type{TypePhone},
 		},
 		{
 			name:     "Credit card detection",
 			text:     "Card number: 4111-1111-1111-1111",
-			expected: []RedactionType{TypeCreditCard},
+			expected: []Type{TypeCreditCard},
 		},
 		{
 			name:     "SSN detection",
 			text:     "SSN: 123-45-6789",
-			expected: []RedactionType{TypeSSN},
+			expected: []Type{TypeSSN},
 		},
 		{
 			name:     "IP address detection",
 			text:     "Server IP: 192.168.1.1",
-			expected: []RedactionType{TypeIPAddress},
+			expected: []Type{TypeIPAddress},
 		},
 		{
 			name:     "Date detection",
 			text:     "Meeting on 12/25/2023",
-			expected: []RedactionType{TypeDate},
+			expected: []Type{TypeDate},
 		},
 		{
 			name:     "Multiple types",
 			text:     "Email: test@example.com, Phone: 555-123-4567",
-			expected: []RedactionType{TypeEmail, TypePhone},
+			expected: []Type{TypeEmail, TypePhone},
 		},
 		{
 			name:     "Time detection",
 			text:     "Meeting at 14:30 PM",
-			expected: []RedactionType{TypeTime},
+			expected: []Type{TypeTime},
 		},
 		{
 			name:     "Link detection",
 			text:     "Visit https://example.com for more info",
-			expected: []RedactionType{TypeLink},
+			expected: []Type{TypeLink},
 		},
 		{
 			name:     "ZIP code detection",
 			text:     "Address: 123 Main St, 12345-6789",
-			expected: []RedactionType{TypeZipCode},
+			expected: []Type{TypeZipCode},
 		},
 		{
 			name:     "PO Box detection",
 			text:     "Send to P.O. Box 123",
-			expected: []RedactionType{TypePoBox},
+			expected: []Type{TypePoBox},
 		},
 		{
 			name:     "Bitcoin address detection",
 			text:     "BTC: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
-			expected: []RedactionType{TypeBTCAddress},
+			expected: []Type{TypeBTCAddress},
 		},
 		{
 			name:     "MD5 hash detection",
 			text:     "Hash: d41d8cd98f00b204e9800998ecf8427e",
-			expected: []RedactionType{TypeMD5Hex},
+			expected: []Type{TypeMD5Hex},
 		},
 		{
 			name:     "GUID detection",
 			text:     "ID: 550e8400-e29b-41d4-a716-446655440000",
-			expected: []RedactionType{TypeGUID},
+			expected: []Type{TypeGUID},
 		},
 		{
 			name:     "MAC address detection",
 			text:     "MAC: 00:1B:44:11:3A:B7",
-			expected: []RedactionType{TypeMACAddress},
+			expected: []Type{TypeMACAddress},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := engine.RedactText(context.Background(), &RedactionRequest{
+			result, err := engine.RedactText(context.Background(), &Request{
 				Text: tt.text,
 				Mode: ModeReplace,
 			})
@@ -180,10 +180,10 @@ func TestRedactionTypes(t *testing.T) {
 }
 
 func TestReversibleRedaction(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	originalText := "Email: test@example.com, Phone: 555-123-4567"
-	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &Request{
 		Text:       originalText,
 		Mode:       ModeReplace,
 		Reversible: true,
@@ -208,7 +208,7 @@ func TestReversibleRedaction(t *testing.T) {
 }
 
 func TestCustomPatterns(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	// Add custom pattern
 	err := engine.AddCustomPattern("custom_id", `\bID-\d{6}\b`)
@@ -217,7 +217,7 @@ func TestCustomPatterns(t *testing.T) {
 	}
 
 	text := "User ID: ID-123456"
-	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &Request{
 		Text: text,
 		Mode: ModeReplace,
 		CustomPatterns: []CustomPattern{
@@ -236,21 +236,21 @@ func TestCustomPatterns(t *testing.T) {
 		t.Errorf("Expected 1 redaction, got %d", len(result.Redactions))
 	}
 
-	if result.Redactions[0].Type != RedactionType("custom_id") {
+	if result.Redactions[0].Type != Type("custom_id") {
 		t.Errorf("Expected custom redaction type, got %s", result.Redactions[0].Type)
 	}
 }
 
 func TestRedactionStats(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	// Perform some redactions
-	_, _ = engine.RedactText(context.Background(), &RedactionRequest{
+	_, _ = engine.RedactText(context.Background(), &Request{
 		Text:       "Email: test@example.com",
 		Mode:       ModeReplace,
 		Reversible: true,
 	})
-	_, _ = engine.RedactText(context.Background(), &RedactionRequest{
+	_, _ = engine.RedactText(context.Background(), &Request{
 		Text:       "Phone: 555-123-4567",
 		Mode:       ModeReplace,
 		Reversible: true,
@@ -267,7 +267,7 @@ func TestRedactionStats(t *testing.T) {
 		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
 	}
 
-	tokensByType, ok := stats["tokens_by_type"].(map[RedactionType]int)
+	tokensByType, ok := stats["tokens_by_type"].(map[Type]int)
 	if !ok {
 		t.Error("Expected tokens_by_type to be a map")
 	}
@@ -282,10 +282,10 @@ func TestRedactionStats(t *testing.T) {
 }
 
 func TestTokenExpiration(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	// Perform redaction to generate token
-	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &Request{
 		Text:       "Email: test@example.com",
 		Mode:       ModeReplace,
 		Reversible: true,
@@ -311,10 +311,10 @@ func TestTokenExpiration(t *testing.T) {
 }
 
 func TestRedactionContext(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	text := "This is a test email: test@example.com and some other text"
-	result, err := engine.RedactText(context.Background(), &RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &Request{
 		Text: text,
 		Mode: ModeReplace,
 	})
@@ -338,7 +338,7 @@ func TestRedactionContext(t *testing.T) {
 }
 
 func TestInvalidCustomPattern(t *testing.T) {
-	engine := NewRedactionEngine()
+	engine := NewEngine()
 
 	// Try to add invalid regex pattern
 	err := engine.AddCustomPattern("invalid", `[invalid regex`)

@@ -79,7 +79,7 @@ func runRestore(args []string) {
 	targetToken = strings.TrimSpace(targetToken)
 
 	// Initialize redaction engine
-	engine := redaction.NewRedactionEngine()
+	engine := redaction.NewEngine()
 
 	// Restore original text
 	restoreResult, err := engine.RestoreText(context.Background(), targetToken)

@@ -102,7 +102,7 @@ func runEngineStats() {
 		os.Exit(1)
 	}
 
-	engine := redaction.NewRedactionEngine()
+	engine := redaction.NewEngine()
 	stats := engine.GetRedactionStats()
 
 	fmt.Println("🔧 Redaction Engine Statistics")
@@ -114,7 +114,7 @@ func runEngineStats() {
 	fmt.Printf("Unencrypted tokens: %v\n", stats["unencrypted_tokens"])
 	fmt.Printf("Key version: %v\n", stats["key_version"])
 
-	if tokensByType, ok := stats["tokens_by_type"].(map[redaction.RedactionType]int); ok && len(tokensByType) > 0 {
+	if tokensByType, ok := stats["tokens_by_type"].(map[redaction.Type]int); ok && len(tokensByType) > 0 {
 		fmt.Println("\nTokens by type:")
 		for rType, count := range tokensByType {
 			fmt.Printf("  %s: %d\n", rType, count)
@@ -154,7 +154,7 @@ func runEnginePatterns() {
 }
 
 func runEngineCleanup() {
-	engine := redaction.NewRedactionEngine()
+	engine := redaction.NewEngine()
 
 	fmt.Println("🧹 Cleaning up expired tokens...")
 	removed := engine.CleanupExpiredTokens()
@@ -167,7 +167,7 @@ func runEngineCleanup() {
 }
 
 func runEngineRotate() {
-	engine := redaction.NewRedactionEngine()
+	engine := redaction.NewEngine()
 
 	fmt.Println("🔄 Rotating encryption keys...")
 	if err := engine.RotateKeys(); err != nil {
@@ -181,14 +181,14 @@ func runEngineRotate() {
 }
 
 func runEngineTest(args []string) {
-	engine := redaction.NewRedactionEngine()
+	engine := redaction.NewEngine()
 	testText := strings.Join(args, " ")
 
 	fmt.Printf("🧪 Testing redaction on: %q\n", testText)
 	fmt.Println("========================================")
 
 	// Perform redaction
-	result, err := engine.RedactText(context.Background(), &redaction.RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &redaction.Request{
 		Text:       testText,
 		Mode:       redaction.ModeReplace,
 		Reversible: true,

@@ -11,37 +11,37 @@ import (
 	"time"
 )
 
-// RedactionType represents the type of sensitive data
-type RedactionType string
+// Type represents the type of sensitive data
+type Type string
 
 // Redaction type constants for different types of sensitive data
 const (
-	TypeEmail      RedactionType = "email"
-	TypePhone      RedactionType = "phone"
-	TypeCreditCard RedactionType = "credit_card"
-	TypeSSN        RedactionType = "ssn"
-	TypeAddress    RedactionType = "address"
-	TypeName       RedactionType = "name"
-	TypeIPAddress  RedactionType = "ip_address"
-	TypeDate       RedactionType = "date"
-	TypeTime       RedactionType = "time"
-	TypeLink       RedactionType = "link"
-	TypeZipCode    RedactionType = "zip_code"
-	TypePoBox      RedactionType = "po_box"
-	TypeBTCAddress RedactionType = "btc_address"
-	TypeMD5Hex     RedactionType = "md5_hex"
-	TypeSHA1Hex    RedactionType = "sha1_hex"
-	TypeSHA256Hex  RedactionType = "sha256_hex"
-	TypeGUID       RedactionType = "guid"
-	TypeISBN       RedactionType = "isbn"
-	TypeMACAddress RedactionType = "mac_address"
-	TypeIBAN       RedactionType = "iban"
-	TypeGitRepo    RedactionType = "git_repo"
-	TypeCustom     RedactionType = "custom"
+	TypeEmail      Type = "email"
+	TypePhone      Type = "phone"
+	TypeCreditCard Type = "credit_card"
+	TypeSSN        Type = "ssn"
+	TypeAddress    Type = "address"
+	TypeName       Type = "name"
+	TypeIPAddress  Type = "ip_address"
+	TypeDate       Type = "date"
+	TypeTime       Type = "time"
+	TypeLink       Type = "link"
+	TypeZipCode    Type = "zip_code"
+	TypePoBox      Type = "po_box"
+	TypeBTCAddress Type = "btc_address"
+	TypeMD5Hex     Type = "md5_hex"
+	TypeSHA1Hex    Type = "sha1_hex"
+	TypeSHA256Hex  Type = "sha256_hex"
+	TypeGUID       Type = "guid"
+	TypeISBN       Type = "isbn"
+	TypeMACAddress Type = "mac_address"
+	TypeIBAN       Type = "iban"
+	TypeGitRepo    Type = "git_repo"
+	TypeCustom     Type = "custom"
 )
 
-// RedactionResult represents the result of a redaction operation
-type RedactionResult struct {
+// Result represents the result of a redaction operation
+type Result struct {
 	OriginalText string      `json:"original_text"`
 	RedactedText string      `json:"redacted_text"`
 	Redactions   []Redaction `json:"redactions"`
@@ -51,19 +51,19 @@ type RedactionResult struct {
 
 // Redaction represents a single redaction operation
 type Redaction struct {
-	Type        RedactionType `json:"type"`
-	Start       int           `json:"start"`
-	End         int           `json:"end"`
-	Original    string        `json:"original"`
-	Replacement string        `json:"replacement"`
-	Confidence  float64       `json:"confidence"`
-	Context     string        `json:"context,omitempty"`
+	Type        Type    `json:"type"`
+	Start       int     `json:"start"`
+	End         int     `json:"end"`
+	Original    string  `json:"original"`
+	Replacement string  `json:"replacement"`
+	Confidence  float64 `json:"confidence"`
+	Context     string  `json:"context,omitempty"`
 }
 
-// RedactionEngine handles PII/PHI detection and redaction
+// Engine handles PII/PHI detection and redaction
 // Implements RedactionProvider interface
-type RedactionEngine struct {
-	patterns map[RedactionType]*regexp.Regexp
+type Engine struct {
+	patterns map[Type]*regexp.Regexp
 	tokens   map[string]TokenInfo
 	mutex    sync.RWMutex
 
@@ -74,16 +74,16 @@ type RedactionEngine struct {
 
 // TokenInfo stores information about a redaction token
 type TokenInfo struct {
-	OriginalText  string        `json:"original_text"`
-	RedactionType RedactionType `json:"redaction_type"`
-	Created       time.Time     `json:"created"`
-	Expires       time.Time     `json:"expires"`
+	OriginalText string    `json:"original_text"`
+	Type         Type      `json:"redaction_type"`
+	Created      time.Time `json:"created"`
+	Expires      time.Time `json:"expires"`
 }
 
-// NewRedactionEngine creates a new redaction engine
-func NewRedactionEngine() *RedactionEngine {
-	engine := &RedactionEngine{
-		patterns:      make(map[RedactionType]*regexp.Regexp),
+// NewEngine creates a new redaction engine
+func NewEngine() *Engine {
+	engine := &Engine{
+		patterns:      make(map[Type]*regexp.Regexp),
 		tokens:        make(map[string]TokenInfo),
 		maxTextLength: 1024 * 1024, // 1MB default
 		defaultTTL:    24 * time.Hour,
@@ -95,10 +95,10 @@ func NewRedactionEngine() *RedactionEngine {
 	return engine
 }
 
-// NewRedactionEngineWithConfig creates a new redaction engine with custom configuration
-func NewRedactionEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *RedactionEngine {
-	engine := &RedactionEngine{
-		patterns:      make(map[RedactionType]*regexp.Regexp),
+// NewEngineWithConfig creates a new redaction engine with custom configuration
+func NewEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *Engine {
+	engine := &Engine{
+		patterns:      make(map[Type]*regexp.Regexp),
 		tokens:        make(map[string]TokenInfo),
 		maxTextLength: maxTextLength,
 		defaultTTL:    defaultTTL,
@@ -111,7 +111,7 @@ func NewRedactionEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *
 }
 
 // initDefaultPatterns initializes the default detection patterns
-func (re *RedactionEngine) initDefaultPatterns() {
+func (re *Engine) initDefaultPatterns() {
 	// Email patterns
 	re.patterns[TypeEmail] = regexp.MustCompile(`(?i)\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`)
 
@@ -171,18 +171,18 @@ func (re *RedactionEngine) initDefaultPatterns() {
 }
 
 // AddCustomPattern adds a custom detection pattern
-func (re *RedactionEngine) AddCustomPattern(name string, pattern string) error {
+func (re *Engine) AddCustomPattern(name string, pattern string) error {
 	compiled, err := regexp.Compile(pattern)
 	if err != nil {
 		return fmt.Errorf("invalid regex pattern: %v", err)
 	}
 
-	re.patterns[RedactionType(name)] = compiled
+	re.patterns[Type(name)] = compiled
 	return nil
 }
 
 // restoreTextInternal restores redacted text using a token (internal method)
-func (re *RedactionEngine) restoreTextInternal(token string) (string, error) {
+func (re *Engine) restoreTextInternal(token string) (string, error) {
 	re.mutex.RLock()
 	tokenInfo, exists := re.tokens[token]
 	re.mutex.RUnlock()
@@ -195,7 +195,7 @@ func (re *RedactionEngine) restoreTextInternal(token string) (string, error) {
 }
 
 // generateReplacement generates a replacement string for redacted content
-func (re *RedactionEngine) generateReplacement(redactionType RedactionType, _ string) string {
+func (re *Engine) generateReplacement(redactionType Type, _ string) string {
 	switch redactionType {
 	case TypeEmail:
 		return "[EMAIL_REDACTED]"
@@ -245,14 +245,14 @@ func (re *RedactionEngine) generateReplacement(redactionType RedactionType, _ st
 }
 
 // extractContext extracts context around the redacted content
-func (re *RedactionEngine) extractContext(text string, start, end int) string {
+func (re *Engine) extractContext(text string, start, end int) string {
 	contextStart := maxInt(0, start-20)
 	contextEnd := minInt(len(text), end+20)
 	return text[contextStart:contextEnd]
 }
 
 // GetRedactionStats returns statistics about redaction operations
-func (re *RedactionEngine) GetRedactionStats() map[string]interface{} {
+func (re *Engine) GetRedactionStats() map[string]interface{} {
 	re.mutex.RLock()
 	defer re.mutex.RUnlock()
 
@@ -261,9 +261,9 @@ func (re *RedactionEngine) GetRedactionStats() map[string]interface{} {
 	stats["active_patterns"] = len(re.patterns)
 
 	// Count tokens by type
-	typeCounts := make(map[RedactionType]int)
+	typeCounts := make(map[Type]int)
 	for _, tokenInfo := range re.tokens {
-		typeCounts[tokenInfo.RedactionType]++
+		typeCounts[tokenInfo.Type]++
 	}
 	stats["tokens_by_type"] = typeCounts
 
@@ -271,7 +271,7 @@ func (re *RedactionEngine) GetRedactionStats() map[string]interface{} {
 }
 
 // CleanupExpiredTokens removes expired tokens
-func (re *RedactionEngine) CleanupExpiredTokens() int {
+func (re *Engine) CleanupExpiredTokens() int {
 	re.mutex.Lock()
 	defer re.mutex.Unlock()
 
@@ -289,7 +289,7 @@ func (re *RedactionEngine) CleanupExpiredTokens() int {
 }
 
 // RotateKeys rotates the encryption keys (placeholder implementation)
-func (re *RedactionEngine) RotateKeys() error {
+func (re *Engine) RotateKeys() error {
 	re.mutex.Lock()
 	defer re.mutex.Unlock()
 
@@ -320,7 +320,7 @@ func minInt(a, b int) int {
 // Interface implementation methods
 
 // RedactText implements RedactionProvider interface
-func (re *RedactionEngine) RedactText(ctx context.Context, request *RedactionRequest) (*RedactionResult, error) {
+func (re *Engine) RedactText(ctx context.Context, request *Request) (*Result, error) {
 	// Check for context cancellation
 	select {
 	case <-ctx.Done():
@@ -358,7 +358,7 @@ func (re *RedactionEngine) RedactText(ctx context.Context, request *RedactionReq
 }
 
 // RestoreText implements RedactionProvider interface
-func (re *RedactionEngine) RestoreText(_ context.Context, token string) (*RestoreResult, error) {
+func (re *Engine) RestoreText(_ context.Context, token string) (*RestoreResult, error) {
 	originalText, err := re.restoreTextInternal(token)
 	if err != nil {
 		return nil, err
@@ -368,22 +368,22 @@ func (re *RedactionEngine) RestoreText(_ context.Context, token string) (*Restor
 		OriginalText: originalText,
 		Token:        token,
 		RestoredAt:   time.Now(),
-		Metadata:     map[string]interface{}{"provider": "RedactionEngine"},
+		Metadata:     map[string]interface{}{"provider": "Engine"},
 	}, nil
 }
 
 // GetCapabilities implements RedactionProvider interface
-func (re *RedactionEngine) GetCapabilities() *ProviderCapabilities {
-	supportedTypes := make([]RedactionType, 0, len(re.patterns))
+func (re *Engine) GetCapabilities() *ProviderCapabilities {
+	supportedTypes := make([]Type, 0, len(re.patterns))
 	for redactionType := range re.patterns {
 		supportedTypes = append(supportedTypes, redactionType)
 	}
 
 	return &ProviderCapabilities{
-		Name:                "RedactionEngine",
+		Name:                "Engine",
 		Version:             "1.0.0",
 		SupportedTypes:      supportedTypes,
-		SupportedModes:      []RedactionMode{ModeReplace, ModeMask, ModeRemove, ModeTokenize},
+		SupportedModes:      []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize},
 		SupportsReversible:  true,
 		SupportsCustom:      true,
 		SupportsLLM:         false,
@@ -400,12 +400,12 @@ func (re *RedactionEngine) GetCapabilities() *ProviderCapabilities {
 }
 
 // GetStats implements RedactionProvider interface
-func (re *RedactionEngine) GetStats() map[string]interface{} {
+func (re *Engine) GetStats() map[string]interface{} {
 	return re.GetRedactionStats()
 }
 
 // Cleanup implements RedactionProvider interface
-func (re *RedactionEngine) Cleanup() error {
+func (re *Engine) Cleanup() error {
 	removed := re.CleanupExpiredTokens()
 	_ = removed // Cleanup count available if needed
 	return nil
@@ -414,8 +414,8 @@ func (re *RedactionEngine) Cleanup() error {
 // Helper methods for interface implementation
 
 // redactTextInternal performs the core redaction logic (renamed from RedactText)
-func (re *RedactionEngine) redactTextInternal(text string) *RedactionResult {
-	result := &RedactionResult{
+func (re *Engine) redactTextInternal(text string) *Result {
+	result := &Result{
 		OriginalText: text,
 		RedactedText: text,
 		Redactions:   []Redaction{},
@@ -466,7 +466,7 @@ func (re *RedactionEngine) redactTextInternal(text string) *RedactionResult {
 }
 
 // applyCustomPatterns applies custom patterns to the redaction result
-func (re *RedactionEngine) applyCustomPatterns(result *RedactionResult, patterns []CustomPattern) *RedactionResult {
+func (re *Engine) applyCustomPatterns(result *Result, patterns []CustomPattern) *Result {
 	for _, pattern := range patterns {
 		compiled, err := regexp.Compile(pattern.Pattern)
 		if err != nil {
@@ -501,7 +501,7 @@ func (re *RedactionEngine) applyCustomPatterns(result *RedactionResult, patterns
 }
 
 // generateTokenWithTTL generates a token with custom TTL
-func (re *RedactionEngine) generateTokenWithTTL(result *RedactionResult, ttl time.Duration) string {
+func (re *Engine) generateTokenWithTTL(result *Result, ttl time.Duration) string {
 	// Generate random token
 	bytes := make([]byte, 16)
 	_, _ = rand.Read(bytes)
@@ -509,10 +509,10 @@ func (re *RedactionEngine) generateTokenWithTTL(result *RedactionResult, ttl tim
 
 	// Store token information with custom TTL
 	tokenInfo := TokenInfo{
-		OriginalText:  result.OriginalText,
-		RedactionType: result.Redactions[0].Type, // Store first redaction type
-		Created:       time.Now(),
-		Expires:       time.Now().Add(ttl),
+		OriginalText: result.OriginalText,
+		Type:         result.Redactions[0].Type, // Store first redaction type
+		Created:      time.Now(),
+		Expires:      time.Now().Add(ttl),
 	}
 
 	re.mutex.Lock()

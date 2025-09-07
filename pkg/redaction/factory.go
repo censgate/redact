@@ -36,14 +36,14 @@ type LLMConfig struct {
 	Options     map[string]interface{} `json:"options,omitempty"`
 }
 
-// RedactionProviderFactory creates redaction providers based on configuration
-type RedactionProviderFactory struct {
+// ProviderFactory creates redaction providers based on configuration
+type ProviderFactory struct {
 	defaultConfig *ProviderConfig
 }
 
-// NewRedactionProviderFactory creates a new provider factory
-func NewRedactionProviderFactory() *RedactionProviderFactory {
-	return &RedactionProviderFactory{
+// NewProviderFactory creates a new provider factory
+func NewProviderFactory() *ProviderFactory {
+	return &ProviderFactory{
 		defaultConfig: &ProviderConfig{
 			Type:          ProviderTypeBasic,
 			MaxTextLength: 1024 * 1024, // 1MB
@@ -52,8 +52,8 @@ func NewRedactionProviderFactory() *RedactionProviderFactory {
 	}
 }
 
-// NewRedactionProviderFactoryWithDefaults creates a new provider factory with custom defaults
-func NewRedactionProviderFactoryWithDefaults(config *ProviderConfig) *RedactionProviderFactory {
+// NewProviderFactoryWithDefaults creates a new provider factory with custom defaults
+func NewProviderFactoryWithDefaults(config *ProviderConfig) *ProviderFactory {
 	if config == nil {
 		config = &ProviderConfig{
 			Type:          ProviderTypeBasic,
@@ -62,13 +62,13 @@ func NewRedactionProviderFactoryWithDefaults(config *ProviderConfig) *RedactionP
 		}
 	}
 
-	return &RedactionProviderFactory{
+	return &ProviderFactory{
 		defaultConfig: config,
 	}
 }
 
 // CreateProvider creates a redaction provider based on the specified type and configuration
-func (factory *RedactionProviderFactory) CreateProvider(providerType ProviderType, config *ProviderConfig) (RedactionProvider, error) {
+func (factory *ProviderFactory) CreateProvider(providerType ProviderType, config *ProviderConfig) (Provider, error) {
 	// Merge with defaults
 	finalConfig := factory.mergeConfig(config)
 
@@ -87,57 +87,57 @@ func (factory *RedactionProviderFactory) CreateProvider(providerType ProviderTyp
 }
 
 // CreateBasicProvider creates a basic redaction provider
-func (factory *RedactionProviderFactory) CreateBasicProvider(config *ProviderConfig) (RedactionProvider, error) {
+func (factory *ProviderFactory) CreateBasicProvider(config *ProviderConfig) (Provider, error) {
 	return factory.CreateProvider(ProviderTypeBasic, config)
 }
 
 // CreatePolicyAwareProvider creates a policy-aware redaction provider
-func (factory *RedactionProviderFactory) CreatePolicyAwareProvider(config *ProviderConfig) (PolicyAwareRedactionProvider, error) {
+func (factory *ProviderFactory) CreatePolicyAwareProvider(config *ProviderConfig) (PolicyAwareProvider, error) {
 	provider, err := factory.CreateProvider(ProviderTypePolicyAware, config)
 	if err != nil {
 		return nil, err
 	}
 
-	policyProvider, ok := provider.(PolicyAwareRedactionProvider)
+	policyProvider, ok := provider.(PolicyAwareProvider)
 	if !ok {
-		return nil, fmt.Errorf("provider does not implement PolicyAwareRedactionProvider interface")
+		return nil, fmt.Errorf("provider does not implement PolicyAwareProvider interface")
 	}
 
 	return policyProvider, nil
 }
 
 // CreateTenantAwareProvider creates a tenant-aware redaction provider
-func (factory *RedactionProviderFactory) CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareRedactionProvider, error) {
+func (factory *ProviderFactory) CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareProvider, error) {
 	provider, err := factory.CreateProvider(ProviderTypeTenantAware, config)
 	if err != nil {
 		return nil, err
 	}
 
-	tenantProvider, ok := provider.(TenantAwareRedactionProvider)
+	tenantProvider, ok := provider.(TenantAwareProvider)
 	if !ok {
-		return nil, fmt.Errorf("provider does not implement TenantAwareRedactionProvider interface")
+		return nil, fmt.Errorf("provider does not implement TenantAwareProvider interface")
 	}
 
 	return tenantProvider, nil
 }
 
 // CreateLLMProvider creates an LLM-based redaction provider
-func (factory *RedactionProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMRedactionProvider, error) {
+func (factory *ProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMProvider, error) {
 	provider, err := factory.CreateProvider(ProviderTypeLLM, config)
 	if err != nil {
 		return nil, err
 	}
 
-	llmProvider, ok := provider.(LLMRedactionProvider)
+	llmProvider, ok := provider.(LLMProvider)
 	if !ok {
-		return nil, fmt.Errorf("provider does not implement LLMRedactionProvider interface")
+		return nil, fmt.Errorf("provider does not implement LLMProvider interface")
 	}
 
 	return llmProvider, nil
 }
 
 // GetSupportedProviderTypes returns a list of supported provider types
-func (factory *RedactionProviderFactory) GetSupportedProviderTypes() []ProviderType {
+func (factory *ProviderFactory) GetSupportedProviderTypes() []ProviderType {
 	return []ProviderType{
 		ProviderTypeBasic,
 		ProviderTypePolicyAware,
@@ -147,7 +147,7 @@ func (factory *RedactionProviderFactory) GetSupportedProviderTypes() []ProviderT
 }
 
 // ValidateConfig validates a provider configuration
-func (factory *RedactionProviderFactory) ValidateConfig(config *ProviderConfig) error {
+func (factory *ProviderFactory) ValidateConfig(config *ProviderConfig) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
 	}
@@ -188,7 +188,7 @@ func (factory *RedactionProviderFactory) ValidateConfig(config *ProviderConfig) 
 // Helper methods
 
 // mergeConfig merges the provided config with defaults
-func (factory *RedactionProviderFactory) mergeConfig(config *ProviderConfig) *ProviderConfig {
+func (factory *ProviderFactory) mergeConfig(config *ProviderConfig) *ProviderConfig {
 	if config == nil {
 		return factory.defaultConfig
 	}
@@ -218,28 +218,28 @@ func (factory *RedactionProviderFactory) mergeConfig(config *ProviderConfig) *Pr
 }
 
 // createBasicProvider creates a basic redaction engine
-func (factory *RedactionProviderFactory) createBasicProvider(config *ProviderConfig) (RedactionProvider, error) {
-	return NewRedactionEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
+func (factory *ProviderFactory) createBasicProvider(config *ProviderConfig) (Provider, error) {
+	return NewEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
 }
 
 // createPolicyAwareProvider creates a policy-aware redaction engine
-func (factory *RedactionProviderFactory) createPolicyAwareProvider(config *ProviderConfig) (RedactionProvider, error) {
-	return NewPolicyAwareRedactionEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
+func (factory *ProviderFactory) createPolicyAwareProvider(config *ProviderConfig) (Provider, error) {
+	return NewPolicyAwareEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
 }
 
 // createTenantAwareProvider creates a tenant-aware redaction engine
-func (factory *RedactionProviderFactory) createTenantAwareProvider(config *ProviderConfig) (RedactionProvider, error) {
-	return NewTenantAwareRedactionEngineWithConfig(config.MaxTextLength, config.DefaultTTL, config.PolicyStore), nil
+func (factory *ProviderFactory) createTenantAwareProvider(config *ProviderConfig) (Provider, error) {
+	return NewTenantAwareEngineWithConfig(config.MaxTextLength, config.DefaultTTL, config.PolicyStore), nil
 }
 
 // createLLMProvider creates an LLM-based redaction provider (placeholder)
-func (factory *RedactionProviderFactory) createLLMProvider(_ *ProviderConfig) (RedactionProvider, error) {
+func (factory *ProviderFactory) createLLMProvider(_ *ProviderConfig) (Provider, error) {
 	// TODO: Implement LLM-based redaction provider
 	return nil, fmt.Errorf("LLM-based redaction provider not yet implemented")
 }
 
 // validateLLMConfig validates LLM configuration
-func (factory *RedactionProviderFactory) validateLLMConfig(config *LLMConfig) error {
+func (factory *ProviderFactory) validateLLMConfig(config *LLMConfig) error {
 	if config.Provider == "" {
 		return fmt.Errorf("LLM provider cannot be empty")
 	}
@@ -260,21 +260,21 @@ func (factory *RedactionProviderFactory) validateLLMConfig(config *LLMConfig) er
 }
 
 // DefaultFactory provides a default factory instance for convenience.
-var DefaultFactory = NewRedactionProviderFactory()
+var DefaultFactory = NewProviderFactory()
 
 // Convenience functions using the default factory
 
 // CreateBasicProvider creates a basic redaction provider using the default factory
-func CreateBasicProvider(config *ProviderConfig) (RedactionProvider, error) {
+func CreateBasicProvider(config *ProviderConfig) (Provider, error) {
 	return DefaultFactory.CreateBasicProvider(config)
 }
 
 // CreatePolicyAwareProvider creates a policy-aware redaction provider using the default factory
-func CreatePolicyAwareProvider(config *ProviderConfig) (PolicyAwareRedactionProvider, error) {
+func CreatePolicyAwareProvider(config *ProviderConfig) (PolicyAwareProvider, error) {
 	return DefaultFactory.CreatePolicyAwareProvider(config)
 }
 
 // CreateTenantAwareProvider creates a tenant-aware redaction provider using the default factory
-func CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareRedactionProvider, error) {
+func CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareProvider, error) {
 	return DefaultFactory.CreateTenantAwareProvider(config)
 }

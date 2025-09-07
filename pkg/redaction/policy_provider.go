@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// PolicyAwareRedactionEngine extends RedactionEngine with policy support
+// PolicyAwareEngine extends Engine with policy support
 // Implements PolicyAwareRedactionProvider interface
-type PolicyAwareRedactionEngine struct {
-	*RedactionEngine
+type PolicyAwareEngine struct {
+	*Engine
 
 	// Policy-specific configuration
 	policyCache map[string]*compiledPolicyRules
@@ -22,25 +22,25 @@ type compiledPolicyRules struct {
 	// Future: compiled rules will be stored here when policy caching is implemented
 }
 
-// NewPolicyAwareRedactionEngine creates a new policy-aware redaction engine
-func NewPolicyAwareRedactionEngine() *PolicyAwareRedactionEngine {
-	return &PolicyAwareRedactionEngine{
-		RedactionEngine: NewRedactionEngine(),
+// NewPolicyAwareEngine creates a new policy-aware redaction engine
+func NewPolicyAwareEngine() *PolicyAwareEngine {
+	return &PolicyAwareEngine{
+		Engine: NewEngine(),
 		policyCache:     make(map[string]*compiledPolicyRules),
 	}
 }
 
-// NewPolicyAwareRedactionEngineWithConfig creates a new policy-aware redaction engine with custom configuration
-func NewPolicyAwareRedactionEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *PolicyAwareRedactionEngine {
-	return &PolicyAwareRedactionEngine{
-		RedactionEngine: NewRedactionEngineWithConfig(maxTextLength, defaultTTL),
+// NewPolicyAwareEngineWithConfig creates a new policy-aware redaction engine with custom configuration
+func NewPolicyAwareEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *PolicyAwareEngine {
+	return &PolicyAwareEngine{
+		Engine: NewEngineWithConfig(maxTextLength, defaultTTL),
 		policyCache:     make(map[string]*compiledPolicyRules),
 	}
 }
 
 // ApplyPolicyRules implements PolicyAwareRedactionProvider interface
-func (pare *PolicyAwareRedactionEngine) ApplyPolicyRules(ctx context.Context, request *PolicyRedactionRequest) (*RedactionResult, error) {
-	if request == nil || request.RedactionRequest == nil {
+func (pare *PolicyAwareEngine) ApplyPolicyRules(ctx context.Context, request *PolicyRequest) (*Result, error) {
+	if request == nil || request.Request == nil {
 		return nil, fmt.Errorf("policy redaction request cannot be nil")
 	}
 
@@ -50,7 +50,7 @@ func (pare *PolicyAwareRedactionEngine) ApplyPolicyRules(ctx context.Context, re
 	}
 
 	// Start with base redaction
-	result, err := pare.RedactText(ctx, request.RedactionRequest)
+	result, err := pare.RedactText(ctx, request.Request)
 	if err != nil {
 		return nil, fmt.Errorf("base redaction failed: %w", err)
 	}
@@ -68,7 +68,7 @@ func (pare *PolicyAwareRedactionEngine) ApplyPolicyRules(ctx context.Context, re
 }
 
 // ValidatePolicy implements PolicyAwareRedactionProvider interface
-func (pare *PolicyAwareRedactionEngine) ValidatePolicy(_ context.Context, rules []PolicyRule) []ValidationError {
+func (pare *PolicyAwareEngine) ValidatePolicy(_ context.Context, rules []PolicyRule) []ValidationError {
 	var errors []ValidationError
 
 	for _, rule := range rules {
@@ -116,7 +116,7 @@ func (pare *PolicyAwareRedactionEngine) ValidatePolicy(_ context.Context, rules 
 		}
 
 		// Validate mode
-		if !isValidRedactionMode(rule.Mode) {
+		if !isValidMode(rule.Mode) {
 			errors = append(errors, ValidationError{
 				Rule:    rule.Name,
 				Field:   "mode",
@@ -151,9 +151,9 @@ func (pare *PolicyAwareRedactionEngine) ValidatePolicy(_ context.Context, rules 
 }
 
 // GetCapabilities overrides the base implementation to indicate policy support
-func (pare *PolicyAwareRedactionEngine) GetCapabilities() *ProviderCapabilities {
-	caps := pare.RedactionEngine.GetCapabilities()
-	caps.Name = "PolicyAwareRedactionEngine"
+func (pare *PolicyAwareEngine) GetCapabilities() *ProviderCapabilities {
+	caps := pare.Engine.GetCapabilities()
+	caps.Name = "PolicyAwareEngine"
 	caps.SupportsPolicies = true
 	caps.Features["policy_rules"] = true
 	caps.Features["rule_validation"] = true
@@ -164,9 +164,9 @@ func (pare *PolicyAwareRedactionEngine) GetCapabilities() *ProviderCapabilities 
 // Helper methods
 
 // applyPolicyRulesToResult applies policy rules to an existing redaction result
-func (pare *PolicyAwareRedactionEngine) applyPolicyRulesToResult(result *RedactionResult, rules []PolicyRule, context *RedactionContext) (*RedactionResult, error) {
+func (pare *PolicyAwareEngine) applyPolicyRulesToResult(result *Result, rules []PolicyRule, context *Context) (*Result, error) {
 	// Create a copy of the result to modify
-	policyResult := &RedactionResult{
+	policyResult := &Result{
 		OriginalText: result.OriginalText,
 		RedactedText: result.RedactedText,
 		Redactions:   make([]Redaction, len(result.Redactions)),
@@ -206,7 +206,7 @@ func (pare *PolicyAwareRedactionEngine) applyPolicyRulesToResult(result *Redacti
 }
 
 // evaluateRuleConditions evaluates whether rule conditions are met
-func (pare *PolicyAwareRedactionEngine) evaluateRuleConditions(conditions []PolicyCondition, context *RedactionContext) bool {
+func (pare *PolicyAwareEngine) evaluateRuleConditions(conditions []PolicyCondition, context *Context) bool {
 	if len(conditions) == 0 {
 		return true // No conditions means always apply
 	}
@@ -221,7 +221,7 @@ func (pare *PolicyAwareRedactionEngine) evaluateRuleConditions(conditions []Poli
 }
 
 // evaluateCondition evaluates a single policy condition
-func (pare *PolicyAwareRedactionEngine) evaluateCondition(condition PolicyCondition, context *RedactionContext) bool {
+func (pare *PolicyAwareEngine) evaluateCondition(condition PolicyCondition, context *Context) bool {
 	if context == nil {
 		return false
 	}
@@ -294,7 +294,7 @@ func (pare *PolicyAwareRedactionEngine) evaluateCondition(condition PolicyCondit
 }
 
 // shouldApplyToField determines if a rule should apply to a specific field
-func (pare *PolicyAwareRedactionEngine) shouldApplyToField(field string, context *RedactionContext) bool {
+func (pare *PolicyAwareEngine) shouldApplyToField(field string, context *Context) bool {
 	if context == nil {
 		return true
 	}
@@ -311,7 +311,7 @@ func (pare *PolicyAwareRedactionEngine) shouldApplyToField(field string, context
 }
 
 // applyPatternToResult applies a compiled pattern to the redaction result
-func (pare *PolicyAwareRedactionEngine) applyPatternToResult(result *RedactionResult, pattern *regexp.Regexp, rule PolicyRule, _ string) *RedactionResult {
+func (pare *PolicyAwareEngine) applyPatternToResult(result *Result, pattern *regexp.Regexp, rule PolicyRule, _ string) *Result {
 	matches := pattern.FindAllStringIndex(result.RedactedText, -1)
 
 	for _, match := range matches {
@@ -340,7 +340,7 @@ func (pare *PolicyAwareRedactionEngine) applyPatternToResult(result *RedactionRe
 }
 
 // generatePolicyReplacement generates a replacement string based on policy mode
-func (pare *PolicyAwareRedactionEngine) generatePolicyReplacement(mode RedactionMode, original, ruleName string) string {
+func (pare *PolicyAwareEngine) generatePolicyReplacement(mode Mode, original, ruleName string) string {
 	switch mode {
 	case ModeReplace:
 		return fmt.Sprintf("[POLICY_%s_REDACTED]", strings.ToUpper(ruleName))
@@ -361,9 +361,9 @@ func (pare *PolicyAwareRedactionEngine) generatePolicyReplacement(mode Redaction
 	}
 }
 
-// isValidRedactionMode checks if a redaction mode is valid
-func isValidRedactionMode(mode RedactionMode) bool {
-	validModes := []RedactionMode{
+// isValidMode checks if a redaction mode is valid
+func isValidMode(mode Mode) bool {
+	validModes := []Mode{
 		ModeReplace, ModeMask, ModeRemove, ModeTokenize, ModeHash, ModeEncrypt, ModeLLM,
 	}
 

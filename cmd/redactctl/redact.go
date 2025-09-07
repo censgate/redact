@@ -70,7 +70,7 @@ func runRedact(args []string) {
 	}
 
 	// Initialize redaction engine
-	engine := redaction.NewRedactionEngine()
+	engine := redaction.NewEngine()
 
 	// Configure enabled types based on flags and config
 	if len(enableTypes) > 0 {
@@ -104,7 +104,7 @@ func runRedact(args []string) {
 	}
 
 	// Perform redaction
-	result, err := engine.RedactText(context.Background(), &redaction.RedactionRequest{
+	result, err := engine.RedactText(context.Background(), &redaction.Request{
 		Text:       inputText,
 		Mode:       redaction.ModeReplace,
 		Reversible: true,
@@ -153,7 +153,7 @@ func readBatchInput() string {
 	return strings.Join(lines, "\n")
 }
 
-func outputResults(result *redaction.RedactionResult, _ *config.Config) error {
+func outputResults(result *redaction.Result, _ *config.Config) error {
 	var output string
 	var err error
 
@@ -182,7 +182,7 @@ func outputResults(result *redaction.RedactionResult, _ *config.Config) error {
 	return nil
 }
 
-func formatJSON(result *redaction.RedactionResult) (string, error) {
+func formatJSON(result *redaction.Result) (string, error) {
 	// Simple JSON formatting - could use encoding/json for more complex formatting
 	return fmt.Sprintf(`{
   "original_text": %q,
@@ -194,7 +194,7 @@ func formatJSON(result *redaction.RedactionResult) (string, error) {
 }`, result.OriginalText, result.RedactedText, result.Token, len(result.Redactions), formatRedactionsJSON(result.Redactions)), nil
 }
 
-func formatYAML(result *redaction.RedactionResult) (string, error) {
+func formatYAML(result *redaction.Result) (string, error) {
 	return fmt.Sprintf(`original_text: %q
 redacted_text: %q
 token: %q
@@ -231,14 +231,14 @@ func formatRedactionsYAML(redactions []redaction.Redaction) string {
 	return strings.Join(parts, "\n")
 }
 
-func printStatistics(result *redaction.RedactionResult, engine *redaction.RedactionEngine) {
+func printStatistics(result *redaction.Result, engine *redaction.Engine) {
 	fmt.Fprintf(os.Stderr, "\n📊 Redaction Statistics:\n")
 	fmt.Fprintf(os.Stderr, "========================\n")
 	fmt.Fprintf(os.Stderr, "Total redactions: %d\n", len(result.Redactions))
 	fmt.Fprintf(os.Stderr, "Token generated: %s\n", result.Token)
 
 	// Group by type
-	typeCount := make(map[redaction.RedactionType]int)
+	typeCount := make(map[redaction.Type]int)
 	for _, r := range result.Redactions {
 		typeCount[r.Type]++
 	}

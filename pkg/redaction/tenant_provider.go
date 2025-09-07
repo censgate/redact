@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// TenantAwareRedactionEngine extends PolicyAwareRedactionEngine with multi-tenant support
+// TenantAwareEngine extends PolicyAwareEngine with multi-tenant support
 // Implements TenantAwareRedactionProvider interface
-type TenantAwareRedactionEngine struct {
-	*PolicyAwareRedactionEngine
+type TenantAwareEngine struct {
+	*PolicyAwareEngine
 
 	// Tenant-specific configuration
 	tenantPolicies map[string]*TenantPolicy
@@ -96,34 +96,34 @@ func (store *InMemoryPolicyStore) ListTenantPolicies(_ context.Context) ([]strin
 	return tenants, nil
 }
 
-// NewTenantAwareRedactionEngine creates a new tenant-aware redaction engine
-func NewTenantAwareRedactionEngine(policyStore PolicyStore) *TenantAwareRedactionEngine {
+// NewTenantAwareEngine creates a new tenant-aware redaction engine
+func NewTenantAwareEngine(policyStore PolicyStore) *TenantAwareEngine {
 	if policyStore == nil {
 		policyStore = NewInMemoryPolicyStore()
 	}
 
-	return &TenantAwareRedactionEngine{
-		PolicyAwareRedactionEngine: NewPolicyAwareRedactionEngine(),
+	return &TenantAwareEngine{
+		PolicyAwareEngine: NewPolicyAwareEngine(),
 		tenantPolicies:             make(map[string]*TenantPolicy),
 		policyStore:                policyStore,
 	}
 }
 
-// NewTenantAwareRedactionEngineWithConfig creates a new tenant-aware redaction engine with custom configuration
-func NewTenantAwareRedactionEngineWithConfig(maxTextLength int, defaultTTL time.Duration, policyStore PolicyStore) *TenantAwareRedactionEngine {
+// NewTenantAwareEngineWithConfig creates a new tenant-aware redaction engine with custom configuration
+func NewTenantAwareEngineWithConfig(maxTextLength int, defaultTTL time.Duration, policyStore PolicyStore) *TenantAwareEngine {
 	if policyStore == nil {
 		policyStore = NewInMemoryPolicyStore()
 	}
 
-	return &TenantAwareRedactionEngine{
-		PolicyAwareRedactionEngine: NewPolicyAwareRedactionEngineWithConfig(maxTextLength, defaultTTL),
+	return &TenantAwareEngine{
+		PolicyAwareEngine: NewPolicyAwareEngineWithConfig(maxTextLength, defaultTTL),
 		tenantPolicies:             make(map[string]*TenantPolicy),
 		policyStore:                policyStore,
 	}
 }
 
 // RedactForTenant implements TenantAwareRedactionProvider interface
-func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, tenantID string, request *RedactionRequest) (*RedactionResult, error) {
+func (tare *TenantAwareEngine) RedactForTenant(ctx context.Context, tenantID string, request *Request) (*Result, error) {
 	if tenantID == "" {
 		return nil, fmt.Errorf("tenant ID cannot be empty")
 	}
@@ -136,8 +136,8 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 	}
 
 	// Create policy redaction request
-	policyRequest := &PolicyRedactionRequest{
-		RedactionRequest: request,
+	policyRequest := &PolicyRequest{
+		Request: request,
 		PolicyRules:      tenantPolicy.Rules,
 		TenantID:         tenantID,
 	}
@@ -158,7 +158,7 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 
 	// Apply tenant context
 	if policyRequest.Context == nil {
-		policyRequest.Context = &RedactionContext{}
+		policyRequest.Context = &Context{}
 	}
 	policyRequest.Context.ComplianceReqs = tenantPolicy.ComplianceReqs
 	if policyRequest.Context.Metadata == nil {
@@ -172,7 +172,7 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 }
 
 // GetTenantPolicy implements TenantAwareRedactionProvider interface
-func (tare *TenantAwareRedactionEngine) GetTenantPolicy(ctx context.Context, tenantID string) (*TenantPolicy, error) {
+func (tare *TenantAwareEngine) GetTenantPolicy(ctx context.Context, tenantID string) (*TenantPolicy, error) {
 	if tenantID == "" {
 		return nil, fmt.Errorf("tenant ID cannot be empty")
 	}
@@ -201,7 +201,7 @@ func (tare *TenantAwareRedactionEngine) GetTenantPolicy(ctx context.Context, ten
 }
 
 // SetTenantPolicy implements TenantAwareRedactionProvider interface
-func (tare *TenantAwareRedactionEngine) SetTenantPolicy(ctx context.Context, tenantID string, policy *TenantPolicy) error {
+func (tare *TenantAwareEngine) SetTenantPolicy(ctx context.Context, tenantID string, policy *TenantPolicy) error {
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID cannot be empty")
 	}
@@ -240,7 +240,7 @@ func (tare *TenantAwareRedactionEngine) SetTenantPolicy(ctx context.Context, ten
 }
 
 // DeleteTenantPolicy deletes a tenant policy
-func (tare *TenantAwareRedactionEngine) DeleteTenantPolicy(ctx context.Context, tenantID string) error {
+func (tare *TenantAwareEngine) DeleteTenantPolicy(ctx context.Context, tenantID string) error {
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID cannot be empty")
 	}
@@ -259,14 +259,14 @@ func (tare *TenantAwareRedactionEngine) DeleteTenantPolicy(ctx context.Context, 
 }
 
 // ListTenants returns a list of all tenant IDs with policies
-func (tare *TenantAwareRedactionEngine) ListTenants(ctx context.Context) ([]string, error) {
+func (tare *TenantAwareEngine) ListTenants(ctx context.Context) ([]string, error) {
 	return tare.policyStore.ListTenantPolicies(ctx)
 }
 
 // GetCapabilities overrides the base implementation to indicate multi-tenant support
-func (tare *TenantAwareRedactionEngine) GetCapabilities() *ProviderCapabilities {
-	caps := tare.PolicyAwareRedactionEngine.GetCapabilities()
-	caps.Name = "TenantAwareRedactionEngine"
+func (tare *TenantAwareEngine) GetCapabilities() *ProviderCapabilities {
+	caps := tare.PolicyAwareEngine.GetCapabilities()
+	caps.Name = "TenantAwareEngine"
 	caps.SupportsMultiTenant = true
 	caps.Features["multi_tenant"] = true
 	caps.Features["tenant_policies"] = true
@@ -276,7 +276,7 @@ func (tare *TenantAwareRedactionEngine) GetCapabilities() *ProviderCapabilities 
 }
 
 // RefreshTenantPolicy refreshes a tenant policy from the persistent store
-func (tare *TenantAwareRedactionEngine) RefreshTenantPolicy(ctx context.Context, tenantID string) error {
+func (tare *TenantAwareEngine) RefreshTenantPolicy(ctx context.Context, tenantID string) error {
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID cannot be empty")
 	}
@@ -296,7 +296,7 @@ func (tare *TenantAwareRedactionEngine) RefreshTenantPolicy(ctx context.Context,
 }
 
 // ClearPolicyCache clears the tenant policy cache
-func (tare *TenantAwareRedactionEngine) ClearPolicyCache() {
+func (tare *TenantAwareEngine) ClearPolicyCache() {
 	tare.tenantMutex.Lock()
 	defer tare.tenantMutex.Unlock()
 
@@ -304,7 +304,7 @@ func (tare *TenantAwareRedactionEngine) ClearPolicyCache() {
 }
 
 // GetCachedTenantCount returns the number of cached tenant policies
-func (tare *TenantAwareRedactionEngine) GetCachedTenantCount() int {
+func (tare *TenantAwareEngine) GetCachedTenantCount() int {
 	tare.tenantMutex.RLock()
 	defer tare.tenantMutex.RUnlock()
 
