@@ -1,4 +1,4 @@
-# golangci-lint v2.4.0 minimal working configuration
+# golangci-lint v2.x configuration following migration guide
 version: "2"
 
 run:
@@ -6,11 +6,16 @@ run:
   go: "1.25"
 
 linters:
+  default: none
   enable:
     - govet
     - errcheck
     - staticcheck
-    - gosimple
     - ineffassign
     - unused
     - misspell
+    - revive
+
+formatters:
+  enable:
+    - gofmt
