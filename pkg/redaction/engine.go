@@ -179,7 +179,6 @@ func (re *RedactionEngine) AddCustomPattern(name string, pattern string) error {
 	return nil
 }
 
-
 // restoreTextInternal restores redacted text using a token (internal method)
 func (re *RedactionEngine) restoreTextInternal(token string) (string, error) {
 	re.mutex.RLock()
@@ -216,7 +215,6 @@ func (re *RedactionEngine) generateReplacement(redactionType RedactionType, orig
 		return "[TIME_REDACTED]"
 	case TypeLink:
 		return "[LINK_REDACTED]"
-		return "[STRICT_LINK_REDACTED]"
 	case TypeZipCode:
 		return "[ZIP_CODE_REDACTED]"
 	case TypePoBox:

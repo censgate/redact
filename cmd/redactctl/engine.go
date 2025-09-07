@@ -218,9 +218,9 @@ func runEngineTest(args []string) {
 	}
 
 	// Test restoration
-		if result.Token != "" {
-			fmt.Println("\n🔄 Testing token restoration...")
-			restoreResult, err := engine.RestoreText(context.Background(), result.Token)
+	if result.Token != "" {
+		fmt.Println("\n🔄 Testing token restoration...")
+		restoreResult, err := engine.RestoreText(context.Background(), result.Token)
 		if err != nil {
 			fmt.Printf("❌ Restoration failed: %v\n", err)
 		} else if restoreResult.OriginalText == result.OriginalText {
