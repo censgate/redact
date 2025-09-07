@@ -149,4 +149,3 @@ func GetViperInstance(configFile string) (*viper.Viper, error) {
 
 	return v, nil
 }
-

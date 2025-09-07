@@ -232,7 +232,7 @@ func (factory *RedactionProviderFactory) createTenantAwareProvider(config *Provi
 }
 
 // createLLMProvider creates an LLM-based redaction provider (placeholder)
-func (factory *RedactionProviderFactory) createLLMProvider(config *ProviderConfig) (RedactionProvider, error) {
+func (factory *RedactionProviderFactory) createLLMProvider(_ *ProviderConfig) (RedactionProvider, error) {
 	// TODO: Implement LLM-based redaction provider
 	return nil, fmt.Errorf("LLM-based redaction provider not yet implemented")
 }

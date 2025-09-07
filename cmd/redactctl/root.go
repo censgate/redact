@@ -48,7 +48,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config-path", "./config", "path to configuration directory")
 
 	// Bind flags to viper
-	viper.BindPFlag("logging.level", rootCmd.PersistentFlags().Lookup("log-level"))
+	_ = viper.BindPFlag("logging.level", rootCmd.PersistentFlags().Lookup("log-level"))
 }
 
 // initConfig reads in config file and ENV variables if set.

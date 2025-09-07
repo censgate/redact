@@ -245,12 +245,12 @@ func TestRedactionStats(t *testing.T) {
 	engine := NewRedactionEngine()
 
 	// Perform some redactions
-	engine.RedactText(context.Background(), &RedactionRequest{
+	_, _ = engine.RedactText(context.Background(), &RedactionRequest{
 		Text:       "Email: test@example.com",
 		Mode:       ModeReplace,
 		Reversible: true,
 	})
-	engine.RedactText(context.Background(), &RedactionRequest{
+	_, _ = engine.RedactText(context.Background(), &RedactionRequest{
 		Text:       "Phone: 555-123-4567",
 		Mode:       ModeReplace,
 		Reversible: true,

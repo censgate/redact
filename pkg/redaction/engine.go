@@ -193,7 +193,7 @@ func (re *RedactionEngine) restoreTextInternal(token string) (string, error) {
 }
 
 // generateReplacement generates a replacement string for redacted content
-func (re *RedactionEngine) generateReplacement(redactionType RedactionType, original string) string {
+func (re *RedactionEngine) generateReplacement(redactionType RedactionType, _ string) string {
 	switch redactionType {
 	case TypeEmail:
 		return "[EMAIL_REDACTED]"
@@ -244,8 +244,8 @@ func (re *RedactionEngine) generateReplacement(redactionType RedactionType, orig
 
 // extractContext extracts context around the redacted content
 func (re *RedactionEngine) extractContext(text string, start, end int) string {
-	contextStart := max(0, start-20)
-	contextEnd := min(len(text), end+20)
+	contextStart := maxInt(0, start-20)
+	contextEnd := minInt(len(text), end+20)
 	return text[contextStart:contextEnd]
 }
 
@@ -253,7 +253,7 @@ func (re *RedactionEngine) extractContext(text string, start, end int) string {
 func (re *RedactionEngine) generateToken(result *RedactionResult) string {
 	// Generate random token
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
+	_, _ = rand.Read(bytes)
 	token := hex.EncodeToString(bytes)
 
 	// Store token information
@@ -323,14 +323,14 @@ func (re *RedactionEngine) RotateKeys() error {
 }
 
 // Helper functions
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -341,6 +341,13 @@ func min(a, b int) int {
 
 // RedactText implements RedactionProvider interface
 func (re *RedactionEngine) RedactText(ctx context.Context, request *RedactionRequest) (*RedactionResult, error) {
+	// Check for context cancellation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	if request == nil {
 		return nil, fmt.Errorf("redaction request cannot be nil")
 	}
@@ -420,9 +427,7 @@ func (re *RedactionEngine) GetStats() map[string]interface{} {
 // Cleanup implements RedactionProvider interface
 func (re *RedactionEngine) Cleanup() error {
 	removed := re.CleanupExpiredTokens()
-	if removed > 0 {
-		// Log cleanup if needed
-	}
+	_ = removed // Cleanup count available if needed
 	return nil
 }
 
@@ -519,7 +524,7 @@ func (re *RedactionEngine) applyCustomPatterns(result *RedactionResult, patterns
 func (re *RedactionEngine) generateTokenWithTTL(result *RedactionResult, ttl time.Duration) string {
 	// Generate random token
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
+	_, _ = rand.Read(bytes)
 	token := hex.EncodeToString(bytes)
 
 	// Store token information with custom TTL

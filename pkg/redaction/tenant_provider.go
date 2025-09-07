@@ -42,7 +42,7 @@ func NewInMemoryPolicyStore() *InMemoryPolicyStore {
 }
 
 // GetTenantPolicy implements PolicyStore interface
-func (store *InMemoryPolicyStore) GetTenantPolicy(ctx context.Context, tenantID string) (*TenantPolicy, error) {
+func (store *InMemoryPolicyStore) GetTenantPolicy(_ context.Context, tenantID string) (*TenantPolicy, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
 
@@ -55,7 +55,7 @@ func (store *InMemoryPolicyStore) GetTenantPolicy(ctx context.Context, tenantID 
 }
 
 // SetTenantPolicy implements PolicyStore interface
-func (store *InMemoryPolicyStore) SetTenantPolicy(ctx context.Context, tenantID string, policy *TenantPolicy) error {
+func (store *InMemoryPolicyStore) SetTenantPolicy(_ context.Context, tenantID string, policy *TenantPolicy) error {
 	if policy == nil {
 		return fmt.Errorf("policy cannot be nil")
 	}
@@ -75,7 +75,7 @@ func (store *InMemoryPolicyStore) SetTenantPolicy(ctx context.Context, tenantID 
 }
 
 // DeleteTenantPolicy implements PolicyStore interface
-func (store *InMemoryPolicyStore) DeleteTenantPolicy(ctx context.Context, tenantID string) error {
+func (store *InMemoryPolicyStore) DeleteTenantPolicy(_ context.Context, tenantID string) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
 

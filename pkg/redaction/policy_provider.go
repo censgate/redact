@@ -315,7 +315,7 @@ func (pare *PolicyAwareRedactionEngine) shouldApplyToField(field string, context
 }
 
 // applyPatternToResult applies a compiled pattern to the redaction result
-func (pare *PolicyAwareRedactionEngine) applyPatternToResult(result *RedactionResult, pattern *regexp.Regexp, rule PolicyRule, patternStr string) *RedactionResult {
+func (pare *PolicyAwareRedactionEngine) applyPatternToResult(result *RedactionResult, pattern *regexp.Regexp, rule PolicyRule, _ string) *RedactionResult {
 	matches := pattern.FindAllStringIndex(result.RedactedText, -1)
 
 	for _, match := range matches {

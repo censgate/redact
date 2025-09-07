@@ -153,7 +153,7 @@ func readBatchInput() string {
 	return strings.Join(lines, "\n")
 }
 
-func outputResults(result *redaction.RedactionResult, cfg *config.Config) error {
+func outputResults(result *redaction.RedactionResult, _ *config.Config) error {
 	var output string
 	var err error
 
@@ -173,11 +173,10 @@ func outputResults(result *redaction.RedactionResult, cfg *config.Config) error 
 	// Write to output
 	if outputFile != "" {
 		return os.WriteFile(outputFile, []byte(output), 0644)
-	} else {
-		fmt.Print(output)
-		if outputFormat == "text" {
-			fmt.Println() // Add newline for text output
-		}
+	}
+	fmt.Print(output)
+	if outputFormat == "text" {
+		fmt.Println() // Add newline for text output
 	}
 
 	return nil
