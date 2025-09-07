@@ -7,6 +7,7 @@ run:
   modules-download-mode: readonly
 
 linters:
+  default: standard
   enable:
     - gofmt
     - govet
@@ -16,23 +17,22 @@ linters:
     - ineffassign
     - unused
     - misspell
-
-linters-settings:
-  govet:
-    settings:
+  settings:
+    govet:
       shadow:
         strict: false
-  errcheck:
-    check-type-assertions: false
-    check-blank: false
-  staticcheck:
-    checks: ["all"]
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    staticcheck:
+      checks: ["all"]
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-    - path: cmd/redactctl/main\.go
-      linters:
-        - unused
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: cmd/redactctl/main\.go
+        linters:
+          - unused
