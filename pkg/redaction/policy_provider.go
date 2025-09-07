@@ -16,7 +16,6 @@ type PolicyAwareRedactionEngine struct {
 
 	// Policy-specific configuration
 	policyCache map[string]*compiledPolicyRules
-	mutex       sync.RWMutex
 }
 
 // compiledPolicyRules represents compiled policy rules for efficient execution
@@ -70,7 +69,7 @@ func (pare *PolicyAwareRedactionEngine) ApplyPolicyRules(ctx context.Context, re
 }
 
 // ValidatePolicy implements PolicyAwareRedactionProvider interface
-func (pare *PolicyAwareRedactionEngine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []ValidationError {
+func (pare *PolicyAwareRedactionEngine) ValidatePolicy(_ context.Context, rules []PolicyRule) []ValidationError {
 	var errors []ValidationError
 
 	for _, rule := range rules {

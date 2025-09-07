@@ -1,3 +1,4 @@
+// Package config provides configuration structures for the redaction system.
 package config
 
 import (
@@ -16,11 +17,13 @@ type Config struct {
 	CLI        CLIConfig        `mapstructure:"cli"`
 }
 
+// RedactionConfig holds configuration for redaction operations.
 type RedactionConfig struct {
 	Engine  EngineConfig  `mapstructure:"engine"`
 	Context ContextConfig `mapstructure:"context"`
 }
 
+// EngineConfig holds configuration for the redaction engine.
 type EngineConfig struct {
 	EnabledTypes        []string      `mapstructure:"enabled_types"`
 	ConfidenceThreshold float64       `mapstructure:"confidence_threshold"`
@@ -28,23 +31,27 @@ type EngineConfig struct {
 	TokenExpiry         time.Duration `mapstructure:"token_expiry"`
 }
 
+// ContextConfig holds configuration for context analysis.
 type ContextConfig struct {
 	AnalysisEnabled bool     `mapstructure:"analysis_enabled"`
 	Domains         []string `mapstructure:"domains"`
 }
 
+// EncryptionConfig holds configuration for encryption operations.
 type EncryptionConfig struct {
 	KeyRotationInterval time.Duration `mapstructure:"key_rotation_interval"`
 	PBKDF2Iterations    int           `mapstructure:"pbkdf2_iterations"`
 	KeyVersion          int           `mapstructure:"key_version"`
 }
 
+// LoggingConfig holds configuration for logging operations.
 type LoggingConfig struct {
 	Level  string `mapstructure:"level"`
 	Format string `mapstructure:"format"`
 	Output string `mapstructure:"output"`
 }
 
+// CLIConfig holds configuration for CLI operations.
 type CLIConfig struct {
 	DefaultFormat   string `mapstructure:"default_format"`
 	BatchSize       int    `mapstructure:"batch_size"`

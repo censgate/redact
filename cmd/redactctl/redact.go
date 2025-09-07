@@ -41,7 +41,7 @@ Examples:
   
   # Show redaction statistics
   redactctl redact --input data.txt --stats`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		runRedact(args)
 	},
 }

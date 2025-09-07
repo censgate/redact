@@ -1,3 +1,4 @@
+// Package main provides the redactctl CLI tool for managing redaction engines.
 package main
 
 import (
@@ -34,7 +35,7 @@ var engineStatsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "Show redaction engine statistics",
 	Long:  "Display detailed statistics about the redaction engine including active patterns, tokens, and performance metrics.",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		runEngineStats()
 	},
 }
@@ -44,7 +45,7 @@ var enginePatternsCmd = &cobra.Command{
 	Use:   "patterns",
 	Short: "List active redaction patterns",
 	Long:  "Display all active redaction patterns and their configurations.",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		runEnginePatterns()
 	},
 }
@@ -54,7 +55,7 @@ var engineCleanupCmd = &cobra.Command{
 	Use:   "cleanup",
 	Short: "Clean up expired redaction tokens",
 	Long:  "Remove expired redaction tokens from the engine to free up memory and maintain security.",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		runEngineCleanup()
 	},
 }
@@ -64,7 +65,7 @@ var engineRotateCmd = &cobra.Command{
 	Use:   "rotate-keys",
 	Short: "Rotate encryption keys",
 	Long:  "Rotate the master encryption keys used for token encryption. This is a security best practice.",
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		runEngineRotate()
 	},
 }
@@ -75,7 +76,7 @@ var engineTestCmd = &cobra.Command{
 	Short: "Test pattern matching against text",
 	Long:  "Test how the redaction engine would process specific text without actually performing redaction.",
 	Args:  cobra.MinimumNArgs(1),
-	Run: func(_ *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		runEngineTest(args)
 	},
 }

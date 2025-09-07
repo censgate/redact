@@ -84,7 +84,7 @@ func (store *InMemoryPolicyStore) DeleteTenantPolicy(_ context.Context, tenantID
 }
 
 // ListTenantPolicies implements PolicyStore interface
-func (store *InMemoryPolicyStore) ListTenantPolicies(ctx context.Context) ([]string, error) {
+func (store *InMemoryPolicyStore) ListTenantPolicies(_ context.Context) ([]string, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
 

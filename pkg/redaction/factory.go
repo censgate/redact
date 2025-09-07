@@ -258,7 +258,7 @@ func (factory *RedactionProviderFactory) validateLLMConfig(config *LLMConfig) er
 	return nil
 }
 
-// Default factory instance for convenience
+// DefaultFactory provides a default factory instance for convenience.
 var DefaultFactory = NewRedactionProviderFactory()
 
 // Convenience functions using the default factory

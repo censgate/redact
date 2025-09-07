@@ -1,3 +1,4 @@
+// Package redaction provides comprehensive PII/PHI redaction capabilities with support for multiple redaction modes, policy-based rules, and multi-tenant configurations.
 package redaction
 
 import (
@@ -249,7 +250,6 @@ func (re *RedactionEngine) extractContext(text string, start, end int) string {
 	return text[contextStart:contextEnd]
 }
 
-
 // GetRedactionStats returns statistics about redaction operations
 func (re *RedactionEngine) GetRedactionStats() map[string]interface{} {
 	re.mutex.RLock()
@@ -357,7 +357,7 @@ func (re *RedactionEngine) RedactText(ctx context.Context, request *RedactionReq
 }
 
 // RestoreText implements RedactionProvider interface
-func (re *RedactionEngine) RestoreText(ctx context.Context, token string) (*RestoreResult, error) {
+func (re *RedactionEngine) RestoreText(_ context.Context, token string) (*RestoreResult, error) {
 	originalText, err := re.restoreTextInternal(token)
 	if err != nil {
 		return nil, err

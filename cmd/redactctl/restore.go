@@ -35,7 +35,7 @@ Examples:
   # Restore and save to file
   redactctl restore abc123def456 --output original.txt`,
 	Args: cobra.MaximumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, args []string) {
 		runRestore(args)
 	},
 }

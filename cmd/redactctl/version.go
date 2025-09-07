@@ -19,7 +19,7 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	Long: `Print detailed version information including build details,
 commit hash, and Go runtime information.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		printVersion()
 	},
 }
