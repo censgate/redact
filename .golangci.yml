@@ -1,9 +1,9 @@
 # golangci-lint v2.x configuration
-version: 2
+version: "2"
 
 run:
   timeout: 5m
-  go: '1.25'
+  go: "1.25"
   modules-download-mode: readonly
 
 linters:
@@ -19,12 +19,14 @@ linters:
 
 linters-settings:
   govet:
-    check-shadowing: false
+    settings:
+      shadow:
+        strict: false
   errcheck:
     check-type-assertions: false
     check-blank: false
   staticcheck:
-    go-version: '1.25'
+    checks: ["all"]
 
 issues:
   exclude-rules:
