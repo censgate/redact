@@ -1,0 +1,21 @@
+# golangci-lint v2.x configuration following migration guide
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.25"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unused
+    - misspell
+    - revive
+
+formatters:
+  enable:
+    - gofmt

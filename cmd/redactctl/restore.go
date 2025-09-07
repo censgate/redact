@@ -90,7 +90,7 @@ func runRestore(args []string) {
 
 	// Output restored text
 	if restoreOut != "" {
-		if err := os.WriteFile(restoreOut, []byte(restoreResult.OriginalText), 0644); err != nil {
+		if err := os.WriteFile(restoreOut, []byte(restoreResult.OriginalText), 0600); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing to output file: %v\n", err)
 			os.Exit(1)
 		}
@@ -101,6 +101,7 @@ func runRestore(args []string) {
 
 	// Log success
 	if logLevel == "debug" || cfg.Logging.Level == "debug" {
-		fmt.Fprintf(os.Stderr, "Successfully restored %d characters from token: %s\n", len(restoreResult.OriginalText), targetToken)
+		fmt.Fprintf(os.Stderr, "Successfully restored %d characters from token: %s\n",
+			len(restoreResult.OriginalText), targetToken)
 	}
 }

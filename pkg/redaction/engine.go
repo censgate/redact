@@ -1,4 +1,5 @@
-// Package redaction provides comprehensive PII/PHI redaction capabilities with support for multiple redaction modes, policy-based rules, and multi-tenant configurations.
+// Package redaction provides comprehensive PII/PHI redaction capabilities with support
+// for multiple redaction modes, policy-based rules, and multi-tenant configurations.
 package redaction
 
 import (
@@ -87,6 +88,7 @@ func NewEngine() *Engine {
 		tokens:        make(map[string]TokenInfo),
 		maxTextLength: 1024 * 1024, // 1MB default
 		defaultTTL:    24 * time.Hour,
+		mutex:         sync.RWMutex{},
 	}
 
 	// Initialize default patterns
@@ -102,6 +104,7 @@ func NewEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *Engine {
 		tokens:        make(map[string]TokenInfo),
 		maxTextLength: maxTextLength,
 		defaultTTL:    defaultTTL,
+		mutex:         sync.RWMutex{},
 	}
 
 	// Initialize default patterns
@@ -155,7 +158,8 @@ func (re *Engine) initDefaultPatterns() {
 	re.patterns[TypeSHA256Hex] = regexp.MustCompile(`\b[a-fA-F0-9]{64}\b`)
 
 	// GUID/UUID patterns
-	re.patterns[TypeGUID] = regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
+	re.patterns[TypeGUID] = regexp.MustCompile(
+		`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
 
 	// ISBN patterns (10 or 13 digits)
 	re.patterns[TypeISBN] = regexp.MustCompile(`\b(?:ISBN(?:-1[03])?\s*:?\s*)?[0-9X]{10}(?:[-\s][0-9X]{3}){3}\b`)
@@ -167,7 +171,8 @@ func (re *Engine) initDefaultPatterns() {
 	re.patterns[TypeIBAN] = regexp.MustCompile(`\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4}[0-9]{7}([A-Z0-9]?){0,16}\b`)
 
 	// Git repository patterns
-	re.patterns[TypeGitRepo] = regexp.MustCompile(`\b(?:git@|https?://)(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[a-zA-Z0-9_.-]+)*\.git\b`)
+	re.patterns[TypeGitRepo] = regexp.MustCompile(
+		`\b(?:git@|https?://)(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[a-zA-Z0-9_.-]+)*\.git\b`)
 }
 
 // AddCustomPattern adds a custom detection pattern

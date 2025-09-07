@@ -104,26 +104,28 @@ func NewTenantAwareEngine(policyStore PolicyStore) *TenantAwareEngine {
 
 	return &TenantAwareEngine{
 		PolicyAwareEngine: NewPolicyAwareEngine(),
-		tenantPolicies:             make(map[string]*TenantPolicy),
-		policyStore:                policyStore,
+		tenantPolicies:    make(map[string]*TenantPolicy),
+		policyStore:       policyStore,
 	}
 }
 
 // NewTenantAwareEngineWithConfig creates a new tenant-aware redaction engine with custom configuration
-func NewTenantAwareEngineWithConfig(maxTextLength int, defaultTTL time.Duration, policyStore PolicyStore) *TenantAwareEngine {
+func NewTenantAwareEngineWithConfig(
+	maxTextLength int, defaultTTL time.Duration, policyStore PolicyStore) *TenantAwareEngine {
 	if policyStore == nil {
 		policyStore = NewInMemoryPolicyStore()
 	}
 
 	return &TenantAwareEngine{
 		PolicyAwareEngine: NewPolicyAwareEngineWithConfig(maxTextLength, defaultTTL),
-		tenantPolicies:             make(map[string]*TenantPolicy),
-		policyStore:                policyStore,
+		tenantPolicies:    make(map[string]*TenantPolicy),
+		policyStore:       policyStore,
 	}
 }
 
 // RedactForTenant implements TenantAwareRedactionProvider interface
-func (tare *TenantAwareEngine) RedactForTenant(ctx context.Context, tenantID string, request *Request) (*Result, error) {
+func (tare *TenantAwareEngine) RedactForTenant(
+	ctx context.Context, tenantID string, request *Request) (*Result, error) {
 	if tenantID == "" {
 		return nil, fmt.Errorf("tenant ID cannot be empty")
 	}
@@ -137,9 +139,9 @@ func (tare *TenantAwareEngine) RedactForTenant(ctx context.Context, tenantID str
 
 	// Create policy redaction request
 	policyRequest := &PolicyRequest{
-		Request: request,
-		PolicyRules:      tenantPolicy.Rules,
-		TenantID:         tenantID,
+		Request:     request,
+		PolicyRules: tenantPolicy.Rules,
+		TenantID:    tenantID,
 	}
 
 	// Apply tenant-specific custom patterns

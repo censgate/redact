@@ -25,16 +25,16 @@ type compiledPolicyRules struct {
 // NewPolicyAwareEngine creates a new policy-aware redaction engine
 func NewPolicyAwareEngine() *PolicyAwareEngine {
 	return &PolicyAwareEngine{
-		Engine: NewEngine(),
-		policyCache:     make(map[string]*compiledPolicyRules),
+		Engine:      NewEngine(),
+		policyCache: make(map[string]*compiledPolicyRules),
 	}
 }
 
 // NewPolicyAwareEngineWithConfig creates a new policy-aware redaction engine with custom configuration
 func NewPolicyAwareEngineWithConfig(maxTextLength int, defaultTTL time.Duration) *PolicyAwareEngine {
 	return &PolicyAwareEngine{
-		Engine: NewEngineWithConfig(maxTextLength, defaultTTL),
-		policyCache:     make(map[string]*compiledPolicyRules),
+		Engine:      NewEngineWithConfig(maxTextLength, defaultTTL),
+		policyCache: make(map[string]*compiledPolicyRules),
 	}
 }
 
@@ -164,7 +164,8 @@ func (pare *PolicyAwareEngine) GetCapabilities() *ProviderCapabilities {
 // Helper methods
 
 // applyPolicyRulesToResult applies policy rules to an existing redaction result
-func (pare *PolicyAwareEngine) applyPolicyRulesToResult(result *Result, rules []PolicyRule, context *Context) (*Result, error) {
+func (pare *PolicyAwareEngine) applyPolicyRulesToResult(
+	result *Result, rules []PolicyRule, context *Context) (*Result, error) {
 	// Create a copy of the result to modify
 	policyResult := &Result{
 		OriginalText: result.OriginalText,
@@ -226,71 +227,99 @@ func (pare *PolicyAwareEngine) evaluateCondition(condition PolicyCondition, cont
 		return false
 	}
 
-	var fieldValue interface{}
+	fieldValue := pare.extractFieldValue(condition.Field, context)
+	return pare.evaluateOperator(condition.Operator, fieldValue, condition.Value)
+}
 
-	// Extract field value from context
-	switch condition.Field {
+// extractFieldValue extracts the field value from context based on field name
+func (pare *PolicyAwareEngine) extractFieldValue(field string, context *Context) interface{} {
+	switch field {
 	case "source":
-		fieldValue = context.Source
+		return context.Source
 	case "field":
-		fieldValue = context.Field
+		return context.Field
 	case "content_type":
-		fieldValue = context.ContentType
+		return context.ContentType
 	case "language":
-		fieldValue = context.Language
+		return context.Language
 	case "user_role":
-		fieldValue = context.UserRole
+		return context.UserRole
 	case "compliance_reqs":
-		fieldValue = context.ComplianceReqs
+		return context.ComplianceReqs
 	default:
 		if context.Metadata != nil {
-			fieldValue = context.Metadata[condition.Field]
+			return context.Metadata[field]
+		}
+		return nil
+	}
+}
+
+// evaluateOperator evaluates the condition operator with field and expected values
+func (pare *PolicyAwareEngine) evaluateOperator(operator string, fieldValue, expectedValue interface{}) bool {
+	switch operator {
+	case "eq":
+		return fieldValue == expectedValue
+	case "ne":
+		return fieldValue != expectedValue
+	case "contains":
+		return pare.evaluateContainsOperator(fieldValue, expectedValue)
+	case "regex":
+		return pare.evaluateRegexOperator(fieldValue, expectedValue)
+	case "in":
+		return pare.evaluateInOperator(fieldValue, expectedValue)
+	default:
+		return false
+	}
+}
+
+// evaluateContainsOperator handles the "contains" operator logic
+func (pare *PolicyAwareEngine) evaluateContainsOperator(fieldValue, expectedValue interface{}) bool {
+	if str, ok := fieldValue.(string); ok {
+		if valStr, ok := expectedValue.(string); ok {
+			return strings.Contains(str, valStr)
 		}
 	}
-
-	// Evaluate condition based on operator
-	switch condition.Operator {
-	case "eq":
-		return fieldValue == condition.Value
-	case "ne":
-		return fieldValue != condition.Value
-	case "contains":
-		if str, ok := fieldValue.(string); ok {
-			if valStr, ok := condition.Value.(string); ok {
-				return strings.Contains(str, valStr)
-			}
-		}
-		if slice, ok := fieldValue.([]string); ok {
-			if valStr, ok := condition.Value.(string); ok {
-				for _, item := range slice {
-					if item == valStr {
-						return true
-					}
-				}
-			}
-		}
-		return false
-	case "regex":
-		if str, ok := fieldValue.(string); ok {
-			if pattern, ok := condition.Value.(string); ok {
-				if compiled, err := regexp.Compile(pattern); err == nil {
-					return compiled.MatchString(str)
-				}
-			}
-		}
-		return false
-	case "in":
-		if slice, ok := condition.Value.([]interface{}); ok {
+	if slice, ok := fieldValue.([]string); ok {
+		if valStr, ok := expectedValue.(string); ok {
 			for _, item := range slice {
-				if fieldValue == item {
+				if item == valStr {
 					return true
 				}
 			}
 		}
-		return false
-	default:
+	}
+	return false
+}
+
+// evaluateRegexOperator handles the "regex" operator logic
+func (pare *PolicyAwareEngine) evaluateRegexOperator(fieldValue, expectedValue interface{}) bool {
+	str, ok := fieldValue.(string)
+	if !ok {
 		return false
 	}
+	pattern, ok := expectedValue.(string)
+	if !ok {
+		return false
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return false
+	}
+	return compiled.MatchString(str)
+}
+
+// evaluateInOperator handles the "in" operator logic
+func (pare *PolicyAwareEngine) evaluateInOperator(fieldValue, expectedValue interface{}) bool {
+	slice, ok := expectedValue.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, item := range slice {
+		if fieldValue == item {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldApplyToField determines if a rule should apply to a specific field
@@ -311,7 +340,8 @@ func (pare *PolicyAwareEngine) shouldApplyToField(field string, context *Context
 }
 
 // applyPatternToResult applies a compiled pattern to the redaction result
-func (pare *PolicyAwareEngine) applyPatternToResult(result *Result, pattern *regexp.Regexp, rule PolicyRule, _ string) *Result {
+func (pare *PolicyAwareEngine) applyPatternToResult(
+	result *Result, pattern *regexp.Regexp, rule PolicyRule, _ string) *Result {
 	matches := pattern.FindAllStringIndex(result.RedactedText, -1)
 
 	for _, match := range matches {

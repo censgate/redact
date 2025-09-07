@@ -77,7 +77,7 @@ type TenantAwareProvider interface {
 // Request represents a redaction request
 type Request struct {
 	Text           string                 `json:"text"`
-	Types []Type        `json:"redaction_types,omitempty"`
+	Types          []Type                 `json:"redaction_types,omitempty"`
 	CustomPatterns []CustomPattern        `json:"custom_patterns,omitempty"`
 	Mode           Mode                   `json:"mode"`
 	Context        *Context               `json:"context,omitempty"`
@@ -153,12 +153,12 @@ type PolicyCondition struct {
 
 // Suggestion represents an LLM-generated redaction suggestion
 type Suggestion struct {
-	Pattern     string        `json:"pattern"`
-	Type        Type `json:"type"`
-	Confidence  float64       `json:"confidence"`
-	Reasoning   string        `json:"reasoning"`
-	Examples    []string      `json:"examples,omitempty"`
-	Replacement string        `json:"replacement,omitempty"`
+	Pattern     string   `json:"pattern"`
+	Type        Type     `json:"type"`
+	Confidence  float64  `json:"confidence"`
+	Reasoning   string   `json:"reasoning"`
+	Examples    []string `json:"examples,omitempty"`
+	Replacement string   `json:"replacement,omitempty"`
 }
 
 // TenantPolicy represents tenant-specific redaction policies
@@ -180,7 +180,7 @@ type TenantPolicy struct {
 type ProviderCapabilities struct {
 	Name                string          `json:"name"`
 	Version             string          `json:"version"`
-	SupportedTypes      []Type `json:"supported_types"`
+	SupportedTypes      []Type          `json:"supported_types"`
 	SupportedModes      []Mode          `json:"supported_modes"`
 	SupportsReversible  bool            `json:"supports_reversible"`
 	SupportsCustom      bool            `json:"supports_custom_patterns"`

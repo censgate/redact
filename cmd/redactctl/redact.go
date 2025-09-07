@@ -172,7 +172,7 @@ func outputResults(result *redaction.Result, _ *config.Config) error {
 
 	// Write to output
 	if outputFile != "" {
-		return os.WriteFile(outputFile, []byte(output), 0644)
+		return os.WriteFile(outputFile, []byte(output), 0600)
 	}
 	fmt.Print(output)
 	if outputFormat == "text" {
@@ -191,7 +191,8 @@ func formatJSON(result *redaction.Result) (string, error) {
   "redaction_count": %d,
   "redactions": [
 %s  ]
-}`, result.OriginalText, result.RedactedText, result.Token, len(result.Redactions), formatRedactionsJSON(result.Redactions)), nil
+}`, result.OriginalText, result.RedactedText, result.Token, len(result.Redactions),
+		formatRedactionsJSON(result.Redactions)), nil
 }
 
 func formatYAML(result *redaction.Result) (string, error) {
@@ -200,7 +201,8 @@ redacted_text: %q
 token: %q
 redaction_count: %d
 redactions:
-%s`, result.OriginalText, result.RedactedText, result.Token, len(result.Redactions), formatRedactionsYAML(result.Redactions)), nil
+%s`, result.OriginalText, result.RedactedText, result.Token, len(result.Redactions),
+		formatRedactionsYAML(result.Redactions)), nil
 }
 
 func formatRedactionsJSON(redactions []redaction.Redaction) string {

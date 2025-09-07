@@ -34,7 +34,8 @@ This command provides administrative functions for the redaction engine:
 var engineStatsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "Show redaction engine statistics",
-	Long:  "Display detailed statistics about the redaction engine including active patterns, tokens, and performance metrics.",
+	Long: "Display detailed statistics about the redaction engine including " +
+		"active patterns, tokens, and performance metrics.",
 	Run: func(_ *cobra.Command, _ []string) {
 		runEngineStats()
 	},
