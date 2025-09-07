@@ -21,9 +21,7 @@ type PolicyAwareRedactionEngine struct {
 
 // compiledPolicyRules represents compiled policy rules for efficient execution
 type compiledPolicyRules struct {
-	rules       []PolicyRule
-	patterns    map[string]*regexp.Regexp
-	lastUpdated time.Time
+	// Future: compiled rules will be stored here when policy caching is implemented
 }
 
 // NewPolicyAwareRedactionEngine creates a new policy-aware redaction engine
@@ -54,7 +52,7 @@ func (pare *PolicyAwareRedactionEngine) ApplyPolicyRules(ctx context.Context, re
 	}
 
 	// Start with base redaction
-	result, err := pare.RedactionEngine.RedactText(ctx, request.RedactionRequest)
+	result, err := pare.RedactText(ctx, request.RedactionRequest)
 	if err != nil {
 		return nil, fmt.Errorf("base redaction failed: %w", err)
 	}

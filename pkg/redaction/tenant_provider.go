@@ -132,7 +132,7 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 	tenantPolicy, err := tare.GetTenantPolicy(ctx, tenantID)
 	if err != nil {
 		// If no tenant-specific policy, use default redaction
-		return tare.RedactionEngine.RedactText(ctx, request)
+		return tare.RedactText(ctx, request)
 	}
 
 	// Create policy redaction request

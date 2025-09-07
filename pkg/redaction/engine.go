@@ -249,27 +249,6 @@ func (re *RedactionEngine) extractContext(text string, start, end int) string {
 	return text[contextStart:contextEnd]
 }
 
-// generateToken generates a unique token for reversible redaction
-func (re *RedactionEngine) generateToken(result *RedactionResult) string {
-	// Generate random token
-	bytes := make([]byte, 16)
-	_, _ = rand.Read(bytes)
-	token := hex.EncodeToString(bytes)
-
-	// Store token information
-	tokenInfo := TokenInfo{
-		OriginalText:  result.OriginalText,
-		RedactionType: result.Redactions[0].Type, // Store first redaction type
-		Created:       time.Now(),
-		Expires:       time.Now().Add(24 * time.Hour), // Token expires in 24 hours
-	}
-
-	re.mutex.Lock()
-	re.tokens[token] = tokenInfo
-	re.mutex.Unlock()
-
-	return token
-}
 
 // GetRedactionStats returns statistics about redaction operations
 func (re *RedactionEngine) GetRedactionStats() map[string]interface{} {

@@ -12,11 +12,7 @@ import (
 )
 
 var (
-	showPatterns bool
-	showStats    bool
-	cleanupMode  bool
-	rotateKeys   bool
-	testPattern  string
+	testPattern string
 )
 
 // engineCmd represents the engine command
