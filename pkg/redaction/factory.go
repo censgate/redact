@@ -26,8 +26,8 @@ type ProviderConfig struct {
 
 // LLMConfig holds configuration for LLM-based redaction providers
 type LLMConfig struct {
-	Provider    string                 `json:"provider"`    // e.g., "openai", "anthropic", "ollama"
-	Model       string                 `json:"model"`       // e.g., "gpt-4", "claude-3", "llama2"
+	Provider    string                 `json:"provider"` // e.g., "openai", "anthropic", "ollama"
+	Model       string                 `json:"model"`    // e.g., "gpt-4", "claude-3", "llama2"
 	APIKey      string                 `json:"api_key,omitempty"`
 	BaseURL     string                 `json:"base_url,omitempty"`
 	Temperature float64                `json:"temperature,omitempty"`
@@ -60,7 +60,7 @@ func NewRedactionProviderFactoryWithDefaults(config *ProviderConfig) *RedactionP
 			DefaultTTL:    24 * time.Hour,
 		}
 	}
-	
+
 	return &RedactionProviderFactory{
 		defaultConfig: config,
 	}
@@ -70,7 +70,7 @@ func NewRedactionProviderFactoryWithDefaults(config *ProviderConfig) *RedactionP
 func (factory *RedactionProviderFactory) CreateProvider(providerType ProviderType, config *ProviderConfig) (RedactionProvider, error) {
 	// Merge with defaults
 	finalConfig := factory.mergeConfig(config)
-	
+
 	switch providerType {
 	case ProviderTypeBasic:
 		return factory.createBasicProvider(finalConfig)
@@ -96,12 +96,12 @@ func (factory *RedactionProviderFactory) CreatePolicyAwareProvider(config *Provi
 	if err != nil {
 		return nil, err
 	}
-	
+
 	policyProvider, ok := provider.(PolicyAwareRedactionProvider)
 	if !ok {
 		return nil, fmt.Errorf("provider does not implement PolicyAwareRedactionProvider interface")
 	}
-	
+
 	return policyProvider, nil
 }
 
@@ -111,12 +111,12 @@ func (factory *RedactionProviderFactory) CreateTenantAwareProvider(config *Provi
 	if err != nil {
 		return nil, err
 	}
-	
+
 	tenantProvider, ok := provider.(TenantAwareRedactionProvider)
 	if !ok {
 		return nil, fmt.Errorf("provider does not implement TenantAwareRedactionProvider interface")
 	}
-	
+
 	return tenantProvider, nil
 }
 
@@ -126,12 +126,12 @@ func (factory *RedactionProviderFactory) CreateLLMProvider(config *ProviderConfi
 	if err != nil {
 		return nil, err
 	}
-	
+
 	llmProvider, ok := provider.(LLMRedactionProvider)
 	if !ok {
 		return nil, fmt.Errorf("provider does not implement LLMRedactionProvider interface")
 	}
-	
+
 	return llmProvider, nil
 }
 
@@ -150,7 +150,7 @@ func (factory *RedactionProviderFactory) ValidateConfig(config *ProviderConfig) 
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
 	}
-	
+
 	// Validate provider type
 	supportedTypes := factory.GetSupportedProviderTypes()
 	typeSupported := false
@@ -160,27 +160,27 @@ func (factory *RedactionProviderFactory) ValidateConfig(config *ProviderConfig) 
 			break
 		}
 	}
-	
+
 	if !typeSupported {
 		return fmt.Errorf("unsupported provider type: %s", config.Type)
 	}
-	
+
 	// Validate configuration values
 	if config.MaxTextLength <= 0 {
 		return fmt.Errorf("max_text_length must be positive")
 	}
-	
+
 	if config.DefaultTTL <= 0 {
 		return fmt.Errorf("default_ttl must be positive")
 	}
-	
+
 	// Validate LLM config if present
 	if config.Type == ProviderTypeLLM && config.LLMConfig != nil {
 		if err := factory.validateLLMConfig(config.LLMConfig); err != nil {
 			return fmt.Errorf("invalid LLM config: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (factory *RedactionProviderFactory) mergeConfig(config *ProviderConfig) *Pr
 	if config == nil {
 		return factory.defaultConfig
 	}
-	
+
 	finalConfig := &ProviderConfig{
 		Type:          config.Type,
 		MaxTextLength: config.MaxTextLength,
@@ -199,20 +199,20 @@ func (factory *RedactionProviderFactory) mergeConfig(config *ProviderConfig) *Pr
 		PolicyStore:   config.PolicyStore,
 		LLMConfig:     config.LLMConfig,
 	}
-	
+
 	// Apply defaults for zero values
 	if finalConfig.Type == "" {
 		finalConfig.Type = factory.defaultConfig.Type
 	}
-	
+
 	if finalConfig.MaxTextLength == 0 {
 		finalConfig.MaxTextLength = factory.defaultConfig.MaxTextLength
 	}
-	
+
 	if finalConfig.DefaultTTL == 0 {
 		finalConfig.DefaultTTL = factory.defaultConfig.DefaultTTL
 	}
-	
+
 	return finalConfig
 }
 
@@ -242,19 +242,19 @@ func (factory *RedactionProviderFactory) validateLLMConfig(config *LLMConfig) er
 	if config.Provider == "" {
 		return fmt.Errorf("LLM provider cannot be empty")
 	}
-	
+
 	if config.Model == "" {
 		return fmt.Errorf("LLM model cannot be empty")
 	}
-	
+
 	if config.Temperature < 0 || config.Temperature > 2 {
 		return fmt.Errorf("temperature must be between 0 and 2")
 	}
-	
+
 	if config.MaxTokens < 0 {
 		return fmt.Errorf("max_tokens cannot be negative")
 	}
-	
+
 	return nil
 }
 

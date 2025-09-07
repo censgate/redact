@@ -11,11 +11,11 @@ import (
 // Implements TenantAwareRedactionProvider interface
 type TenantAwareRedactionEngine struct {
 	*PolicyAwareRedactionEngine
-	
+
 	// Tenant-specific configuration
 	tenantPolicies map[string]*TenantPolicy
 	tenantMutex    sync.RWMutex
-	
+
 	// Policy persistence interface (to be implemented)
 	policyStore PolicyStore
 }
@@ -45,12 +45,12 @@ func NewInMemoryPolicyStore() *InMemoryPolicyStore {
 func (store *InMemoryPolicyStore) GetTenantPolicy(ctx context.Context, tenantID string) (*TenantPolicy, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
-	
+
 	policy, exists := store.policies[tenantID]
 	if !exists {
 		return nil, fmt.Errorf("policy not found for tenant: %s", tenantID)
 	}
-	
+
 	return policy, nil
 }
 
@@ -59,17 +59,17 @@ func (store *InMemoryPolicyStore) SetTenantPolicy(ctx context.Context, tenantID 
 	if policy == nil {
 		return fmt.Errorf("policy cannot be nil")
 	}
-	
+
 	// Update timestamps
 	now := time.Now()
 	if policy.CreatedAt.IsZero() {
 		policy.CreatedAt = now
 	}
 	policy.UpdatedAt = now
-	
+
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	
+
 	store.policies[tenantID] = policy
 	return nil
 }
@@ -78,7 +78,7 @@ func (store *InMemoryPolicyStore) SetTenantPolicy(ctx context.Context, tenantID 
 func (store *InMemoryPolicyStore) DeleteTenantPolicy(ctx context.Context, tenantID string) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	
+
 	delete(store.policies, tenantID)
 	return nil
 }
@@ -87,12 +87,12 @@ func (store *InMemoryPolicyStore) DeleteTenantPolicy(ctx context.Context, tenant
 func (store *InMemoryPolicyStore) ListTenantPolicies(ctx context.Context) ([]string, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
-	
+
 	tenants := make([]string, 0, len(store.policies))
 	for tenantID := range store.policies {
 		tenants = append(tenants, tenantID)
 	}
-	
+
 	return tenants, nil
 }
 
@@ -101,7 +101,7 @@ func NewTenantAwareRedactionEngine(policyStore PolicyStore) *TenantAwareRedactio
 	if policyStore == nil {
 		policyStore = NewInMemoryPolicyStore()
 	}
-	
+
 	return &TenantAwareRedactionEngine{
 		PolicyAwareRedactionEngine: NewPolicyAwareRedactionEngine(),
 		tenantPolicies:             make(map[string]*TenantPolicy),
@@ -114,7 +114,7 @@ func NewTenantAwareRedactionEngineWithConfig(maxTextLength int, defaultTTL time.
 	if policyStore == nil {
 		policyStore = NewInMemoryPolicyStore()
 	}
-	
+
 	return &TenantAwareRedactionEngine{
 		PolicyAwareRedactionEngine: NewPolicyAwareRedactionEngineWithConfig(maxTextLength, defaultTTL),
 		tenantPolicies:             make(map[string]*TenantPolicy),
@@ -127,21 +127,21 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 	if tenantID == "" {
 		return nil, fmt.Errorf("tenant ID cannot be empty")
 	}
-	
+
 	// Get tenant policy
 	tenantPolicy, err := tare.GetTenantPolicy(ctx, tenantID)
 	if err != nil {
 		// If no tenant-specific policy, use default redaction
 		return tare.RedactionEngine.RedactText(ctx, request)
 	}
-	
+
 	// Create policy redaction request
 	policyRequest := &PolicyRedactionRequest{
 		RedactionRequest: request,
 		PolicyRules:      tenantPolicy.Rules,
 		TenantID:         tenantID,
 	}
-	
+
 	// Apply tenant-specific custom patterns
 	if len(tenantPolicy.CustomPatterns) > 0 {
 		if policyRequest.CustomPatterns == nil {
@@ -150,12 +150,12 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 			policyRequest.CustomPatterns = append(policyRequest.CustomPatterns, tenantPolicy.CustomPatterns...)
 		}
 	}
-	
+
 	// Override mode if not specified
 	if policyRequest.Mode == "" {
 		policyRequest.Mode = tenantPolicy.DefaultMode
 	}
-	
+
 	// Apply tenant context
 	if policyRequest.Context == nil {
 		policyRequest.Context = &RedactionContext{}
@@ -166,7 +166,7 @@ func (tare *TenantAwareRedactionEngine) RedactForTenant(ctx context.Context, ten
 	}
 	policyRequest.Context.Metadata["tenant_id"] = tenantID
 	policyRequest.Context.Metadata["tenant_policy_version"] = tenantPolicy.Version
-	
+
 	// Apply policy rules
 	return tare.ApplyPolicyRules(ctx, policyRequest)
 }
@@ -176,27 +176,27 @@ func (tare *TenantAwareRedactionEngine) GetTenantPolicy(ctx context.Context, ten
 	if tenantID == "" {
 		return nil, fmt.Errorf("tenant ID cannot be empty")
 	}
-	
+
 	// Check cache first
 	tare.tenantMutex.RLock()
 	cachedPolicy, exists := tare.tenantPolicies[tenantID]
 	tare.tenantMutex.RUnlock()
-	
+
 	if exists {
 		return cachedPolicy, nil
 	}
-	
+
 	// Load from persistent store
 	policy, err := tare.policyStore.GetTenantPolicy(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Cache the policy
 	tare.tenantMutex.Lock()
 	tare.tenantPolicies[tenantID] = policy
 	tare.tenantMutex.Unlock()
-	
+
 	return policy, nil
 }
 
@@ -205,37 +205,37 @@ func (tare *TenantAwareRedactionEngine) SetTenantPolicy(ctx context.Context, ten
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID cannot be empty")
 	}
-	
+
 	if policy == nil {
 		return fmt.Errorf("policy cannot be nil")
 	}
-	
+
 	// Set tenant ID if not already set
 	if policy.TenantID == "" {
 		policy.TenantID = tenantID
 	}
-	
+
 	// Validate tenant ID matches
 	if policy.TenantID != tenantID {
 		return fmt.Errorf("policy tenant ID (%s) does not match provided tenant ID (%s)", policy.TenantID, tenantID)
 	}
-	
+
 	// Validate policy rules
 	validationErrors := tare.ValidatePolicy(ctx, policy.Rules)
 	if len(validationErrors) > 0 {
 		return fmt.Errorf("policy validation failed: %d errors found", len(validationErrors))
 	}
-	
+
 	// Store in persistent store
 	if err := tare.policyStore.SetTenantPolicy(ctx, tenantID, policy); err != nil {
 		return fmt.Errorf("failed to persist tenant policy: %w", err)
 	}
-	
+
 	// Update cache
 	tare.tenantMutex.Lock()
 	tare.tenantPolicies[tenantID] = policy
 	tare.tenantMutex.Unlock()
-	
+
 	return nil
 }
 
@@ -244,17 +244,17 @@ func (tare *TenantAwareRedactionEngine) DeleteTenantPolicy(ctx context.Context, 
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID cannot be empty")
 	}
-	
+
 	// Remove from persistent store
 	if err := tare.policyStore.DeleteTenantPolicy(ctx, tenantID); err != nil {
 		return fmt.Errorf("failed to delete tenant policy from store: %w", err)
 	}
-	
+
 	// Remove from cache
 	tare.tenantMutex.Lock()
 	delete(tare.tenantPolicies, tenantID)
 	tare.tenantMutex.Unlock()
-	
+
 	return nil
 }
 
@@ -280,18 +280,18 @@ func (tare *TenantAwareRedactionEngine) RefreshTenantPolicy(ctx context.Context,
 	if tenantID == "" {
 		return fmt.Errorf("tenant ID cannot be empty")
 	}
-	
+
 	// Load from persistent store
 	policy, err := tare.policyStore.GetTenantPolicy(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to refresh tenant policy: %w", err)
 	}
-	
+
 	// Update cache
 	tare.tenantMutex.Lock()
 	tare.tenantPolicies[tenantID] = policy
 	tare.tenantMutex.Unlock()
-	
+
 	return nil
 }
 
@@ -299,7 +299,7 @@ func (tare *TenantAwareRedactionEngine) RefreshTenantPolicy(ctx context.Context,
 func (tare *TenantAwareRedactionEngine) ClearPolicyCache() {
 	tare.tenantMutex.Lock()
 	defer tare.tenantMutex.Unlock()
-	
+
 	tare.tenantPolicies = make(map[string]*TenantPolicy)
 }
 
@@ -307,6 +307,6 @@ func (tare *TenantAwareRedactionEngine) ClearPolicyCache() {
 func (tare *TenantAwareRedactionEngine) GetCachedTenantCount() int {
 	tare.tenantMutex.RLock()
 	defer tare.tenantMutex.RUnlock()
-	
+
 	return len(tare.tenantPolicies)
 }
