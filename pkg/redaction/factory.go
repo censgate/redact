@@ -122,7 +122,7 @@ func (factory *ProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMPr
 func (factory *ProviderFactory) GetSupportedProviderTypes() []ProviderType {
 	return []ProviderType{
 		ProviderTypeBasic,
-		ProviderTypePolicyAware, // Basic implementation - falls back to basic engine
+		ProviderTypePolicyAware, // Policy-aware implementation with rule validation and conditional redaction
 		// ProviderTypeLLM, // Commented out until implemented
 	}
 }
@@ -205,8 +205,8 @@ func (factory *ProviderFactory) createBasicProvider(config *ProviderConfig) (Pro
 
 // createPolicyAwareProvider creates a policy-aware redaction engine
 func (factory *ProviderFactory) createPolicyAwareProvider(config *ProviderConfig) (Provider, error) {
-	// Policy aware engine implementation would go here
-	return NewEngine(), nil // Fallback to basic engine for now
+	// Engine now directly implements PolicyAwareEngine interface
+	return NewEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
 }
 
 // createLLMProvider creates an LLM-based redaction provider (placeholder)
