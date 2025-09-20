@@ -56,3 +56,6 @@ build/
 redactctl
 
 AGENTS.md
+
+# Agent documentation and task tracking
+docs/agent/
