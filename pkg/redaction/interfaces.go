@@ -77,20 +77,6 @@ type PatternProvider interface {
 type PolicyAwareProvider = PolicyAwareEngine
 type LLMProvider = LLMEngine
 
-// TenantAwareProvider defines interface for multi-tenant redaction
-type TenantAwareProvider interface {
-	PolicyAwareProvider
-
-	// RedactForTenant performs tenant-specific redaction
-	RedactForTenant(ctx context.Context, tenantID string, request *Request) (*Result, error)
-
-	// GetTenantPolicy retrieves redaction policy for a specific tenant
-	GetTenantPolicy(ctx context.Context, tenantID string) (*TenantPolicy, error)
-
-	// SetTenantPolicy sets redaction policy for a specific tenant
-	SetTenantPolicy(ctx context.Context, tenantID string, policy *TenantPolicy) error
-}
-
 // Request represents a redaction request
 type Request struct {
 	Text           string                 `json:"text"`
@@ -107,7 +93,6 @@ type Request struct {
 type PolicyRequest struct {
 	*Request
 	PolicyRules []PolicyRule `json:"policy_rules"`
-	TenantID    string       `json:"tenant_id,omitempty"`
 	UserID      string       `json:"user_id,omitempty"`
 }
 
@@ -178,34 +163,18 @@ type Suggestion struct {
 	Replacement string   `json:"replacement,omitempty"`
 }
 
-// TenantPolicy represents tenant-specific redaction policies
-type TenantPolicy struct {
-	TenantID       string                 `json:"tenant_id"`
-	Name           string                 `json:"name"`
-	Description    string                 `json:"description,omitempty"`
-	Rules          []PolicyRule           `json:"rules"`
-	DefaultMode    Mode                   `json:"default_mode"`
-	ComplianceReqs []string               `json:"compliance_reqs,omitempty"`
-	CustomPatterns []CustomPattern        `json:"custom_patterns,omitempty"`
-	Settings       map[string]interface{} `json:"settings,omitempty"`
-	CreatedAt      time.Time              `json:"created_at"`
-	UpdatedAt      time.Time              `json:"updated_at"`
-	Version        string                 `json:"version"`
-}
-
 // EngineCapabilities describes what a redaction engine can do
 type EngineCapabilities struct {
-	Name                string          `json:"name"`
-	Version             string          `json:"version"`
-	SupportedTypes      []Type          `json:"supported_types"`
-	SupportedModes      []Mode          `json:"supported_modes"`
-	SupportsReversible  bool            `json:"supports_reversible"`
-	SupportsCustom      bool            `json:"supports_custom_patterns"`
-	SupportsLLM         bool            `json:"supports_llm"`
-	SupportsPolicies    bool            `json:"supports_policies"`
-	SupportsMultiTenant bool            `json:"supports_multi_tenant"`
-	MaxTextLength       int             `json:"max_text_length,omitempty"`
-	Features            map[string]bool `json:"features,omitempty"`
+	Name               string          `json:"name"`
+	Version            string          `json:"version"`
+	SupportedTypes     []Type          `json:"supported_types"`
+	SupportedModes     []Mode          `json:"supported_modes"`
+	SupportsReversible bool            `json:"supports_reversible"`
+	SupportsCustom     bool            `json:"supports_custom_patterns"`
+	SupportsLLM        bool            `json:"supports_llm"`
+	SupportsPolicies   bool            `json:"supports_policies"`
+	MaxTextLength      int             `json:"max_text_length,omitempty"`
+	Features           map[string]bool `json:"features,omitempty"`
 }
 
 // ProviderCapabilities is deprecated, use EngineCapabilities instead
@@ -237,7 +206,6 @@ type Pattern struct {
 type PatternRequest struct {
 	Context       *Context `json:"context,omitempty"`
 	Categories    []string `json:"categories,omitempty"`
-	TenantID      string   `json:"tenant_id,omitempty"`
 	IncludeGlobal bool     `json:"include_global"`
 }
 

@@ -1,5 +1,5 @@
 // Package redaction provides comprehensive PII/PHI redaction capabilities with support
-// for multiple redaction modes, policy-based rules, and multi-tenant configurations.
+// for multiple redaction modes and policy-based rules.
 package redaction
 
 import (
@@ -443,16 +443,15 @@ func (re *Engine) GetCapabilities() *ProviderCapabilities {
 	}
 
 	return &ProviderCapabilities{
-		Name:                "Engine",
-		Version:             "1.0.0",
-		SupportedTypes:      supportedTypes,
-		SupportedModes:      []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize},
-		SupportsReversible:  true,
-		SupportsCustom:      true,
-		SupportsLLM:         false,
-		SupportsPolicies:    false,
-		SupportsMultiTenant: false,
-		MaxTextLength:       re.maxTextLength,
+		Name:               "Engine",
+		Version:            "1.0.0",
+		SupportedTypes:     supportedTypes,
+		SupportedModes:     []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize},
+		SupportsReversible: true,
+		SupportsCustom:     true,
+		SupportsLLM:        false,
+		SupportsPolicies:   false,
+		MaxTextLength:      re.maxTextLength,
 		Features: map[string]bool{
 			"pattern_matching":   true,
 			"token_restoration":  true,

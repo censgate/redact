@@ -44,7 +44,6 @@ type ReplacementResult struct {
 // ReplacementContext provides context for replacement operations
 type ReplacementContext struct {
 	OrganizationID string                 `json:"organization_id,omitempty"`
-	TenantID       string                 `json:"tenant_id,omitempty"`
 	UserID         string                 `json:"user_id,omitempty"`
 	Source         string                 `json:"source,omitempty"`
 	Field          string                 `json:"field,omitempty"`

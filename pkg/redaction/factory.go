@@ -12,7 +12,6 @@ type ProviderType string
 const (
 	ProviderTypeBasic       ProviderType = "basic"
 	ProviderTypePolicyAware ProviderType = "policy_aware"
-	ProviderTypeTenantAware ProviderType = "tenant_aware"
 	ProviderTypeLLM         ProviderType = "llm"
 )
 
@@ -77,8 +76,6 @@ func (factory *ProviderFactory) CreateProvider(providerType ProviderType, config
 		return factory.createBasicProvider(finalConfig)
 	case ProviderTypePolicyAware:
 		return factory.createPolicyAwareProvider(finalConfig)
-	case ProviderTypeTenantAware:
-		return factory.createTenantAwareProvider(finalConfig)
 	case ProviderTypeLLM:
 		return factory.createLLMProvider(finalConfig)
 	default:
@@ -106,21 +103,6 @@ func (factory *ProviderFactory) CreatePolicyAwareProvider(config *ProviderConfig
 	return policyProvider, nil
 }
 
-// CreateTenantAwareProvider creates a tenant-aware redaction provider
-func (factory *ProviderFactory) CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareProvider, error) {
-	provider, err := factory.CreateProvider(ProviderTypeTenantAware, config)
-	if err != nil {
-		return nil, err
-	}
-
-	tenantProvider, ok := provider.(TenantAwareProvider)
-	if !ok {
-		return nil, fmt.Errorf("provider does not implement TenantAwareProvider interface")
-	}
-
-	return tenantProvider, nil
-}
-
 // CreateLLMProvider creates an LLM-based redaction provider
 func (factory *ProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMProvider, error) {
 	provider, err := factory.CreateProvider(ProviderTypeLLM, config)
@@ -140,8 +122,7 @@ func (factory *ProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMPr
 func (factory *ProviderFactory) GetSupportedProviderTypes() []ProviderType {
 	return []ProviderType{
 		ProviderTypeBasic,
-		ProviderTypePolicyAware,
-		ProviderTypeTenantAware,
+		ProviderTypePolicyAware, // Basic implementation - falls back to basic engine
 		// ProviderTypeLLM, // Commented out until implemented
 	}
 }
@@ -228,12 +209,6 @@ func (factory *ProviderFactory) createPolicyAwareProvider(config *ProviderConfig
 	return NewEngine(), nil // Fallback to basic engine for now
 }
 
-// createTenantAwareProvider creates a tenant-aware redaction engine
-func (factory *ProviderFactory) createTenantAwareProvider(config *ProviderConfig) (Provider, error) {
-	// Tenant aware engine implementation would go here
-	return NewEngine(), nil // Fallback to basic engine for now
-}
-
 // createLLMProvider creates an LLM-based redaction provider (placeholder)
 func (factory *ProviderFactory) createLLMProvider(_ *ProviderConfig) (Provider, error) {
 	// TODO: Implement LLM-based redaction provider
@@ -274,9 +249,4 @@ func CreateBasicProvider(config *ProviderConfig) (Provider, error) {
 // CreatePolicyAwareProvider creates a policy-aware redaction provider using the default factory
 func CreatePolicyAwareProvider(config *ProviderConfig) (PolicyAwareProvider, error) {
 	return DefaultFactory.CreatePolicyAwareProvider(config)
-}
-
-// CreateTenantAwareProvider creates a tenant-aware redaction provider using the default factory
-func CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareProvider, error) {
-	return DefaultFactory.CreateTenantAwareProvider(config)
 }
