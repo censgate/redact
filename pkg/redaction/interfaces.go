@@ -74,7 +74,11 @@ type PatternProvider interface {
 }
 
 // Backward compatibility aliases
+
+// PolicyAwareProvider is a backward compatibility alias for PolicyAwareEngine
 type PolicyAwareProvider = PolicyAwareEngine
+
+// LLMProvider is a backward compatibility alias for LLMEngine
 type LLMProvider = LLMEngine
 
 // Request represents a redaction request
