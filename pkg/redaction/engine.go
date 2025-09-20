@@ -302,6 +302,29 @@ func (re *Engine) generateReplacement(redactionType Type, _ string) string {
 		return "[IBAN_REDACTED]"
 	case TypeGitRepo:
 		return "[GIT_REPO_REDACTED]"
+
+	// UK-specific redaction types
+	case TypeUKNationalInsurance:
+		return "[UK_NATIONAL_INSURANCE_REDACTED]"
+	case TypeUKNHSNumber:
+		return "[UK_NHS_NUMBER_REDACTED]"
+	case TypeUKPostcode:
+		return "[UK_POSTCODE_REDACTED]"
+	case TypeUKPhoneNumber:
+		return "[UK_PHONE_NUMBER_REDACTED]"
+	case TypeUKMobileNumber:
+		return "[UK_MOBILE_NUMBER_REDACTED]"
+	case TypeUKSortCode:
+		return "[UK_SORT_CODE_REDACTED]"
+	case TypeUKIBAN:
+		return "[UK_IBAN_REDACTED]"
+	case TypeUKCompanyNumber:
+		return "[UK_COMPANY_NUMBER_REDACTED]"
+	case TypeUKDrivingLicense:
+		return "[UK_DRIVING_LICENSE_REDACTED]"
+	case TypeUKPassportNumber:
+		return "[UK_PASSPORT_NUMBER_REDACTED]"
+
 	default:
 		return "[REDACTED]"
 	}

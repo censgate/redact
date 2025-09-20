@@ -352,3 +352,150 @@ func TestInvalidCustomPattern(t *testing.T) {
 		t.Errorf("Expected 29 active patterns, got %v", stats["active_patterns"])
 	}
 }
+
+// TestUKRedactionReplacements tests that UK-specific redaction types generate correct replacement text
+func TestUKRedactionReplacements(t *testing.T) {
+	engine := NewEngine()
+
+	testCases := []struct {
+		name            string
+		text            string
+		expectedType    Type
+		expectedReplace string
+	}{
+		{
+			name:            "UK National Insurance replacement",
+			text:            "NI: AB123456C",
+			expectedType:    TypeUKNationalInsurance,
+			expectedReplace: "[UK_NATIONAL_INSURANCE_REDACTED]",
+		},
+		// Note: NHS Number replacement is tested in TestGenerateReplacementMethod
+		// to avoid conflicts with phone number patterns in integration tests
+		{
+			name:            "UK Postcode replacement",
+			text:            "Address: SW1A 1AA",
+			expectedType:    TypeUKPostcode,
+			expectedReplace: "[UK_POSTCODE_REDACTED]",
+		},
+		{
+			name:            "UK Phone Number replacement",
+			text:            "Call +44 20 1234 5678",
+			expectedType:    TypeUKPhoneNumber,
+			expectedReplace: "[UK_PHONE_NUMBER_REDACTED]",
+		},
+		{
+			name:            "UK Mobile Number replacement",
+			text:            "Mobile: 07123456789",
+			expectedType:    TypeUKMobileNumber,
+			expectedReplace: "[UK_MOBILE_NUMBER_REDACTED]",
+		},
+		{
+			name:            "UK Sort Code replacement",
+			text:            "Sort: 12-34-56",
+			expectedType:    TypeUKSortCode,
+			expectedReplace: "[UK_SORT_CODE_REDACTED]",
+		},
+		{
+			name:            "UK IBAN replacement",
+			text:            "IBAN: GB82 WEST 1234 5698 7654 32",
+			expectedType:    TypeUKIBAN,
+			expectedReplace: "[UK_IBAN_REDACTED]",
+		},
+		{
+			name:            "UK Company Number replacement",
+			text:            "Company No: 12345678",
+			expectedType:    TypeUKCompanyNumber,
+			expectedReplace: "[UK_COMPANY_NUMBER_REDACTED]",
+		},
+		{
+			name:            "UK Driving License replacement",
+			text:            "License: MORGA657054SM9IJ",
+			expectedType:    TypeUKDrivingLicense,
+			expectedReplace: "[UK_DRIVING_LICENSE_REDACTED]",
+		},
+		{
+			name:            "UK Passport Number replacement",
+			text:            "Passport No: 123456789",
+			expectedType:    TypeUKPassportNumber,
+			expectedReplace: "[UK_PASSPORT_NUMBER_REDACTED]",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := engine.RedactText(context.Background(), &Request{
+				Text: tc.text,
+				Mode: ModeReplace,
+			})
+			if err != nil {
+				t.Fatalf("RedactText failed: %v", err)
+			}
+
+			// Find the specific redaction type we're testing
+			found := false
+			for _, redaction := range result.Redactions {
+				if redaction.Type == tc.expectedType {
+					found = true
+					if redaction.Replacement != tc.expectedReplace {
+						t.Errorf("Expected replacement '%s', got '%s'", tc.expectedReplace, redaction.Replacement)
+					}
+
+					// Verify the replacement appears in the redacted text
+					if !strings.Contains(result.RedactedText, tc.expectedReplace) {
+						t.Errorf("Expected redacted text to contain '%s', but it was: %s", tc.expectedReplace, result.RedactedText)
+					}
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("Expected to find redaction of type %s, but found types: %v", tc.expectedType, getRedactionTypes(result.Redactions))
+			}
+		})
+	}
+}
+
+// TestGenerateReplacementMethod tests the generateReplacement method directly for all UK types
+func TestGenerateReplacementMethod(t *testing.T) {
+	engine := NewEngine()
+
+	testCases := []struct {
+		redactionType Type
+		expected      string
+	}{
+		{TypeUKNationalInsurance, "[UK_NATIONAL_INSURANCE_REDACTED]"},
+		{TypeUKNHSNumber, "[UK_NHS_NUMBER_REDACTED]"},
+		{TypeUKPostcode, "[UK_POSTCODE_REDACTED]"},
+		{TypeUKPhoneNumber, "[UK_PHONE_NUMBER_REDACTED]"},
+		{TypeUKMobileNumber, "[UK_MOBILE_NUMBER_REDACTED]"},
+		{TypeUKSortCode, "[UK_SORT_CODE_REDACTED]"},
+		{TypeUKIBAN, "[UK_IBAN_REDACTED]"},
+		{TypeUKCompanyNumber, "[UK_COMPANY_NUMBER_REDACTED]"},
+		{TypeUKDrivingLicense, "[UK_DRIVING_LICENSE_REDACTED]"},
+		{TypeUKPassportNumber, "[UK_PASSPORT_NUMBER_REDACTED]"},
+		// Test original types still work
+		{TypeEmail, "[EMAIL_REDACTED]"},
+		{TypePhone, "[PHONE_REDACTED]"},
+		{TypeCreditCard, "[CREDIT_CARD_REDACTED]"},
+		// Test default fallback for unknown types
+		{Type("unknown_type"), "[REDACTED]"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(string(tc.redactionType), func(t *testing.T) {
+			replacement := engine.generateReplacement(tc.redactionType, "dummy_original")
+			if replacement != tc.expected {
+				t.Errorf("For type %s, expected '%s', got '%s'", tc.redactionType, tc.expected, replacement)
+			}
+		})
+	}
+}
+
+// Helper function to extract redaction types from results
+func getRedactionTypes(redactions []Redaction) []Type {
+	types := make([]Type, len(redactions))
+	for i, r := range redactions {
+		types[i] = r.Type
+	}
+	return types
+}
