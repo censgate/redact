@@ -6,6 +6,14 @@
 
 A powerful, extensible redaction library for Go that provides comprehensive PII/PHI detection and redaction capabilities with policy-aware support.
 
+## Support Disclaimer
+
+This module is provided as-is and is not officially supported. There is no guarantee of timely responses to issues or pull requests, except at our discretion.
+
+## Stability Notice
+
+**Please note:** Until we reach version 1.0.0, this module may undergo breaking changes at any time.
+
 ## Features
 
 ### 🔧 Extensible Architecture
