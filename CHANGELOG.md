@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.0] - 2025-09-20
+
+### Added
+- Version bump to v0.4.0 for upcoming features
+
+### Changed
+- Updated version references across codebase
+- Updated documentation for v0.4.0
+
 ## [v0.3.1] - 2025-09-20
 
 ### Security
