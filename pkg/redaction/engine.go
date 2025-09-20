@@ -650,6 +650,9 @@ func (re *Engine) redactTextInternal(text string) *Result {
 		Timestamp:    time.Now(),
 	}
 
+	// Collect all potential redactions
+	var allRedactions []Redaction
+
 	// Process each redaction type
 	for redactionType, pattern := range re.patterns {
 		matches := pattern.FindAllStringIndex(text, -1)
@@ -669,28 +672,120 @@ func (re *Engine) redactTextInternal(text string) *Result {
 				Context:     re.extractContext(text, start, end),
 			}
 
-			result.Redactions = append(result.Redactions, redaction)
+			allRedactions = append(allRedactions, redaction)
 		}
 	}
 
-	// Apply redactions in reverse order to maintain indices
-	offset := 0
-	for i := len(result.Redactions) - 1; i >= 0; i-- {
-		redaction := result.Redactions[i]
-		adjustedStart := redaction.Start + offset
-		adjustedEnd := redaction.End + offset
+	// Resolve overlapping redactions (longer match wins, then by type priority)
+	result.Redactions = re.resolveOverlappingRedactions(allRedactions)
 
-		if adjustedStart >= 0 && adjustedEnd <= len(result.RedactedText) {
-			result.RedactedText = result.RedactedText[:adjustedStart] +
+	// Sort redactions by start position (descending) to apply from end to beginning
+	for i := 0; i < len(result.Redactions); i++ {
+		for j := i + 1; j < len(result.Redactions); j++ {
+			if result.Redactions[i].Start < result.Redactions[j].Start {
+				result.Redactions[i], result.Redactions[j] = result.Redactions[j], result.Redactions[i]
+			}
+		}
+	}
+
+	// Apply redactions from end to beginning to maintain indices
+	for _, redaction := range result.Redactions {
+		if redaction.Start >= 0 && redaction.End <= len(result.RedactedText) {
+			result.RedactedText = result.RedactedText[:redaction.Start] +
 				redaction.Replacement +
-				result.RedactedText[adjustedEnd:]
-
-			// Update offset for next redaction
-			offset += len(redaction.Replacement) - (redaction.End - redaction.Start)
+				result.RedactedText[redaction.End:]
 		}
 	}
 
 	return result
+}
+
+// resolveOverlappingRedactions removes overlapping redactions using conflict resolution
+func (re *Engine) resolveOverlappingRedactions(redactions []Redaction) []Redaction {
+	if len(redactions) <= 1 {
+		return redactions
+	}
+
+	// Sort by start position first
+	for i := 0; i < len(redactions); i++ {
+		for j := i + 1; j < len(redactions); j++ {
+			if redactions[i].Start > redactions[j].Start {
+				redactions[i], redactions[j] = redactions[j], redactions[i]
+			}
+		}
+	}
+
+	var resolved []Redaction
+	
+	for _, current := range redactions {
+		overlaps := false
+		
+		// Check if current redaction overlaps with any already resolved redaction
+		for i, existing := range resolved {
+			if re.redactionsOverlap(current, existing) {
+				overlaps = true
+				
+				// Conflict resolution: prefer longer match, then by type priority
+				if re.shouldReplaceRedaction(current, existing) {
+					resolved[i] = current // Replace existing with current
+				}
+				// If existing wins, do nothing (keep existing)
+				break
+			}
+		}
+		
+		// If no overlap, add the redaction
+		if !overlaps {
+			resolved = append(resolved, current)
+		}
+	}
+	
+	return resolved
+}
+
+// redactionsOverlap checks if two redactions overlap
+func (re *Engine) redactionsOverlap(a, b Redaction) bool {
+	return a.Start < b.End && b.Start < a.End
+}
+
+// shouldReplaceRedaction determines if redaction 'new' should replace 'existing'
+func (re *Engine) shouldReplaceRedaction(new, existing Redaction) bool {
+	newLength := new.End - new.Start
+	existingLength := existing.End - existing.Start
+	
+	// Prefer longer matches
+	if newLength != existingLength {
+		return newLength > existingLength
+	}
+	
+	// If same length, prefer by type priority (UK-specific types have higher priority)
+	newPriority := re.getTypePriority(new.Type)
+	existingPriority := re.getTypePriority(existing.Type)
+	
+	return newPriority > existingPriority
+}
+
+// getTypePriority returns priority for redaction types (higher = more important)
+func (re *Engine) getTypePriority(redactionType Type) int {
+	// UK-specific types get higher priority
+	switch redactionType {
+	case TypeUKNationalInsurance, TypeUKNHSNumber, TypeUKPassportNumber:
+		return 100 // Very high priority
+	case TypeUKDrivingLicense, TypeUKIBAN, TypeUKSortCode:
+		return 90 // High priority
+	case TypeUKPhoneNumber, TypeUKMobileNumber, TypeUKCompanyNumber:
+		return 80 // Medium-high priority
+	case TypeUKPostcode:
+		return 70 // Medium priority
+	case TypeSSN, TypeCreditCard:
+		return 60 // Standard high priority
+	case TypeEmail, TypePhone:
+		return 50 // Standard medium priority
+	case TypeIPAddress, TypeDate, TypeTime:
+		return 40 // Lower priority
+	default:
+		return 30 // Default priority
+	}
 }
 
 // applyCustomPatterns applies custom patterns to the redaction result
