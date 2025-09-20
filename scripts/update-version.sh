@@ -191,9 +191,10 @@ All notable changes to this project will be documented in this file.
 
 EOF
     
-    # Append existing changelog content (skip first line if it's just "# Changelog")
+    # Append existing changelog content (skip header lines)
     if [[ -s "$file" ]]; then
-        tail -n +2 "$file" >> "$temp_file"
+        # Skip the header lines: "# Changelog" and "All notable changes..." and empty lines
+        tail -n +2 "$file" | sed '/^All notable changes to this project will be documented in this file\.$/d' | sed '/^$/d' >> "$temp_file"
     fi
     
     mv "$temp_file" "$file"
