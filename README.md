@@ -29,6 +29,8 @@ A powerful, extensible redaction library for Go that provides comprehensive PII/
 - **Thread-safe**: Concurrent-safe implementations
 - **Caching**: Intelligent caching for performance optimization
 - **Resource Management**: Proper cleanup and resource handling
+- **Overlap Resolution**: Advanced conflict resolution for overlapping redactions
+- **Comprehensive Testing**: Extensive test coverage for edge cases and complex scenarios
 
 ## Quick Start
 
@@ -166,6 +168,7 @@ func main() {
 
 ## Supported Redaction Types
 
+### Global Patterns
 - **Email addresses**: `john@example.com`
 - **Phone numbers**: `(555) 123-4567`, `555-123-4567`
 - **Social Security Numbers**: `123-45-6789`
@@ -178,6 +181,18 @@ func main() {
 - **Hash values**: MD5, SHA1, SHA256
 - **GUIDs/UUIDs**: `550e8400-e29b-41d4-a716-446655440000`
 - **Custom patterns**: User-defined regex patterns
+
+### UK-Specific Patterns
+- **National Insurance Numbers**: `AB123456C`
+- **NHS Numbers**: `123 456 7890`, `NHS: 1234567890`
+- **UK Postcodes**: `SW1A 1AA`, `M1 1AA`
+- **UK Phone Numbers**: `+44 20 1234 5678`
+- **UK Mobile Numbers**: `07123456789`
+- **UK Sort Codes**: `12-34-56`
+- **UK IBAN**: `GB82 WEST 1234 5698 7654 32`
+- **UK Company Numbers**: `12345678`
+- **UK Driving License**: `MORGA657054SM9IJ`
+- **UK Passport Numbers**: `123456789`
 
 ## Redaction Modes
 
@@ -293,6 +308,46 @@ redactctl redact --pattern "ID-\d{6}" --mode mask "User ID-123456"
 # Interactive mode
 redactctl interactive
 ```
+
+## Recent Improvements
+
+### Bug Fixes & Enhancements
+
+#### ✅ **Overlapping Redactions Resolution (v0.1.1)**
+Fixed a critical bug in the `resolveOverlappingRedactions` function that could leave unresolved overlaps when a redaction conflicted with multiple existing redactions.
+
+**What was fixed:**
+- Removed premature `break` statement that prevented checking all overlaps
+- Implemented comprehensive multi-overlap evaluation logic
+- Added proper conflict resolution based on length and type priority
+- Enhanced test coverage with complex overlapping scenarios
+
+**Impact:**
+- Ensures accurate text replacement in all scenarios
+- Prevents data leakage from unresolved overlapping patterns
+- Improves reliability for complex documents with multiple PII types
+
+**Example of improved behavior:**
+```go
+// Before: Could miss overlaps, leading to incorrect redaction
+text := "Contact: john@company.com, Phone: +44 20 1234 5678, ID: AB123456C"
+
+// After: All overlaps properly resolved with correct priority
+// UK-specific patterns take precedence over generic ones
+// Longer matches win over shorter ones
+result := engine.RedactText(context.Background(), &redaction.Request{Text: text})
+// Result: "Contact: [EMAIL_REDACTED], Phone: [UK_PHONE_NUMBER_REDACTED], ID: [UK_NATIONAL_INSURANCE_REDACTED]"
+```
+
+#### 🔧 **Enhanced UK Pattern Support**
+- Added comprehensive UK-specific redaction patterns
+- Improved pattern priority system for regional compliance
+- Enhanced test coverage for UK GDPR compliance scenarios
+
+#### 📊 **Improved Testing Framework**
+- Added comprehensive test cases for overlapping redaction scenarios
+- Enhanced edge case coverage for complex pattern conflicts
+- Improved validation for multi-pattern documents
 
 ## Contributing
 
