@@ -15,12 +15,13 @@ linters:
     - misspell
     - revive
 
-revive:
-  rules:
-    - name: package-comments
-    - name: exported
-    - name: redefines-builtin-id
-    - name: empty-block
-    - name: unused-parameter
-    - name: var-declaration
-    - name: indent-error-flow
+linters-settings:
+  revive:
+    rules:
+      - name: package-comments
+      - name: exported
+      - name: redefines-builtin-id
+      - name: empty-block
+      - name: unused-parameter
+      - name: var-declaration
+      - name: indent-error-flow
