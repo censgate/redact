@@ -6,7 +6,6 @@ run:
   go: "1.25"
 
 linters:
-  disable-all: true
   enable:
     - govet
     - errcheck
@@ -16,13 +15,12 @@ linters:
     - misspell
     - revive
 
-linters-settings:
-  revive:
-    rules:
-      - name: package-comments
-      - name: exported
-      - name: redefines-builtin-id
-      - name: empty-block
-      - name: unused-parameter
-      - name: var-declaration
-      - name: indent-error-flow
+revive:
+  rules:
+    - name: package-comments
+    - name: exported
+    - name: redefines-builtin-id
+    - name: empty-block
+    - name: unused-parameter
+    - name: var-declaration
+    - name: indent-error-flow
