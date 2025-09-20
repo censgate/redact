@@ -12,7 +12,6 @@ type ProviderType string
 const (
 	ProviderTypeBasic       ProviderType = "basic"
 	ProviderTypePolicyAware ProviderType = "policy_aware"
-	ProviderTypeTenantAware ProviderType = "tenant_aware"
 	ProviderTypeLLM         ProviderType = "llm"
 )
 
@@ -21,8 +20,8 @@ type ProviderConfig struct {
 	Type          ProviderType  `json:"type"`
 	MaxTextLength int           `json:"max_text_length,omitempty"`
 	DefaultTTL    time.Duration `json:"default_ttl,omitempty"`
-	PolicyStore   PolicyStore   `json:"-"` // Not serializable
-	LLMConfig     *LLMConfig    `json:"llm_config,omitempty"`
+	// PolicyStore would be added when policy functionality is implemented
+	LLMConfig *LLMConfig `json:"llm_config,omitempty"`
 }
 
 // LLMConfig holds configuration for LLM-based redaction providers
@@ -77,8 +76,6 @@ func (factory *ProviderFactory) CreateProvider(providerType ProviderType, config
 		return factory.createBasicProvider(finalConfig)
 	case ProviderTypePolicyAware:
 		return factory.createPolicyAwareProvider(finalConfig)
-	case ProviderTypeTenantAware:
-		return factory.createTenantAwareProvider(finalConfig)
 	case ProviderTypeLLM:
 		return factory.createLLMProvider(finalConfig)
 	default:
@@ -106,21 +103,6 @@ func (factory *ProviderFactory) CreatePolicyAwareProvider(config *ProviderConfig
 	return policyProvider, nil
 }
 
-// CreateTenantAwareProvider creates a tenant-aware redaction provider
-func (factory *ProviderFactory) CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareProvider, error) {
-	provider, err := factory.CreateProvider(ProviderTypeTenantAware, config)
-	if err != nil {
-		return nil, err
-	}
-
-	tenantProvider, ok := provider.(TenantAwareProvider)
-	if !ok {
-		return nil, fmt.Errorf("provider does not implement TenantAwareProvider interface")
-	}
-
-	return tenantProvider, nil
-}
-
 // CreateLLMProvider creates an LLM-based redaction provider
 func (factory *ProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMProvider, error) {
 	provider, err := factory.CreateProvider(ProviderTypeLLM, config)
@@ -140,8 +122,7 @@ func (factory *ProviderFactory) CreateLLMProvider(config *ProviderConfig) (LLMPr
 func (factory *ProviderFactory) GetSupportedProviderTypes() []ProviderType {
 	return []ProviderType{
 		ProviderTypeBasic,
-		ProviderTypePolicyAware,
-		ProviderTypeTenantAware,
+		ProviderTypePolicyAware, // Policy-aware implementation with rule validation and conditional redaction
 		// ProviderTypeLLM, // Commented out until implemented
 	}
 }
@@ -197,8 +178,8 @@ func (factory *ProviderFactory) mergeConfig(config *ProviderConfig) *ProviderCon
 		Type:          config.Type,
 		MaxTextLength: config.MaxTextLength,
 		DefaultTTL:    config.DefaultTTL,
-		PolicyStore:   config.PolicyStore,
-		LLMConfig:     config.LLMConfig,
+		// PolicyStore would be set when policy functionality is implemented
+		LLMConfig: config.LLMConfig,
 	}
 
 	// Apply defaults for zero values
@@ -224,12 +205,8 @@ func (factory *ProviderFactory) createBasicProvider(config *ProviderConfig) (Pro
 
 // createPolicyAwareProvider creates a policy-aware redaction engine
 func (factory *ProviderFactory) createPolicyAwareProvider(config *ProviderConfig) (Provider, error) {
-	return NewPolicyAwareEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
-}
-
-// createTenantAwareProvider creates a tenant-aware redaction engine
-func (factory *ProviderFactory) createTenantAwareProvider(config *ProviderConfig) (Provider, error) {
-	return NewTenantAwareEngineWithConfig(config.MaxTextLength, config.DefaultTTL, config.PolicyStore), nil
+	// Engine now directly implements PolicyAwareEngine interface
+	return NewEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
 }
 
 // createLLMProvider creates an LLM-based redaction provider (placeholder)
@@ -272,9 +249,4 @@ func CreateBasicProvider(config *ProviderConfig) (Provider, error) {
 // CreatePolicyAwareProvider creates a policy-aware redaction provider using the default factory
 func CreatePolicyAwareProvider(config *ProviderConfig) (PolicyAwareProvider, error) {
 	return DefaultFactory.CreatePolicyAwareProvider(config)
-}
-
-// CreateTenantAwareProvider creates a tenant-aware redaction provider using the default factory
-func CreateTenantAwareProvider(config *ProviderConfig) (TenantAwareProvider, error) {
-	return DefaultFactory.CreateTenantAwareProvider(config)
 }

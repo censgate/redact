@@ -263,8 +263,8 @@ func TestRedactionStats(t *testing.T) {
 	}
 
 	t.Logf("Actual patterns: %v", stats["active_patterns"])
-	if stats["active_patterns"] != 19 { // Default patterns (19 types initialized)
-		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
+	if stats["active_patterns"] != 29 { // Default patterns (19 original + 10 UK patterns)
+		t.Errorf("Expected 29 active patterns, got %v", stats["active_patterns"])
 	}
 
 	tokensByType, ok := stats["tokens_by_type"].(map[Type]int)
@@ -348,7 +348,280 @@ func TestInvalidCustomPattern(t *testing.T) {
 
 	// Verify pattern wasn't added
 	stats := engine.GetRedactionStats()
-	if stats["active_patterns"] != 19 { // Should still be default patterns
-		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
+	if stats["active_patterns"] != 29 { // Should still be default patterns (19 original + 10 UK patterns)
+		t.Errorf("Expected 29 active patterns, got %v", stats["active_patterns"])
 	}
+}
+
+// TestUKRedactionReplacements tests that UK-specific redaction types generate correct replacement text
+func TestUKRedactionReplacements(t *testing.T) {
+	engine := NewEngine()
+
+	testCases := []struct {
+		name            string
+		text            string
+		expectedType    Type
+		expectedReplace string
+	}{
+		{
+			name:            "UK National Insurance replacement",
+			text:            "NI: AB123456C",
+			expectedType:    TypeUKNationalInsurance,
+			expectedReplace: "[UK_NATIONAL_INSURANCE_REDACTED]",
+		},
+		// Note: NHS Number replacement is tested in TestGenerateReplacementMethod
+		// to avoid conflicts with phone number patterns in integration tests
+		{
+			name:            "UK Postcode replacement",
+			text:            "Address: SW1A 1AA",
+			expectedType:    TypeUKPostcode,
+			expectedReplace: "[UK_POSTCODE_REDACTED]",
+		},
+		{
+			name:            "UK Phone Number replacement",
+			text:            "Call +44 20 1234 5678",
+			expectedType:    TypeUKPhoneNumber,
+			expectedReplace: "[UK_PHONE_NUMBER_REDACTED]",
+		},
+		{
+			name:            "UK Mobile Number replacement",
+			text:            "Mobile: 07123456789",
+			expectedType:    TypeUKMobileNumber,
+			expectedReplace: "[UK_MOBILE_NUMBER_REDACTED]",
+		},
+		{
+			name:            "UK Sort Code replacement",
+			text:            "Sort: 12-34-56",
+			expectedType:    TypeUKSortCode,
+			expectedReplace: "[UK_SORT_CODE_REDACTED]",
+		},
+		{
+			name:            "UK IBAN replacement",
+			text:            "IBAN: GB82 WEST 1234 5698 7654 32",
+			expectedType:    TypeUKIBAN,
+			expectedReplace: "[UK_IBAN_REDACTED]",
+		},
+		{
+			name:            "UK Company Number replacement",
+			text:            "Company No: 12345678",
+			expectedType:    TypeUKCompanyNumber,
+			expectedReplace: "[UK_COMPANY_NUMBER_REDACTED]",
+		},
+		{
+			name:            "UK Driving License replacement",
+			text:            "License: MORGA657054SM9IJ",
+			expectedType:    TypeUKDrivingLicense,
+			expectedReplace: "[UK_DRIVING_LICENSE_REDACTED]",
+		},
+		{
+			name:            "UK Passport Number replacement",
+			text:            "Passport No: 123456789",
+			expectedType:    TypeUKPassportNumber,
+			expectedReplace: "[UK_PASSPORT_NUMBER_REDACTED]",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := engine.RedactText(context.Background(), &Request{
+				Text: tc.text,
+				Mode: ModeReplace,
+			})
+			if err != nil {
+				t.Fatalf("RedactText failed: %v", err)
+			}
+
+			// Find the specific redaction type we're testing
+			found := false
+			for _, redaction := range result.Redactions {
+				if redaction.Type == tc.expectedType {
+					found = true
+					if redaction.Replacement != tc.expectedReplace {
+						t.Errorf("Expected replacement '%s', got '%s'", tc.expectedReplace, redaction.Replacement)
+					}
+
+					// Verify the replacement appears in the redacted text
+					if !strings.Contains(result.RedactedText, tc.expectedReplace) {
+						t.Errorf("Expected redacted text to contain '%s', but it was: %s", tc.expectedReplace, result.RedactedText)
+					}
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("Expected to find redaction of type %s, but found types: %v", tc.expectedType, getRedactionTypes(result.Redactions))
+			}
+		})
+	}
+}
+
+// TestGenerateReplacementMethod tests the generateReplacement method directly for all UK types
+func TestGenerateReplacementMethod(t *testing.T) {
+	engine := NewEngine()
+
+	testCases := []struct {
+		redactionType Type
+		expected      string
+	}{
+		{TypeUKNationalInsurance, "[UK_NATIONAL_INSURANCE_REDACTED]"},
+		{TypeUKNHSNumber, "[UK_NHS_NUMBER_REDACTED]"},
+		{TypeUKPostcode, "[UK_POSTCODE_REDACTED]"},
+		{TypeUKPhoneNumber, "[UK_PHONE_NUMBER_REDACTED]"},
+		{TypeUKMobileNumber, "[UK_MOBILE_NUMBER_REDACTED]"},
+		{TypeUKSortCode, "[UK_SORT_CODE_REDACTED]"},
+		{TypeUKIBAN, "[UK_IBAN_REDACTED]"},
+		{TypeUKCompanyNumber, "[UK_COMPANY_NUMBER_REDACTED]"},
+		{TypeUKDrivingLicense, "[UK_DRIVING_LICENSE_REDACTED]"},
+		{TypeUKPassportNumber, "[UK_PASSPORT_NUMBER_REDACTED]"},
+		// Test original types still work
+		{TypeEmail, "[EMAIL_REDACTED]"},
+		{TypePhone, "[PHONE_REDACTED]"},
+		{TypeCreditCard, "[CREDIT_CARD_REDACTED]"},
+		// Test default fallback for unknown types
+		{Type("unknown_type"), "[REDACTED]"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(string(tc.redactionType), func(t *testing.T) {
+			replacement := engine.generateReplacement(tc.redactionType, "dummy_original")
+			if replacement != tc.expected {
+				t.Errorf("For type %s, expected '%s', got '%s'", tc.redactionType, tc.expected, replacement)
+			}
+		})
+	}
+}
+
+// TestOverlappingRedactions tests the fix for the overlapping redactions bug
+func TestOverlappingRedactions(t *testing.T) {
+	engine := NewEngine()
+
+	t.Run("Multiple overlaps resolved correctly", func(t *testing.T) {
+		// Create a scenario where one redaction overlaps with multiple existing ones
+		// This tests the specific bug where the break statement prevented checking all overlaps
+
+		// Create test redactions that will overlap
+		redactions := []Redaction{
+			{Type: TypeEmail, Start: 0, End: 10, Original: "test@email", Replacement: "[EMAIL]"},
+			{Type: TypePhone, Start: 15, End: 25, Original: "1234567890", Replacement: "[PHONE]"},         // Overlaps with SSN
+			{Type: TypeSSN, Start: 20, End: 30, Original: "123456789", Replacement: "[SSN]"},              // Overlaps with phone and credit card
+			{Type: TypeCreditCard, Start: 25, End: 42, Original: "4444555566667777", Replacement: "[CC]"}, // Overlaps with SSN
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		// The credit card redaction (longest) should win and replace both phone and SSN
+		// Email should remain as it doesn't overlap with any others
+		if len(resolved) != 2 {
+			t.Errorf("Expected 2 resolved redactions, got %d", len(resolved))
+			for i, r := range resolved {
+				t.Logf("Resolved[%d]: Type=%s, Start=%d, End=%d", i, r.Type, r.Start, r.End)
+			}
+		}
+
+		// Check that we have email and credit card (the winners)
+		hasEmail := false
+		hasCreditCard := false
+		for _, r := range resolved {
+			if r.Type == TypeEmail {
+				hasEmail = true
+			}
+			if r.Type == TypeCreditCard {
+				hasCreditCard = true
+			}
+		}
+
+		if !hasEmail {
+			t.Error("Expected email redaction to be preserved")
+		}
+		if !hasCreditCard {
+			t.Error("Expected credit card redaction to win over overlapping phone and SSN")
+		}
+	})
+
+	t.Run("Priority-based resolution", func(t *testing.T) {
+		// Test that UK-specific types have higher priority
+		redactions := []Redaction{
+			{Type: TypePhone, Start: 0, End: 15, Original: "+44 20 1234 5678", Replacement: "[PHONE]"},
+			{Type: TypeUKPhoneNumber, Start: 0, End: 15, Original: "+44 20 1234 5678", Replacement: "[UK_PHONE]"},
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		if len(resolved) != 1 {
+			t.Errorf("Expected 1 resolved redaction, got %d", len(resolved))
+		}
+
+		if resolved[0].Type != TypeUKPhoneNumber {
+			t.Errorf("Expected UK phone number to win over generic phone, got %s", resolved[0].Type)
+		}
+	})
+
+	t.Run("Length-based resolution", func(t *testing.T) {
+		// Test that longer matches win over shorter ones
+		redactions := []Redaction{
+			{Type: TypeZipCode, Start: 0, End: 5, Original: "12345", Replacement: "[ZIP]"},
+			{Type: TypeSSN, Start: 0, End: 11, Original: "123-45-6789", Replacement: "[SSN]"}, // Longer match
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		if len(resolved) != 1 {
+			t.Errorf("Expected 1 resolved redaction, got %d", len(resolved))
+		}
+
+		if resolved[0].Type != TypeSSN {
+			t.Errorf("Expected SSN (longer match) to win over ZIP code, got %s", resolved[0].Type)
+		}
+	})
+
+	t.Run("No overlaps - all preserved", func(t *testing.T) {
+		// Test that non-overlapping redactions are all preserved
+		redactions := []Redaction{
+			{Type: TypeEmail, Start: 0, End: 10, Original: "test@email", Replacement: "[EMAIL]"},
+			{Type: TypePhone, Start: 15, End: 25, Original: "1234567890", Replacement: "[PHONE]"},
+			{Type: TypeSSN, Start: 30, End: 40, Original: "123456789", Replacement: "[SSN]"},
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		if len(resolved) != 3 {
+			t.Errorf("Expected 3 resolved redactions (no overlaps), got %d", len(resolved))
+		}
+	})
+
+	t.Run("Chain of overlaps", func(t *testing.T) {
+		// Test a chain where A overlaps B, B overlaps C, etc.
+		redactions := []Redaction{
+			{Type: TypeEmail, Start: 0, End: 10, Original: "test@email", Replacement: "[EMAIL]"},
+			{Type: TypePhone, Start: 8, End: 18, Original: "1234567890", Replacement: "[PHONE]"},          // Overlaps with email
+			{Type: TypeSSN, Start: 16, End: 26, Original: "123456789", Replacement: "[SSN]"},              // Overlaps with phone
+			{Type: TypeCreditCard, Start: 24, End: 40, Original: "4444555566667777", Replacement: "[CC]"}, // Overlaps with SSN
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		// Each should win based on length and priority rules
+		// This tests that the fix correctly handles the chain without the break statement issue
+		if len(resolved) == 0 {
+			t.Error("Expected at least one resolved redaction")
+		}
+
+		// Verify no overlaps remain in the final result
+		for i := 0; i < len(resolved); i++ {
+			for j := i + 1; j < len(resolved); j++ {
+				if engine.redactionsOverlap(resolved[i], resolved[j]) {
+					t.Errorf("Found overlapping redactions in final result: %v and %v", resolved[i], resolved[j])
+				}
+			}
+		}
+	})
+}
+
+// Helper function to extract redaction types from results
+func getRedactionTypes(redactions []Redaction) []Type {
+	types := make([]Type, len(redactions))
+	for i, r := range redactions {
+		types[i] = r.Type
+	}
+	return types
 }

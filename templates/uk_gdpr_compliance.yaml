@@ -1,0 +1,286 @@
+apiVersion: v1
+kind: ComplianceTemplate
+metadata:
+  name: uk-gdpr-compliance
+  description: "UK GDPR and Data Protection Act 2018 compliance template"
+  version: "1.0.0"
+  region: "UK"
+  frameworks: ["uk_gdpr", "data_protection_act_2018", "pecr"]
+  created_at: "2025-09-14T18:00:00Z"
+  updated_at: "2025-09-14T18:00:00Z"
+
+spec:
+  # Required redaction patterns for UK compliance
+  redaction_patterns:
+    uk_identifiers:
+      - name: uk-national-insurance
+        type: uk_national_insurance
+        pattern: '\b[A-Z]{2}\d{6}[A-D]\b'
+        sensitivity: very_high
+        mode: tokenize
+        description: "UK National Insurance Number"
+        examples: ["AB123456C", "JK987654A"]
+        
+      - name: uk-nhs-number
+        type: uk_nhs_number
+        pattern: '\b\d{3}\s?\d{3}\s?\d{4}\b'
+        sensitivity: very_high
+        mode: encrypt
+        description: "UK NHS Number"
+        examples: ["123 456 7890", "1234567890"]
+        
+      - name: uk-postcode
+        type: uk_postcode
+        pattern: '\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b'
+        sensitivity: medium
+        mode: mask
+        description: "UK Postcode"
+        examples: ["SW1A 1AA", "M1 1AA", "B33 8TH"]
+        
+      - name: uk-phone-numbers
+        type: uk_phone_number
+        pattern: '\+44\s?\d{2,4}\s?\d{3,4}\s?\d{3,4}'
+        sensitivity: high
+        mode: tokenize
+        description: "UK Phone Numbers (International format)"
+        examples: ["+44 20 1234 5678", "+44 161 123 4567"]
+        
+      - name: uk-mobile-numbers
+        type: uk_mobile_number
+        pattern: '\b07\d{9}\b|07\s?\d{3}\s?\d{3}\s?\d{3}'
+        sensitivity: high
+        mode: tokenize
+        description: "UK Mobile Numbers"
+        examples: ["07123456789", "07 123 456 789"]
+        
+      - name: uk-financial-data
+        type: uk_sort_code
+        pattern: '\b\d{2}-\d{2}-\d{2}\b'
+        sensitivity: very_high
+        mode: encrypt
+        description: "UK Bank Sort Code"
+        examples: ["12-34-56", "98-76-54"]
+        
+      - name: uk-iban
+        type: uk_iban
+        pattern: '\bGB\d{2}\s?[A-Z]{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{2}\b'
+        sensitivity: very_high
+        mode: encrypt
+        description: "UK IBAN"
+        examples: ["GB82 WEST 1234 5698 7654 32"]
+        
+      - name: uk-company-number
+        type: uk_company_number
+        pattern: '\b(?:Company\s+(?:No\.?|Number)\s*:?\s*)?\d{8}\b'
+        sensitivity: medium
+        mode: mask
+        description: "UK Company Number"
+        examples: ["Company No: 12345678", "12345678"]
+        
+      - name: uk-driving-license
+        type: uk_driving_license
+        pattern: '\b[A-Z]{5}\d{6}[A-Z]{2}\d[A-Z]{2}\b'
+        sensitivity: high
+        mode: tokenize
+        description: "UK Driving License Number"
+        examples: ["MORGA657054SM9IJ"]
+        
+      - name: uk-passport-number
+        type: uk_passport_number
+        pattern: '\b(?:Passport\s+(?:No\.?|Number)\s*:?\s*)?\d{9}\b'
+        sensitivity: very_high
+        mode: encrypt
+        description: "UK Passport Number"
+        examples: ["Passport No: 123456789", "123456789"]
+
+    # Standard PII patterns still apply
+    standard_pii:
+      - name: email-addresses
+        type: email
+        sensitivity: high
+        mode: tokenize
+        
+      - name: credit-card-numbers
+        type: credit_card
+        sensitivity: very_high
+        mode: encrypt
+        
+      - name: ip-addresses
+        type: ip_address
+        sensitivity: medium
+        mode: mask
+
+  # Compliance rules specific to UK GDPR
+  compliance_rules:
+    - name: uk-gdpr-lawful-basis
+      description: "Ensure lawful basis for processing personal data"
+      framework: uk_gdpr
+      validation_required: true
+      audit_required: true
+      
+    - name: data-minimization
+      description: "Process only necessary personal data"
+      framework: uk_gdpr
+      enforcement: strict
+      
+    - name: consent-management
+      description: "Validate and record consent for data processing"
+      framework: uk_gdpr
+      audit_required: true
+      consent_tracking: enabled
+      
+    - name: right-to-erasure
+      description: "Support data subject's right to erasure"
+      framework: uk_gdpr
+      reversible_redaction: required
+      deletion_support: enabled
+      
+    - name: data-portability
+      description: "Support data subject's right to data portability"
+      framework: uk_gdpr
+      export_support: enabled
+      
+    - name: privacy-by-design
+      description: "Implement privacy by design principles"
+      framework: uk_gdpr
+      default_redaction: enabled
+      
+    - name: ico-compliance
+      description: "Comply with ICO (Information Commissioner's Office) requirements"
+      framework: uk_gdpr
+      reporting_required: true
+      breach_notification: enabled
+
+  # Audit and logging requirements
+  audit_requirements:
+    retention_period: "6_years"  # UK legal requirement
+    fields: 
+      - timestamp
+      - user_id
+      - data_type
+      - legal_basis
+      - consent_status
+      - processing_purpose
+      - data_subject_rights
+    ico_reporting: enabled
+    breach_detection: enabled
+    access_logging: comprehensive
+    
+  # Data transfer rules for UK
+  data_transfer_rules:
+    adequacy_decisions: ["eu", "approved_countries"]
+    safeguards_required: true
+    bcr_compliance: enabled  # Binding Corporate Rules
+    transfer_impact_assessment: required
+    
+  # UK-specific processing rules
+  processing_rules:
+    special_category_data:
+      enabled: true
+      additional_safeguards: required
+      explicit_consent: required
+      
+    children_data:
+      age_verification: required
+      parental_consent: required_under_13
+      enhanced_protection: enabled
+      
+    automated_decision_making:
+      profiling_detection: enabled
+      human_review_required: true
+      explanation_rights: enabled
+
+  # Performance and operational settings
+  performance_settings:
+    max_processing_time: "200ms"
+    concurrent_processing: enabled
+    caching_enabled: true
+    cache_ttl: "5m"
+    
+  # Notification settings
+  notifications:
+    data_breach:
+      ico_notification: "72_hours"
+      data_subject_notification: "without_undue_delay"
+      severity_threshold: "high_risk"
+      
+    consent_expiry:
+      advance_warning: "30_days"
+      automatic_renewal: disabled
+      
+    access_requests:
+      response_time: "1_month"
+      extension_allowed: "2_months"
+      complexity_threshold: "high"
+
+  # Integration settings
+  integration:
+    ico_api: enabled
+    consent_management_platform: required
+    data_mapping_tools: enabled
+    privacy_dashboard: enabled
+    
+  # Monitoring and metrics
+  monitoring:
+    compliance_score: enabled
+    data_subject_requests: tracked
+    consent_rates: monitored
+    breach_incidents: logged
+    processing_volumes: measured
+    
+  # Default configurations for different use cases
+  use_case_defaults:
+    healthcare:
+      additional_patterns: [uk_nhs_number]
+      sensitivity_boost: 0.2
+      encryption_required: true
+      
+    financial_services:
+      additional_patterns: [uk_sort_code, uk_iban]
+      pci_compliance: enabled
+      transaction_logging: comprehensive
+      
+    education:
+      additional_patterns: [uk_postcode]
+      children_protection: enhanced
+      parental_consent: required
+      
+    employment:
+      additional_patterns: [uk_national_insurance, uk_driving_license]
+      employee_rights: enhanced
+      workplace_monitoring: regulated
+      
+    public_sector:
+      additional_patterns: [uk_nhs_number, uk_national_insurance]
+      transparency_requirements: enhanced
+      foi_compliance: enabled  # Freedom of Information
+
+# Template validation rules
+validation:
+  required_patterns:
+    - uk_national_insurance
+    - uk_postcode
+    - email
+    
+  minimum_sensitivity_levels:
+    uk_national_insurance: very_high
+    uk_nhs_number: very_high
+    uk_passport_number: very_high
+    
+  mandatory_features:
+    - consent_management
+    - audit_logging
+    - data_subject_rights
+    - breach_notification
+
+# Template metadata for management
+management:
+  template_id: "uk-gdpr-v1.0"
+  certification: "ico_reviewed"
+  legal_review_date: "2025-09-14"
+  next_review_date: "2026-09-14"
+  change_log:
+    - version: "1.0.0"
+      date: "2025-09-14"
+      changes: "Initial UK GDPR compliance template"
+      reviewer: "Legal Team"

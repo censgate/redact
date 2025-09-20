@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/censgate/redact)](https://goreportcard.com/report/github.com/censgate/redact)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A powerful, extensible redaction library for Go that provides comprehensive PII/PHI detection and redaction capabilities with policy-aware and multi-tenant support.
+A powerful, extensible redaction library for Go that provides comprehensive PII/PHI detection and redaction capabilities with policy-aware support.
 
 ## Features
 
@@ -24,15 +24,13 @@ A powerful, extensible redaction library for Go that provides comprehensive PII/
 - **Conditional Redaction**: Context-based rule application
 - **Priority Processing**: Ordered rule evaluation for consistent results
 
-### 🏢 Multi-tenant Support
-- **Tenant Isolation**: Per-tenant redaction policies and configurations
-- **Policy Inheritance**: Base policies with tenant-specific overrides
-- **Pluggable Storage**: Abstract storage interface for policy persistence
 
 ### 🚀 Performance & Reliability
 - **Thread-safe**: Concurrent-safe implementations
 - **Caching**: Intelligent caching for performance optimization
 - **Resource Management**: Proper cleanup and resource handling
+- **Overlap Resolution**: Advanced conflict resolution for overlapping redactions
+- **Comprehensive Testing**: Extensive test coverage for edge cases and complex scenarios
 
 ## Quick Start
 
@@ -120,7 +118,7 @@ func main() {
 }
 ```
 
-### Multi-tenant Usage
+### Policy-aware Usage
 
 ```go
 package main
@@ -133,20 +131,17 @@ import (
 )
 
 func main() {
-    // Create tenant-aware provider
-    factory := redaction.NewRedactionProviderFactory()
-    provider, err := factory.CreateTenantAwareProvider(&redaction.ProviderConfig{
-        Type:        redaction.ProviderTypeTenantAware,
-        PolicyStore: redaction.NewInMemoryPolicyStore(),
+    // Create policy-aware provider
+    factory := redaction.NewProviderFactory()
+    provider, err := factory.CreatePolicyAwareProvider(&redaction.ProviderConfig{
+        Type:        redaction.ProviderTypePolicyAware,
     })
     if err != nil {
         log.Fatal(err)
     }
     
-    // Set tenant policy
-    tenantPolicy := &redaction.TenantPolicy{
-        TenantID:    "tenant-123",
-        Name:        "Healthcare Policy",
+    // Create a basic redaction request
+    request := &redaction.Request{
         DefaultMode: redaction.ModeHash,
         Rules: []redaction.PolicyRule{
             {
@@ -157,30 +152,23 @@ func main() {
                 Enabled:  true,
             },
         },
-        ComplianceReqs: []string{"HIPAA"},
-    }
-    
-    err = provider.SetTenantPolicy(context.Background(), "tenant-123", tenantPolicy)
-    if err != nil {
-        log.Fatal(err)
-    }
-    
-    // Perform tenant-specific redaction
-    request := &redaction.RedactionRequest{
         Text: "Patient email: patient@hospital.com",
+        Mode: redaction.ModeReplace,
     }
     
-    result, err := provider.RedactForTenant(context.Background(), "tenant-123", request)
+    // Perform policy-aware redaction
+    result, err := provider.RedactText(context.Background(), request)
     if err != nil {
         log.Fatal(err)
     }
     
-    fmt.Printf("Tenant-redacted: %s\n", result.RedactedText)
+    fmt.Printf("Policy-redacted: %s\n", result.RedactedText)
 }
 ```
 
 ## Supported Redaction Types
 
+### Global Patterns
 - **Email addresses**: `john@example.com`
 - **Phone numbers**: `(555) 123-4567`, `555-123-4567`
 - **Social Security Numbers**: `123-45-6789`
@@ -193,6 +181,18 @@ func main() {
 - **Hash values**: MD5, SHA1, SHA256
 - **GUIDs/UUIDs**: `550e8400-e29b-41d4-a716-446655440000`
 - **Custom patterns**: User-defined regex patterns
+
+### UK-Specific Patterns
+- **National Insurance Numbers**: `AB123456C`
+- **NHS Numbers**: `123 456 7890`, `NHS: 1234567890`
+- **UK Postcodes**: `SW1A 1AA`, `M1 1AA`
+- **UK Phone Numbers**: `+44 20 1234 5678`
+- **UK Mobile Numbers**: `07123456789`
+- **UK Sort Codes**: `12-34-56`
+- **UK IBAN**: `GB82 WEST 1234 5698 7654 32`
+- **UK Company Numbers**: `12345678`
+- **UK Driving License**: `MORGA657054SM9IJ`
+- **UK Passport Numbers**: `123456789`
 
 ## Redaction Modes
 
@@ -211,16 +211,13 @@ func main() {
 ### Basic Provider
 - Standard pattern-based redaction
 - No policy support
-- Single-tenant
+- Single instance
 
 ### Policy-Aware Provider
 - Policy-driven redaction rules
 - Rule validation and conditional logic
 - Priority-based processing
 
-### Tenant-Aware Provider
-- Multi-tenant policy support
-- Per-tenant configurations
 - Policy inheritance
 
 ### LLM Provider (Coming Soon)
@@ -234,10 +231,9 @@ func main() {
 
 ```go
 config := &redaction.ProviderConfig{
-    Type:          redaction.ProviderTypeTenantAware,
+    Type:          redaction.ProviderTypeBasic,
     MaxTextLength: 2048 * 1024, // 2MB
     DefaultTTL:    48 * time.Hour,
-    PolicyStore:   customPolicyStore,
     LLMConfig: &redaction.LLMConfig{
         Provider:    "openai",
         Model:       "gpt-4",
@@ -279,15 +275,8 @@ type CustomPolicyStore struct {
     db *sql.DB
 }
 
-func (s *CustomPolicyStore) GetTenantPolicy(ctx context.Context, tenantID string) (*redaction.TenantPolicy, error) {
-    // Implementation for database storage
-    return policy, nil
-}
-
-func (s *CustomPolicyStore) SetTenantPolicy(ctx context.Context, tenantID string, policy *redaction.TenantPolicy) error {
-    // Implementation for database storage
-    return nil
-}
+// Custom policy store implementation methods would go here
+// for storing and retrieving redaction policies
 ```
 
 ### Statistics and Monitoring
@@ -319,6 +308,46 @@ redactctl redact --pattern "ID-\d{6}" --mode mask "User ID-123456"
 # Interactive mode
 redactctl interactive
 ```
+
+## Recent Improvements
+
+### Bug Fixes & Enhancements
+
+#### ✅ **Overlapping Redactions Resolution (v0.1.1)**
+Fixed a critical bug in the `resolveOverlappingRedactions` function that could leave unresolved overlaps when a redaction conflicted with multiple existing redactions.
+
+**What was fixed:**
+- Removed premature `break` statement that prevented checking all overlaps
+- Implemented comprehensive multi-overlap evaluation logic
+- Added proper conflict resolution based on length and type priority
+- Enhanced test coverage with complex overlapping scenarios
+
+**Impact:**
+- Ensures accurate text replacement in all scenarios
+- Prevents data leakage from unresolved overlapping patterns
+- Improves reliability for complex documents with multiple PII types
+
+**Example of improved behavior:**
+```go
+// Before: Could miss overlaps, leading to incorrect redaction
+text := "Contact: john@company.com, Phone: +44 20 1234 5678, ID: AB123456C"
+
+// After: All overlaps properly resolved with correct priority
+// UK-specific patterns take precedence over generic ones
+// Longer matches win over shorter ones
+result := engine.RedactText(context.Background(), &redaction.Request{Text: text})
+// Result: "Contact: [EMAIL_REDACTED], Phone: [UK_PHONE_NUMBER_REDACTED], ID: [UK_NATIONAL_INSURANCE_REDACTED]"
+```
+
+#### 🔧 **Enhanced UK Pattern Support**
+- Added comprehensive UK-specific redaction patterns
+- Improved pattern priority system for regional compliance
+- Enhanced test coverage for UK GDPR compliance scenarios
+
+#### 📊 **Improved Testing Framework**
+- Added comprehensive test cases for overlapping redaction scenarios
+- Enhanced edge case coverage for complex pattern conflicts
+- Improved validation for multi-pattern documents
 
 ## Contributing
 

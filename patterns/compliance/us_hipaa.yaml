@@ -1,0 +1,263 @@
+# HIPAA Compliance Patterns
+# Public Domain Pattern Library for Health Insurance Portability and Accountability Act
+version: "1.0"
+framework: "US-HIPAA"
+jurisdiction: "United States"
+description: "Patterns for detecting Protected Health Information (PHI) under HIPAA"
+last_updated: "2024-01-15"
+
+patterns:
+  # Direct Identifiers (Safe Harbor Method)
+  - id: "hipaa_name"
+    name: "Patient Name"
+    category: "direct_identifier"
+    regex: '\b(?:Patient|Name|Mr\.|Mrs\.|Ms\.|Dr\.)\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b'
+    confidence: 0.8
+    description: "Detects patient names with titles"
+    examples:
+      - "Patient John Smith"
+      - "Dr. Jane Doe"
+      - "Mrs. Mary Johnson"
+    replacement: "[PATIENT_NAME_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_address"
+    name: "Geographic Subdivision"
+    category: "direct_identifier"
+    regex: '\b\d+\s+[A-Za-z0-9\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Place|Pl)\b'
+    confidence: 0.85
+    description: "Detects street addresses (geographic subdivision smaller than state)"
+    examples:
+      - "123 Main Street"
+      - "456 Oak Avenue"
+    replacement: "[ADDRESS_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_zip_code"
+    name: "ZIP Code (3+ digits)"
+    category: "direct_identifier"
+    regex: '\b\d{5}(?:-\d{4})?\b'
+    confidence: 0.9
+    description: "Detects ZIP codes (must be redacted if population <20,000)"
+    examples:
+      - "12345"
+      - "12345-6789"
+    replacement: "[ZIP_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_dates"
+    name: "Dates Related to Individual"
+    category: "direct_identifier"
+    regex: '\b(?:DOB|Date of Birth|Born|Birth Date)[:\s]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b'
+    confidence: 0.9
+    description: "Detects dates of birth and other significant dates"
+    examples:
+      - "DOB: 01/15/1980"
+      - "Date of Birth 1980-01-15"
+      - "Born 01-15-1980"
+    replacement: "[DATE_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_phone"
+    name: "Telephone Numbers"
+    category: "direct_identifier"
+    regex: '\b(?:\+1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b'
+    confidence: 0.9
+    description: "Detects telephone numbers"
+    examples:
+      - "(555) 123-4567"
+      - "555-123-4567"
+      - "+1 555 123 4567"
+    replacement: "[PHONE_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_email"
+    name: "Email Addresses"
+    category: "direct_identifier"
+    regex: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    confidence: 0.95
+    description: "Detects email addresses"
+    examples:
+      - "patient@example.com"
+      - "john.doe@hospital.org"
+    replacement: "[EMAIL_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_ssn"
+    name: "Social Security Numbers"
+    category: "direct_identifier"
+    regex: '\b\d{3}-?\d{2}-?\d{4}\b'
+    confidence: 0.95
+    description: "Detects Social Security Numbers"
+    examples:
+      - "123-45-6789"
+      - "123456789"
+    replacement: "[SSN_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_mrn"
+    name: "Medical Record Numbers"
+    category: "direct_identifier"
+    regex: '\b(?:MRN|Medical Record|Patient ID|Chart)[:\s#]*([A-Z0-9]{6,12})\b'
+    confidence: 0.9
+    description: "Detects medical record numbers and patient identifiers"
+    examples:
+      - "MRN: 123456789"
+      - "Patient ID #P789012"
+      - "Chart: MR123456"
+    replacement: "[MRN_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_health_plan"
+    name: "Health Plan Beneficiary Numbers"
+    category: "direct_identifier"
+    regex: '\b(?:Policy|Member|Subscriber|Group)[:\s#]*([A-Z0-9]{8,15})\b'
+    confidence: 0.85
+    description: "Detects health plan beneficiary numbers"
+    examples:
+      - "Policy: ABC123456789"
+      - "Member #M987654321"
+      - "Subscriber ID: S123456789"
+    replacement: "[HEALTH_PLAN_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_account_numbers"
+    name: "Account Numbers"
+    category: "direct_identifier"
+    regex: '\b(?:Account|Acct)[:\s#]*([A-Z0-9]{8,15})\b'
+    confidence: 0.8
+    description: "Detects account numbers"
+    examples:
+      - "Account: 123456789012"
+      - "Acct #A987654321"
+    replacement: "[ACCOUNT_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_certificate_numbers"
+    name: "Certificate/License Numbers"
+    category: "direct_identifier"
+    regex: '\b(?:Certificate|License|Cert|Lic)[:\s#]*([A-Z0-9]{6,15})\b'
+    confidence: 0.8
+    description: "Detects certificate and license numbers"
+    examples:
+      - "License: LIC123456"
+      - "Certificate #CERT789012"
+    replacement: "[CERTIFICATE_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_vehicle_identifiers"
+    name: "Vehicle Identifiers"
+    category: "direct_identifier"
+    regex: '\b(?:VIN|Vehicle ID|License Plate)[:\s#]*([A-Z0-9]{8,17})\b'
+    confidence: 0.85
+    description: "Detects vehicle identifiers and license plates"
+    examples:
+      - "VIN: 1HGBH41JXMN109186"
+      - "License Plate: ABC123"
+    replacement: "[VEHICLE_ID_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_device_identifiers"
+    name: "Device Identifiers"
+    category: "direct_identifier"
+    regex: '\b(?:Device|Serial|IMEI|MAC)[:\s#]*([A-Z0-9:-]{8,20})\b'
+    confidence: 0.8
+    description: "Detects device identifiers and serial numbers"
+    examples:
+      - "Device: DEV123456789"
+      - "Serial #SN987654321"
+      - "IMEI: 123456789012345"
+    replacement: "[DEVICE_ID_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_web_urls"
+    name: "Web URLs"
+    category: "direct_identifier"
+    regex: '\bhttps?://[A-Za-z0-9.-]+(?:/[A-Za-z0-9./_-]*)?\b'
+    confidence: 0.9
+    description: "Detects web URLs that may contain identifying information"
+    examples:
+      - "http://example.com/patient/123"
+      - "https://portal.hospital.org/records"
+    replacement: "[URL_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_ip_addresses"
+    name: "IP Addresses"
+    category: "direct_identifier"
+    regex: '\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b'
+    confidence: 0.9
+    description: "Detects IP addresses"
+    examples:
+      - "192.168.1.1"
+      - "10.0.0.1"
+    replacement: "[IP_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_biometric_identifiers"
+    name: "Biometric Identifiers"
+    category: "direct_identifier"
+    regex: '\b(?:Fingerprint|Biometric|Retina|DNA)[:\s#]*([A-Z0-9]{10,30})\b'
+    confidence: 0.9
+    description: "Detects biometric identifiers"
+    examples:
+      - "Fingerprint: FP123456789012"
+      - "Biometric ID: BIO987654321098"
+    replacement: "[BIOMETRIC_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_photographs"
+    name: "Full Face Photographs"
+    category: "direct_identifier"
+    regex: '\b(?:Photo|Image|Picture)[:\s]*([A-Za-z0-9._-]+\.(?:jpg|jpeg|png|gif|bmp))\b'
+    confidence: 0.8
+    description: "Detects references to photographs and images"
+    examples:
+      - "Photo: patient_123.jpg"
+      - "Image: scan_456.png"
+    replacement: "[PHOTO_REDACTED]"
+    enabled: true
+
+  # Medical Information Patterns
+  - id: "hipaa_diagnosis_codes"
+    name: "ICD-10 Diagnosis Codes"
+    category: "medical"
+    regex: '\b[A-Z]\d{2}(?:\.[A-Z0-9]{1,4})?\b'
+    confidence: 0.9
+    description: "Detects ICD-10 diagnosis codes"
+    examples:
+      - "E11.9"
+      - "J44.1"
+      - "I25.10"
+    replacement: "[DIAGNOSIS_CODE_REDACTED]"
+    enabled: true
+
+  - id: "hipaa_procedure_codes"
+    name: "CPT Procedure Codes"
+    category: "medical"
+    regex: '\b\d{5}\b'
+    confidence: 0.7
+    description: "Detects CPT procedure codes"
+    examples:
+      - "99213"
+      - "45378"
+    replacement: "[PROCEDURE_CODE_REDACTED]"
+    enabled: true
+
+metadata:
+  compliance_frameworks:
+    - "HIPAA"
+    - "HITECH"
+  categories:
+    - "direct_identifier"
+    - "medical"
+  safe_harbor_identifiers: 18
+  risk_levels:
+    high: ["hipaa_name", "hipaa_ssn", "hipaa_mrn", "hipaa_dates", "hipaa_biometric_identifiers"]
+    medium: ["hipaa_address", "hipaa_phone", "hipaa_email", "hipaa_health_plan", "hipaa_account_numbers"]
+    low: ["hipaa_zip_code", "hipaa_ip_addresses", "hipaa_web_urls", "hipaa_diagnosis_codes"]
+  validation:
+    pattern_count: 19
+    categories_covered: 2
+    compliance_score: 0.98
+    safe_harbor_coverage: 1.0

@@ -13,13 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Extensible Redaction Provider Interfaces**: Comprehensive interface hierarchy for pluggable redaction strategies
   - `RedactionProvider`: Base interface for all redaction implementations
   - `PolicyAwareRedactionProvider`: Extended interface with policy integration capabilities
-  - `TenantAwareRedactionProvider`: Multi-tenant redaction support with per-tenant policies
   - `LLMRedactionProvider`: Interface ready for future AI-powered redaction
 
 #### Redaction Engines
 - **RedactionEngine**: Enhanced base engine with improved configuration options
 - **PolicyAwareRedactionEngine**: Policy-driven redaction with comprehensive rule validation
-- **TenantAwareRedactionEngine**: Multi-tenant redaction engine with policy isolation
 - **RedactionProviderFactory**: Factory pattern for easy provider instantiation and configuration
 
 #### Redaction Modes
@@ -39,14 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Pattern Matching**: Advanced regex-based content detection
 
 #### Multi-tenancy
-- **Tenant Policy Management**: Per-tenant redaction configurations with inheritance
-- **PolicyStore Interface**: Pluggable persistence layer for tenant policies
+- **Policy Management**: Redaction configurations with inheritance
+- **PolicyStore Interface**: Pluggable persistence layer for redaction policies
 - **InMemoryPolicyStore**: Development and testing implementation
 - **Policy Caching**: Performance optimization with intelligent caching strategies
 
 #### Configuration & Extensibility
 - **Provider Configuration**: Flexible configuration system for all provider types
-- **Custom Patterns**: Support for tenant-defined redaction patterns
+- **Custom Patterns**: Support for user-defined redaction patterns
 - **TTL Management**: Configurable token expiration and cleanup
 - **Statistics & Monitoring**: Comprehensive metrics and performance tracking
 
@@ -111,10 +109,9 @@ provider, err := factory.CreatePolicyAwareProvider(&redaction.ProviderConfig{
     DefaultTTL: 24 * time.Hour,
 })
 
-// Create tenant-aware provider
-tenantProvider, err := factory.CreateTenantAwareProvider(&redaction.ProviderConfig{
-    Type: redaction.ProviderTypeTenantAware,
-    PolicyStore: redaction.NewInMemoryPolicyStore(),
+// Create policy-aware provider
+policyProvider, err := factory.CreatePolicyAwareProvider(&redaction.ProviderConfig{
+    Type: redaction.ProviderTypePolicyAware,
 })
 ```
 

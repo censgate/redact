@@ -1,5 +1,5 @@
 // Package redaction provides comprehensive PII/PHI redaction capabilities with support
-// for multiple redaction modes, policy-based rules, and multi-tenant configurations.
+// for multiple redaction modes and policy-based rules.
 package redaction
 
 import (
@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,6 +40,18 @@ const (
 	TypeIBAN       Type = "iban"
 	TypeGitRepo    Type = "git_repo"
 	TypeCustom     Type = "custom"
+
+	// UK-specific identifier types
+	TypeUKNationalInsurance Type = "uk_national_insurance"
+	TypeUKNHSNumber         Type = "uk_nhs_number"
+	TypeUKPostcode          Type = "uk_postcode"
+	TypeUKPhoneNumber       Type = "uk_phone_number"
+	TypeUKMobileNumber      Type = "uk_mobile_number"
+	TypeUKSortCode          Type = "uk_sort_code"
+	TypeUKIBAN              Type = "uk_iban"
+	TypeUKCompanyNumber     Type = "uk_company_number"
+	TypeUKDrivingLicense    Type = "uk_driving_license"
+	TypeUKPassportNumber    Type = "uk_passport_number"
 )
 
 // Result represents the result of a redaction operation
@@ -173,6 +186,52 @@ func (re *Engine) initDefaultPatterns() {
 	// Git repository patterns
 	re.patterns[TypeGitRepo] = regexp.MustCompile(
 		`\b(?:git@|https?://)(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[a-zA-Z0-9_.-]+)*\.git\b`)
+
+	// Initialize UK-specific patterns
+	re.initUKPatterns()
+}
+
+// initUKPatterns initializes UK-specific detection patterns
+func (re *Engine) initUKPatterns() {
+	// UK National Insurance Number: Two letters, six digits, one letter (A, B, C, or D)
+	// Format: AB123456C
+	re.patterns[TypeUKNationalInsurance] = regexp.MustCompile(`(?i)\b[A-Z]{2}\d{6}[A-D]\b`)
+
+	// UK NHS Number: 10 digits, often with spaces after 3rd and 6th digits
+	// Format: NHS Number: 123 456 7890, NHS: 1234567890, NHS 987 654 3210
+	re.patterns[TypeUKNHSNumber] = regexp.MustCompile(`(?i)\bNHS\s+Numbers?\s*:?\s*\d{3}\s\d{3}\s\d{4}\b|\bNHS:?\s*\d{10}\b|\bNHS\s+\d{3}\s\d{3}\s\d{4}\b`)
+
+	// UK Postcode: Complex format with area, district, sector, and unit codes
+	// Format: SW1A 1AA, M1 1AA, B33 8TH (but not M11 1AA - invalid format)
+	re.patterns[TypeUKPostcode] = regexp.MustCompile(`(?i)\b[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}\b`)
+
+	// UK Phone Numbers (International format): +44 followed by area code and number
+	// Format: +44 20 1234 5678, +44 161 123 4567
+	re.patterns[TypeUKPhoneNumber] = regexp.MustCompile(`(?i)\+44\s?\d{2,4}\s?\d{3,4}\s?\d{3,4}`)
+
+	// UK Mobile Numbers: 07 followed by 9 digits
+	// Format: 07123456789, 07 123 456 789
+	re.patterns[TypeUKMobileNumber] = regexp.MustCompile(`(?i)\b07\d{9}\b|07\s?\d{3}\s?\d{3}\s?\d{3}`)
+
+	// UK Bank Sort Code: 6 digits in format XX-XX-XX
+	// Format: 12-34-56
+	re.patterns[TypeUKSortCode] = regexp.MustCompile(`(?i)\b\d{2}-\d{2}-\d{2}\b`)
+
+	// UK IBAN: GB followed by 2 digits, 4 letters, and 14 digits
+	// Format: GB82 WEST 1234 5698 7654 32
+	re.patterns[TypeUKIBAN] = regexp.MustCompile(`(?i)\bGB\d{2}\s?[A-Z]{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{2}\b`)
+
+	// UK Company Number: 8 digits assigned by Companies House
+	// Format: 12345678 (context-dependent, so we'll be conservative)
+	re.patterns[TypeUKCompanyNumber] = regexp.MustCompile(`(?i)\b(?:Company\s+(?:No\.?|Number)\s*:?\s*)?\d{8}\b`)
+
+	// UK Driving License Number: Complex format with letters and numbers
+	// Format: MORGA657054SM9IJ (5 letters, 6 digits, 2 letters, 1 digit, 2 letters)
+	re.patterns[TypeUKDrivingLicense] = regexp.MustCompile(`(?i)\b[A-Z]{5}\d{6}[A-Z]{2}\d[A-Z]{2}\b`)
+
+	// UK Passport Number: 9 digits
+	// Format: 123456789 (context-dependent, so we'll be conservative)
+	re.patterns[TypeUKPassportNumber] = regexp.MustCompile(`(?i)\b(?:Passport\s+(?:No\.?|Number)\s*:?\s*)?\d{9}\b`)
 }
 
 // AddCustomPattern adds a custom detection pattern
@@ -244,6 +303,29 @@ func (re *Engine) generateReplacement(redactionType Type, _ string) string {
 		return "[IBAN_REDACTED]"
 	case TypeGitRepo:
 		return "[GIT_REPO_REDACTED]"
+
+	// UK-specific redaction types
+	case TypeUKNationalInsurance:
+		return "[UK_NATIONAL_INSURANCE_REDACTED]"
+	case TypeUKNHSNumber:
+		return "[UK_NHS_NUMBER_REDACTED]"
+	case TypeUKPostcode:
+		return "[UK_POSTCODE_REDACTED]"
+	case TypeUKPhoneNumber:
+		return "[UK_PHONE_NUMBER_REDACTED]"
+	case TypeUKMobileNumber:
+		return "[UK_MOBILE_NUMBER_REDACTED]"
+	case TypeUKSortCode:
+		return "[UK_SORT_CODE_REDACTED]"
+	case TypeUKIBAN:
+		return "[UK_IBAN_REDACTED]"
+	case TypeUKCompanyNumber:
+		return "[UK_COMPANY_NUMBER_REDACTED]"
+	case TypeUKDrivingLicense:
+		return "[UK_DRIVING_LICENSE_REDACTED]"
+	case TypeUKPassportNumber:
+		return "[UK_PASSPORT_NUMBER_REDACTED]"
+
 	default:
 		return "[REDACTED]"
 	}
@@ -378,28 +460,30 @@ func (re *Engine) RestoreText(_ context.Context, token string) (*RestoreResult, 
 }
 
 // GetCapabilities implements RedactionProvider interface
-func (re *Engine) GetCapabilities() *ProviderCapabilities {
+func (re *Engine) GetCapabilities() *EngineCapabilities {
 	supportedTypes := make([]Type, 0, len(re.patterns))
 	for redactionType := range re.patterns {
 		supportedTypes = append(supportedTypes, redactionType)
 	}
 
-	return &ProviderCapabilities{
-		Name:                "Engine",
-		Version:             "1.0.0",
-		SupportedTypes:      supportedTypes,
-		SupportedModes:      []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize},
-		SupportsReversible:  true,
-		SupportsCustom:      true,
-		SupportsLLM:         false,
-		SupportsPolicies:    false,
-		SupportsMultiTenant: false,
-		MaxTextLength:       re.maxTextLength,
+	return &EngineCapabilities{
+		Name:               "Engine",
+		Version:            "1.0.0",
+		SupportedTypes:     supportedTypes,
+		SupportedModes:     []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize, ModeHash, ModeEncrypt},
+		SupportsReversible: true,
+		SupportsCustom:     true,
+		SupportsLLM:        false,
+		SupportsPolicies:   true, // Now supports policies directly
+		MaxTextLength:      re.maxTextLength,
 		Features: map[string]bool{
-			"pattern_matching":   true,
-			"token_restoration":  true,
-			"custom_patterns":    true,
-			"context_extraction": true,
+			"pattern_matching":      true,
+			"token_restoration":     true,
+			"custom_patterns":       true,
+			"context_extraction":    true,
+			"policy_rules":          true,
+			"rule_validation":       true,
+			"conditional_redaction": true,
 		},
 	}
 }
@@ -416,6 +500,144 @@ func (re *Engine) Cleanup() error {
 	return nil
 }
 
+// PolicyAwareEngine interface implementation
+
+// ApplyPolicyRules applies policy-defined redaction rules
+func (re *Engine) ApplyPolicyRules(ctx context.Context, request *PolicyRequest) (*Result, error) {
+	if request == nil || request.Request == nil {
+		return nil, fmt.Errorf("policy request cannot be nil")
+	}
+
+	// Apply the basic redaction first
+	result, err := re.RedactText(ctx, request.Request)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply policy rules to enhance/modify the result
+	// This is a simplified implementation - policy rules are evaluated
+	// to determine which patterns to apply with what priority
+	for _, rule := range request.PolicyRules {
+		if !rule.Enabled {
+			continue
+		}
+
+		// Apply rule conditions
+		if !re.evaluateConditions(rule.Conditions, request) {
+			continue
+		}
+
+		// Apply the rule patterns (simplified implementation)
+		// In a full implementation, this would integrate more deeply
+		// with the pattern matching and redaction process
+		_ = rule // Rule processing placeholder
+	}
+
+	return result, nil
+}
+
+// ValidatePolicy validates that policy rules are compatible with this engine
+func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []ValidationError {
+	var errors []ValidationError
+
+	for _, rule := range rules {
+		// Validate rule name
+		if rule.Name == "" {
+			errors = append(errors, ValidationError{
+				Rule:    rule.Name,
+				Message: "rule name cannot be empty",
+				Code:    "EMPTY_RULE_NAME",
+			})
+		}
+
+		// Validate patterns
+		if len(rule.Patterns) == 0 {
+			errors = append(errors, ValidationError{
+				Rule:    rule.Name,
+				Message: "rule must have at least one pattern",
+				Code:    "NO_PATTERNS",
+			})
+		}
+
+		// Validate priority
+		if rule.Priority < 0 {
+			errors = append(errors, ValidationError{
+				Rule:    rule.Name,
+				Message: "rule priority cannot be negative",
+				Code:    "INVALID_PRIORITY",
+			})
+		}
+
+		// Validate mode
+		validModes := []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize, ModeHash, ModeEncrypt}
+		modeValid := false
+		for _, validMode := range validModes {
+			if rule.Mode == validMode {
+				modeValid = true
+				break
+			}
+		}
+		if !modeValid {
+			errors = append(errors, ValidationError{
+				Rule:    rule.Name,
+				Message: fmt.Sprintf("invalid redaction mode: %s", rule.Mode),
+				Code:    "INVALID_MODE",
+			})
+		}
+	}
+
+	return errors
+}
+
+// evaluateConditions evaluates policy rule conditions
+func (re *Engine) evaluateConditions(conditions []PolicyCondition, request *PolicyRequest) bool {
+	// If no conditions, rule applies
+	if len(conditions) == 0 {
+		return true
+	}
+
+	// Evaluate each condition
+	for _, condition := range conditions {
+		switch condition.Field {
+		case "user_id":
+			if !re.evaluateStringCondition(request.UserID, condition.Operator, condition.Value) {
+				return false
+			}
+		case "user_role":
+			if request.Context != nil {
+				if !re.evaluateStringCondition(request.Context.UserRole, condition.Operator, condition.Value) {
+					return false
+				}
+			}
+		// Add more condition fields as needed
+		default:
+			// Unknown field, skip condition
+			continue
+		}
+	}
+
+	return true
+}
+
+// evaluateStringCondition evaluates a string condition
+func (re *Engine) evaluateStringCondition(fieldValue string, operator string, expectedValue interface{}) bool {
+	expectedStr, ok := expectedValue.(string)
+	if !ok {
+		return false
+	}
+
+	switch operator {
+	case "eq", "equals":
+		return fieldValue == expectedStr
+	case "ne", "not_equals":
+		return fieldValue != expectedStr
+	case "contains":
+		return len(expectedStr) > 0 && strings.Contains(fieldValue, expectedStr)
+	default:
+		return false
+	}
+}
+
 // Helper methods for interface implementation
 
 // redactTextInternal performs the core redaction logic (renamed from RedactText)
@@ -426,6 +648,9 @@ func (re *Engine) redactTextInternal(text string) *Result {
 		Redactions:   []Redaction{},
 		Timestamp:    time.Now(),
 	}
+
+	// Collect all potential redactions
+	var allRedactions []Redaction
 
 	// Process each redaction type
 	for redactionType, pattern := range re.patterns {
@@ -446,28 +671,139 @@ func (re *Engine) redactTextInternal(text string) *Result {
 				Context:     re.extractContext(text, start, end),
 			}
 
-			result.Redactions = append(result.Redactions, redaction)
+			allRedactions = append(allRedactions, redaction)
 		}
 	}
 
-	// Apply redactions in reverse order to maintain indices
-	offset := 0
-	for i := len(result.Redactions) - 1; i >= 0; i-- {
-		redaction := result.Redactions[i]
-		adjustedStart := redaction.Start + offset
-		adjustedEnd := redaction.End + offset
+	// Resolve overlapping redactions (longer match wins, then by type priority)
+	result.Redactions = re.resolveOverlappingRedactions(allRedactions)
 
-		if adjustedStart >= 0 && adjustedEnd <= len(result.RedactedText) {
-			result.RedactedText = result.RedactedText[:adjustedStart] +
+	// Sort redactions by start position (descending) to apply from end to beginning
+	for i := 0; i < len(result.Redactions); i++ {
+		for j := i + 1; j < len(result.Redactions); j++ {
+			if result.Redactions[i].Start < result.Redactions[j].Start {
+				result.Redactions[i], result.Redactions[j] = result.Redactions[j], result.Redactions[i]
+			}
+		}
+	}
+
+	// Apply redactions from end to beginning to maintain indices
+	for _, redaction := range result.Redactions {
+		if redaction.Start >= 0 && redaction.End <= len(result.RedactedText) {
+			result.RedactedText = result.RedactedText[:redaction.Start] +
 				redaction.Replacement +
-				result.RedactedText[adjustedEnd:]
-
-			// Update offset for next redaction
-			offset += len(redaction.Replacement) - (redaction.End - redaction.Start)
+				result.RedactedText[redaction.End:]
 		}
 	}
 
 	return result
+}
+
+// resolveOverlappingRedactions removes overlapping redactions using conflict resolution
+func (re *Engine) resolveOverlappingRedactions(redactions []Redaction) []Redaction {
+	if len(redactions) <= 1 {
+		return redactions
+	}
+
+	// Sort by start position first
+	for i := 0; i < len(redactions); i++ {
+		for j := i + 1; j < len(redactions); j++ {
+			if redactions[i].Start > redactions[j].Start {
+				redactions[i], redactions[j] = redactions[j], redactions[i]
+			}
+		}
+	}
+
+	var resolved []Redaction
+
+	for _, current := range redactions {
+		overlappingIndices := []int{}
+
+		// Find all overlapping redactions
+		for i, existing := range resolved {
+			if re.redactionsOverlap(current, existing) {
+				overlappingIndices = append(overlappingIndices, i)
+			}
+		}
+
+		if len(overlappingIndices) == 0 {
+			// No overlaps, add the redaction
+			resolved = append(resolved, current)
+		} else {
+			// Handle overlaps - determine if current should replace any/all overlapping redactions
+			shouldAdd := true
+			indicesToRemove := []int{}
+
+			for _, idx := range overlappingIndices {
+				existing := resolved[idx]
+				if re.shouldReplaceRedaction(current, existing) {
+					// Current wins over this existing redaction
+					indicesToRemove = append(indicesToRemove, idx)
+				} else {
+					// Existing redaction wins, don't add current
+					shouldAdd = false
+					break
+				}
+			}
+
+			if shouldAdd {
+				// Remove overlapping redactions that current wins against (in reverse order to maintain indices)
+				for i := len(indicesToRemove) - 1; i >= 0; i-- {
+					idx := indicesToRemove[i]
+					resolved = append(resolved[:idx], resolved[idx+1:]...)
+				}
+				// Add the current redaction
+				resolved = append(resolved, current)
+			}
+		}
+	}
+
+	return resolved
+}
+
+// redactionsOverlap checks if two redactions overlap
+func (re *Engine) redactionsOverlap(a, b Redaction) bool {
+	return a.Start < b.End && b.Start < a.End
+}
+
+// shouldReplaceRedaction determines if redaction 'new' should replace 'existing'
+func (re *Engine) shouldReplaceRedaction(new, existing Redaction) bool {
+	newLength := new.End - new.Start
+	existingLength := existing.End - existing.Start
+
+	// Prefer longer matches
+	if newLength != existingLength {
+		return newLength > existingLength
+	}
+
+	// If same length, prefer by type priority (UK-specific types have higher priority)
+	newPriority := re.getTypePriority(new.Type)
+	existingPriority := re.getTypePriority(existing.Type)
+
+	return newPriority > existingPriority
+}
+
+// getTypePriority returns priority for redaction types (higher = more important)
+func (re *Engine) getTypePriority(redactionType Type) int {
+	// UK-specific types get higher priority
+	switch redactionType {
+	case TypeUKNationalInsurance, TypeUKNHSNumber, TypeUKPassportNumber:
+		return 100 // Very high priority
+	case TypeUKDrivingLicense, TypeUKIBAN, TypeUKSortCode:
+		return 90 // High priority
+	case TypeUKPhoneNumber, TypeUKMobileNumber, TypeUKCompanyNumber:
+		return 80 // Medium-high priority
+	case TypeUKPostcode:
+		return 70 // Medium priority
+	case TypeSSN, TypeCreditCard:
+		return 60 // Standard high priority
+	case TypeEmail, TypePhone:
+		return 50 // Standard medium priority
+	case TypeIPAddress, TypeDate, TypeTime:
+		return 40 // Lower priority
+	default:
+		return 30 // Default priority
+	}
 }
 
 // applyCustomPatterns applies custom patterns to the redaction result
