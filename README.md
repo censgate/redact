@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/censgate/redact.svg)](https://pkg.go.dev/github.com/censgate/redact)
 [![Go Report Card](https://goreportcard.com/badge/github.com/censgate/redact)](https://goreportcard.com/report/github.com/censgate/redact)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A powerful, extensible redaction library for Go that provides comprehensive PII/PHI detection and redaction capabilities with policy-aware support.
 
@@ -372,7 +372,7 @@ go build -o redactctl ./cmd/redactctl
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Security
 

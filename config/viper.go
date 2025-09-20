@@ -114,7 +114,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redaction.context.domains", []string{"medical", "financial", "legal", "general"})
 
 	// Encryption defaults
-	v.SetDefault("encryption.key_rotation_interval", "30d")
+	v.SetDefault("encryption.key_rotation_interval", "720h")
 	v.SetDefault("encryption.pbkdf2_iterations", 10000)
 	v.SetDefault("encryption.key_version", 1)
 

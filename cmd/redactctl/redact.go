@@ -127,17 +127,34 @@ func runRedact(args []string) {
 }
 
 func readStdinInput() string {
-	fmt.Fprintf(os.Stderr, "Reading from stdin (press Ctrl+D when done)...\n")
-	var lines []string
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+	// Check if stdin is a terminal (interactive) or a pipe/file
+	stat, _ := os.Stdin.Stat()
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		// stdin is a pipe or file, read directly without prompting
+		var lines []string
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
+			os.Exit(1)
+		}
+		return strings.Join(lines, "\n")
+	} else {
+		// stdin is a terminal, prompt user
+		fmt.Fprintf(os.Stderr, "Reading from stdin (press Ctrl+D when done)...\n")
+		var lines []string
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
+			os.Exit(1)
+		}
+		return strings.Join(lines, "\n")
 	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
-		os.Exit(1)
-	}
-	return strings.Join(lines, "\n")
 }
 
 func readBatchInput() string {

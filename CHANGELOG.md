@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.3.0] - 2025-09-20
+
+### Added
+- Interactive CLI mode with  command
+- Comprehensive help text for all CLI commands
+- Automated version management system
+
+### Fixed
+- Fixed stdin input handling for piped commands
+- Fixed configuration duration parsing (30d -> 720h)
+- Updated license references from MIT to Apache 2.0
+
+### Changed
+- Improved CLI command structure and help documentation
+- Enhanced error handling and user feedback
+
+
+All notable changes to this project will be documented in this file.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
