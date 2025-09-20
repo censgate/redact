@@ -491,6 +491,39 @@ func TestGenerateReplacementMethod(t *testing.T) {
 	}
 }
 
+// Helper functions to reduce cyclomatic complexity in TestOverlappingRedactions
+
+// assertRedactionCount checks that the resolved redactions have the expected count
+func assertRedactionCount(t *testing.T, resolved []Redaction, expected int) {
+	if len(resolved) != expected {
+		t.Errorf("Expected %d resolved redactions, got %d", expected, len(resolved))
+		for i, r := range resolved {
+			t.Logf("Resolved[%d]: Type=%s, Start=%d, End=%d", i, r.Type, r.Start, r.End)
+		}
+	}
+}
+
+// assertRedactionTypeExists checks that a specific redaction type exists in the resolved list
+func assertRedactionTypeExists(t *testing.T, resolved []Redaction, expectedType Type, description string) {
+	for _, r := range resolved {
+		if r.Type == expectedType {
+			return
+		}
+	}
+	t.Errorf("Expected %s redaction to be present: %s", description, expectedType)
+}
+
+// assertNoOverlaps verifies that no redactions in the resolved list overlap
+func assertNoOverlaps(t *testing.T, engine *Engine, resolved []Redaction) {
+	for i := 0; i < len(resolved); i++ {
+		for j := i + 1; j < len(resolved); j++ {
+			if engine.redactionsOverlap(resolved[i], resolved[j]) {
+				t.Errorf("Found overlapping redactions in final result: %v and %v", resolved[i], resolved[j])
+			}
+		}
+	}
+}
+
 // TestOverlappingRedactions tests the fix for the overlapping redactions bug
 func TestOverlappingRedactions(t *testing.T) {
 	engine := NewEngine()
@@ -511,31 +544,9 @@ func TestOverlappingRedactions(t *testing.T) {
 
 		// The credit card redaction (longest) should win and replace both phone and SSN
 		// Email should remain as it doesn't overlap with any others
-		if len(resolved) != 2 {
-			t.Errorf("Expected 2 resolved redactions, got %d", len(resolved))
-			for i, r := range resolved {
-				t.Logf("Resolved[%d]: Type=%s, Start=%d, End=%d", i, r.Type, r.Start, r.End)
-			}
-		}
-
-		// Check that we have email and credit card (the winners)
-		hasEmail := false
-		hasCreditCard := false
-		for _, r := range resolved {
-			if r.Type == TypeEmail {
-				hasEmail = true
-			}
-			if r.Type == TypeCreditCard {
-				hasCreditCard = true
-			}
-		}
-
-		if !hasEmail {
-			t.Error("Expected email redaction to be preserved")
-		}
-		if !hasCreditCard {
-			t.Error("Expected credit card redaction to win over overlapping phone and SSN")
-		}
+		assertRedactionCount(t, resolved, 2)
+		assertRedactionTypeExists(t, resolved, TypeEmail, "email")
+		assertRedactionTypeExists(t, resolved, TypeCreditCard, "credit card")
 	})
 
 	t.Run("Priority-based resolution", func(t *testing.T) {
@@ -547,11 +558,8 @@ func TestOverlappingRedactions(t *testing.T) {
 
 		resolved := engine.resolveOverlappingRedactions(redactions)
 
-		if len(resolved) != 1 {
-			t.Errorf("Expected 1 resolved redaction, got %d", len(resolved))
-		}
-
-		if resolved[0].Type != TypeUKPhoneNumber {
+		assertRedactionCount(t, resolved, 1)
+		if len(resolved) > 0 && resolved[0].Type != TypeUKPhoneNumber {
 			t.Errorf("Expected UK phone number to win over generic phone, got %s", resolved[0].Type)
 		}
 	})
@@ -565,11 +573,8 @@ func TestOverlappingRedactions(t *testing.T) {
 
 		resolved := engine.resolveOverlappingRedactions(redactions)
 
-		if len(resolved) != 1 {
-			t.Errorf("Expected 1 resolved redaction, got %d", len(resolved))
-		}
-
-		if resolved[0].Type != TypeSSN {
+		assertRedactionCount(t, resolved, 1)
+		if len(resolved) > 0 && resolved[0].Type != TypeSSN {
 			t.Errorf("Expected SSN (longer match) to win over ZIP code, got %s", resolved[0].Type)
 		}
 	})
@@ -584,9 +589,7 @@ func TestOverlappingRedactions(t *testing.T) {
 
 		resolved := engine.resolveOverlappingRedactions(redactions)
 
-		if len(resolved) != 3 {
-			t.Errorf("Expected 3 resolved redactions (no overlaps), got %d", len(resolved))
-		}
+		assertRedactionCount(t, resolved, 3)
 	})
 
 	t.Run("Chain of overlaps", func(t *testing.T) {
@@ -607,13 +610,7 @@ func TestOverlappingRedactions(t *testing.T) {
 		}
 
 		// Verify no overlaps remain in the final result
-		for i := 0; i < len(resolved); i++ {
-			for j := i + 1; j < len(resolved); j++ {
-				if engine.redactionsOverlap(resolved[i], resolved[j]) {
-					t.Errorf("Found overlapping redactions in final result: %v and %v", resolved[i], resolved[j])
-				}
-			}
-		}
+		assertNoOverlaps(t, engine, resolved)
 	})
 }
 
