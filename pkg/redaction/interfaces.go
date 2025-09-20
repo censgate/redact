@@ -19,8 +19,10 @@ const (
 	ModeLLM      Mode = "llm"      // Use LLM for context-aware redaction
 )
 
-// RedactionEngine defines the interface for redaction implementations
-// This allows for pluggable redaction strategies including pattern-based and LLM-based redaction
+// RedactionEngine defines the interface for redaction implementations.
+// This allows for pluggable redaction strategies including pattern-based and LLM-based redaction.
+//
+//nolint:revive // RedactionEngine is the established name for this interface
 type RedactionEngine interface {
 	// RedactText performs redaction on the input text according to the strategy
 	RedactText(ctx context.Context, request *Request) (*Result, error)
@@ -73,9 +75,12 @@ type PatternProvider interface {
 	GetPatternsByCategory(ctx context.Context, category string) ([]*Pattern, error)
 }
 
-// Backward compatibility aliases
+// PolicyAwareProvider is a backward compatibility alias for PolicyAwareEngine.
 type PolicyAwareProvider = PolicyAwareEngine
+
+// LLMProvider is a backward compatibility alias for LLMEngine.
 type LLMProvider = LLMEngine
+
 
 // Request represents a redaction request
 type Request struct {

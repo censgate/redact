@@ -30,13 +30,13 @@ func (s *FormatPreservingStrategy) GetDescription() string {
 }
 
 // Replace performs the replacement using format-preserving strategy
-func (s *FormatPreservingStrategy) Replace(ctx context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
+func (s *FormatPreservingStrategy) Replace(_ context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
 	if request == nil {
 		return nil, fmt.Errorf("replacement request cannot be nil")
 	}
 
 	var replacedText string
-	var confidence float64 = 0.9
+	confidence := 0.9
 
 	switch strings.ToLower(request.DetectedType) {
 	case "ssn", "social_security":
@@ -108,9 +108,8 @@ func (s *FormatPreservingStrategy) preserveSSNFormat(original string) string {
 			randIntRange(100, 1000),
 			randInt(100),
 			randInt(10000))
-	} else {
-		return fmt.Sprintf("%09d", randInt(1000000000))
 	}
+	return fmt.Sprintf("%09d", randInt(1000000000))
 }
 
 func (s *FormatPreservingStrategy) preservePhoneFormat(original string) string {
@@ -139,9 +138,8 @@ func (s *FormatPreservingStrategy) preserveCreditCardFormat(original string) str
 		return "4111-1111-1111-1111"
 	} else if strings.Contains(original, " ") {
 		return "4111 1111 1111 1111"
-	} else {
-		return "4111111111111111"
 	}
+	return "4111111111111111"
 }
 
 func (s *FormatPreservingStrategy) preserveDateFormat(original string) string {

@@ -25,9 +25,8 @@ func TestPolicyAwareProviderCreation(t *testing.T) {
 		t.Fatal("PolicyAwareProvider should not be nil")
 	}
 
-	// Verify it implements the PolicyAwareProvider interface
-	_, ok := provider.(PolicyAwareProvider)
-	if !ok {
+	// Verify it implements the PolicyAwareProvider interface (provider is already of this type)
+	if provider == nil {
 		t.Fatal("Created provider does not implement PolicyAwareProvider interface")
 	}
 
