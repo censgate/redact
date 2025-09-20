@@ -1,10 +1,18 @@
-# CensGate Redact
+![censgate redact logo](assets/censgate-redact-logo-v1.png "censgate redact logo")
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/censgate/redact.svg)](https://pkg.go.dev/github.com/censgate/redact)
 [![Go Report Card](https://goreportcard.com/badge/github.com/censgate/redact)](https://goreportcard.com/report/github.com/censgate/redact)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A powerful, extensible redaction library for Go that provides comprehensive PII/PHI detection and redaction capabilities with policy-aware support.
+
+## Support Disclaimer
+
+This module is provided as-is and is not officially supported. There is no guarantee of timely responses to issues or pull requests, except at our discretion.
+
+## Stability Notice
+
+**Please note:** Until we reach version 1.0.0, this module may undergo breaking changes at any time.
 
 ## Features
 
@@ -37,7 +45,7 @@ A powerful, extensible redaction library for Go that provides comprehensive PII/
 ### Installation
 
 ```bash
-go get github.com/censgate/redact@v0.1.0
+go get github.com/censgate/redact@v0.3.0
 ```
 
 ### Basic Usage
@@ -309,46 +317,6 @@ redactctl redact --pattern "ID-\d{6}" --mode mask "User ID-123456"
 redactctl interactive
 ```
 
-## Recent Improvements
-
-### Bug Fixes & Enhancements
-
-#### ✅ **Overlapping Redactions Resolution (v0.1.1)**
-Fixed a critical bug in the `resolveOverlappingRedactions` function that could leave unresolved overlaps when a redaction conflicted with multiple existing redactions.
-
-**What was fixed:**
-- Removed premature `break` statement that prevented checking all overlaps
-- Implemented comprehensive multi-overlap evaluation logic
-- Added proper conflict resolution based on length and type priority
-- Enhanced test coverage with complex overlapping scenarios
-
-**Impact:**
-- Ensures accurate text replacement in all scenarios
-- Prevents data leakage from unresolved overlapping patterns
-- Improves reliability for complex documents with multiple PII types
-
-**Example of improved behavior:**
-```go
-// Before: Could miss overlaps, leading to incorrect redaction
-text := "Contact: john@company.com, Phone: +44 20 1234 5678, ID: AB123456C"
-
-// After: All overlaps properly resolved with correct priority
-// UK-specific patterns take precedence over generic ones
-// Longer matches win over shorter ones
-result := engine.RedactText(context.Background(), &redaction.Request{Text: text})
-// Result: "Contact: [EMAIL_REDACTED], Phone: [UK_PHONE_NUMBER_REDACTED], ID: [UK_NATIONAL_INSURANCE_REDACTED]"
-```
-
-#### 🔧 **Enhanced UK Pattern Support**
-- Added comprehensive UK-specific redaction patterns
-- Improved pattern priority system for regional compliance
-- Enhanced test coverage for UK GDPR compliance scenarios
-
-#### 📊 **Improved Testing Framework**
-- Added comprehensive test cases for overlapping redaction scenarios
-- Enhanced edge case coverage for complex pattern conflicts
-- Improved validation for multi-pattern documents
-
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
@@ -372,7 +340,7 @@ go build -o redactctl ./cmd/redactctl
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Security
 

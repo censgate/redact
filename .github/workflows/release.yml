@@ -57,6 +57,20 @@ jobs:
       id: get_version
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       
+    - name: Update version in codebase
+      run: |
+        # Make the version update script executable
+        chmod +x scripts/update-version.sh
+        
+        # Update version references in the codebase
+        ./scripts/update-version.sh ${{ steps.get_version.outputs.VERSION }}
+        
+        # Verify the version was updated correctly
+        echo "Verifying version update..."
+        grep -q "version   = \"${{ steps.get_version.outputs.VERSION }}\"" cmd/redactctl/version.go || exit 1
+        grep -q "Version: \"${{ steps.get_version.outputs.VERSION }}\"" cmd/redactctl/root.go || exit 1
+        echo "Version update verified successfully"
+      
     - name: Build binaries
       run: |
         # Build for multiple platforms

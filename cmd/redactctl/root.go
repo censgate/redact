@@ -27,7 +27,7 @@ The tool supports various redaction types including:
 - Credit cards, addresses, and names  
 - Medical, financial, and legal context-aware patterns
 - Custom patterns and reversible tokenization`,
-	Version: "1.0.0",
+	Version: "v0.3.0",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
