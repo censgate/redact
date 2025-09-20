@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -631,9 +632,7 @@ func (re *Engine) evaluateStringCondition(fieldValue string, operator string, ex
 	case "ne", "not_equals":
 		return fieldValue != expectedStr
 	case "contains":
-		return len(fieldValue) > 0 && len(expectedStr) > 0 &&
-			fieldValue != expectedStr &&
-			(fieldValue == expectedStr || len(fieldValue) > len(expectedStr))
+		return len(expectedStr) > 0 && strings.Contains(fieldValue, expectedStr)
 	default:
 		return false
 	}
