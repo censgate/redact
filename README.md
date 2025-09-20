@@ -317,46 +317,6 @@ redactctl redact --pattern "ID-\d{6}" --mode mask "User ID-123456"
 redactctl interactive
 ```
 
-## Recent Improvements
-
-### Bug Fixes & Enhancements
-
-#### ✅ **Overlapping Redactions Resolution (v0.1.1)**
-Fixed a critical bug in the `resolveOverlappingRedactions` function that could leave unresolved overlaps when a redaction conflicted with multiple existing redactions.
-
-**What was fixed:**
-- Removed premature `break` statement that prevented checking all overlaps
-- Implemented comprehensive multi-overlap evaluation logic
-- Added proper conflict resolution based on length and type priority
-- Enhanced test coverage with complex overlapping scenarios
-
-**Impact:**
-- Ensures accurate text replacement in all scenarios
-- Prevents data leakage from unresolved overlapping patterns
-- Improves reliability for complex documents with multiple PII types
-
-**Example of improved behavior:**
-```go
-// Before: Could miss overlaps, leading to incorrect redaction
-text := "Contact: john@company.com, Phone: +44 20 1234 5678, ID: AB123456C"
-
-// After: All overlaps properly resolved with correct priority
-// UK-specific patterns take precedence over generic ones
-// Longer matches win over shorter ones
-result := engine.RedactText(context.Background(), &redaction.Request{Text: text})
-// Result: "Contact: [EMAIL_REDACTED], Phone: [UK_PHONE_NUMBER_REDACTED], ID: [UK_NATIONAL_INSURANCE_REDACTED]"
-```
-
-#### 🔧 **Enhanced UK Pattern Support**
-- Added comprehensive UK-specific redaction patterns
-- Improved pattern priority system for regional compliance
-- Enhanced test coverage for UK GDPR compliance scenarios
-
-#### 📊 **Improved Testing Framework**
-- Added comprehensive test cases for overlapping redaction scenarios
-- Enhanced edge case coverage for complex pattern conflicts
-- Improved validation for multi-pattern documents
-
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
