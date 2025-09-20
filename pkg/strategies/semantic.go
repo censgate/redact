@@ -29,13 +29,13 @@ func (s *SemanticStrategy) GetDescription() string {
 }
 
 // Replace performs the replacement using semantic strategy
-func (s *SemanticStrategy) Replace(ctx context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
+func (s *SemanticStrategy) Replace(_ context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
 	if request == nil {
 		return nil, fmt.Errorf("replacement request cannot be nil")
 	}
 
 	var replacedText string
-	var confidence float64 = 0.8
+	var confidence = 0.8
 
 	switch strings.ToLower(request.DetectedType) {
 	case "email":
@@ -151,9 +151,9 @@ func (s *SemanticStrategy) generateGenericReplacement(original string) string {
 	length := len(original)
 	if length <= 3 {
 		return "***"
-	} else if length <= 10 {
-		return "[REDACTED]"
-	} else {
-		return "[SENSITIVE_DATA_REDACTED]"
 	}
+	if length <= 10 {
+		return "[REDACTED]"
+	}
+	return "[SENSITIVE_DATA_REDACTED]"
 }

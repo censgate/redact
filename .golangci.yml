@@ -1,12 +1,10 @@
-# golangci-lint v2.x configuration following migration guide
-version: "2"
-
+# golangci-lint v1.x configuration
 run:
   timeout: 5m
   go: "1.25"
 
 linters:
-  default: none
+  disable-all: true
   enable:
     - govet
     - errcheck
@@ -16,6 +14,13 @@ linters:
     - misspell
     - revive
 
-formatters:
-  enable:
-    - gofmt
+linters-settings:
+  revive:
+    rules:
+      - name: package-comments
+      - name: exported
+      - name: redefines-builtin-id
+      - name: empty-block
+      - name: unused-parameter
+      - name: var-declaration
+      - name: indent-error-flow
