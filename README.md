@@ -45,7 +45,7 @@ This module is provided as-is and is not officially supported. There is no guara
 ### Installation
 
 ```bash
-go get github.com/censgate/redact@v0.3.0
+go get github.com/censgate/redact@v0.3.1
 ```
 
 ### Basic Usage

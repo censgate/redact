@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.3.1] - 2025-09-20
+
+### Security
+- **Dependency Security Updates**: Updated multiple dependencies to address security vulnerabilities
+  - Updated `gopkg.in/yaml.v3` from v3.0.1 to v3.0.4
+  - Updated `gopkg.in/check.v1` from v1.0.0-20190902080502 to v1.0.0-20201130134442
+  - Updated `cobra` from v1.9.1 to v1.10.1
+  - Updated `viper` from v1.20.1 to v1.21.0
+  - Updated multiple indirect dependencies to latest secure versions
+  - Addresses 2 moderate vulnerabilities detected by GitHub security scanning
+
+### Fixed
+- **CI Workflow Security**: Added proper permissions to GitHub Actions workflow to address security scanning alert
+  - Added `contents: read` permission to CI workflow
+  - Resolves GitHub Advanced Security code scanning alert
+
 ## [v0.3.0] - 2025-09-20
 
 ### Added
