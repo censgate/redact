@@ -1,3 +1,5 @@
+// Package patterns provides validation functionality for redaction pattern libraries.
+// It includes validation for pattern syntax, metadata, and compliance requirements.
 package patterns
 
 import (

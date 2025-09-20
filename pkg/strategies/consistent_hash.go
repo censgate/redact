@@ -1,3 +1,5 @@
+// Package strategies provides various replacement strategies for redacted data.
+// It includes consistent hash, fake data, format preserving, random, and semantic strategies.
 package strategies
 
 import (
@@ -40,7 +42,7 @@ func (s *ConsistentHashStrategy) GetDescription() string {
 }
 
 // Replace performs the replacement using consistent hash strategy
-func (s *ConsistentHashStrategy) Replace(ctx context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
+func (s *ConsistentHashStrategy) Replace(_ context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
 	if request == nil {
 		return nil, fmt.Errorf("replacement request cannot be nil")
 	}

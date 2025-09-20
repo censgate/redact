@@ -537,7 +537,7 @@ func (re *Engine) ApplyPolicyRules(ctx context.Context, request *PolicyRequest) 
 }
 
 // ValidatePolicy validates that policy rules are compatible with this engine
-func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []ValidationError {
+func (re *Engine) ValidatePolicy(_ context.Context, rules []PolicyRule) []ValidationError {
 	var errors []ValidationError
 
 	for _, rule := range rules {
@@ -767,8 +767,8 @@ func (re *Engine) redactionsOverlap(a, b Redaction) bool {
 }
 
 // shouldReplaceRedaction determines if redaction 'new' should replace 'existing'
-func (re *Engine) shouldReplaceRedaction(new, existing Redaction) bool {
-	newLength := new.End - new.Start
+func (re *Engine) shouldReplaceRedaction(newRedaction, existing Redaction) bool {
+	newLength := newRedaction.End - newRedaction.Start
 	existingLength := existing.End - existing.Start
 
 	// Prefer longer matches
@@ -777,7 +777,7 @@ func (re *Engine) shouldReplaceRedaction(new, existing Redaction) bool {
 	}
 
 	// If same length, prefer by type priority (UK-specific types have higher priority)
-	newPriority := re.getTypePriority(new.Type)
+	newPriority := re.getTypePriority(newRedaction.Type)
 	existingPriority := re.getTypePriority(existing.Type)
 
 	return newPriority > existingPriority

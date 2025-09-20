@@ -27,6 +27,6 @@ func randInt(n int) int {
 }
 
 // randIntRange returns a random integer in the range [min, max)
-func randIntRange(min, max int) int {
-	return getRNG().Intn(max-min) + min
+func randIntRange(minVal, maxVal int) int {
+	return getRNG().Intn(maxVal-minVal) + minVal
 }

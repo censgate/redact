@@ -141,20 +141,19 @@ func readStdinInput() string {
 			os.Exit(1)
 		}
 		return strings.Join(lines, "\n")
-	} else {
-		// stdin is a terminal, prompt user
-		fmt.Fprintf(os.Stderr, "Reading from stdin (press Ctrl+D when done)...\n")
-		var lines []string
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-		}
-		if err := scanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
-			os.Exit(1)
-		}
-		return strings.Join(lines, "\n")
 	}
+	// stdin is a terminal, prompt user
+	fmt.Fprintf(os.Stderr, "Reading from stdin (press Ctrl+D when done)...\n")
+	var lines []string
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
+		os.Exit(1)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func readBatchInput() string {

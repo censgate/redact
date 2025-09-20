@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRedactionEngine(t *testing.T) {
+func TestEngineInterface(t *testing.T) {
 	engine := NewEngine()
 
 	// Test basic redaction

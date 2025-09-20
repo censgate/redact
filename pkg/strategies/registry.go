@@ -95,7 +95,7 @@ func (r *DefaultStrategyRegistry) GetDefaultStrategy(detectedType string) (Repla
 }
 
 // GetBestStrategy returns the best strategy for a given context
-func (r *DefaultStrategyRegistry) GetBestStrategy(ctx context.Context, request *StrategySelectionRequest) (ReplacementStrategy, error) {
+func (r *DefaultStrategyRegistry) GetBestStrategy(_ context.Context, request *StrategySelectionRequest) (ReplacementStrategy, error) {
 	if request == nil {
 		return nil, fmt.Errorf("strategy selection request cannot be nil")
 	}

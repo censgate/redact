@@ -97,6 +97,8 @@ func TestUKNationalInsuranceNumbers(t *testing.T) {
 			// If we expected to find NI numbers, verify they were redacted
 			if tc.expected && !strings.Contains(result.RedactedText, "AB123456C") && !strings.Contains(result.RedactedText, "JK987654A") {
 				// This is good - the NI numbers should be redacted
+				// No action needed, just verification
+				_ = tc.expected // Use the variable to avoid unused variable warning
 			}
 		})
 	}

@@ -19,9 +19,9 @@ const (
 	ModeLLM      Mode = "llm"      // Use LLM for context-aware redaction
 )
 
-// RedactionEngine defines the interface for redaction implementations
+// EngineInterface defines the interface for redaction implementations
 // This allows for pluggable redaction strategies including pattern-based and LLM-based redaction
-type RedactionEngine interface {
+type EngineInterface interface {
 	// RedactText performs redaction on the input text according to the strategy
 	RedactText(ctx context.Context, request *Request) (*Result, error)
 
@@ -38,13 +38,13 @@ type RedactionEngine interface {
 	Cleanup() error
 }
 
-// Provider is deprecated, use RedactionEngine instead
+// Provider is deprecated, use EngineInterface instead
 // Maintained for backward compatibility
-type Provider = RedactionEngine
+type Provider = EngineInterface
 
-// PolicyAwareEngine extends RedactionEngine with policy integration
+// PolicyAwareEngine extends EngineInterface with policy integration
 type PolicyAwareEngine interface {
-	RedactionEngine
+	EngineInterface
 
 	// ApplyPolicyRules applies policy-defined redaction rules
 	ApplyPolicyRules(ctx context.Context, request *PolicyRequest) (*Result, error)

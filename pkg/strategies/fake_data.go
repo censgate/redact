@@ -29,13 +29,13 @@ func (s *FakeDataStrategy) GetDescription() string {
 }
 
 // Replace performs the replacement using fake data strategy
-func (s *FakeDataStrategy) Replace(ctx context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
+func (s *FakeDataStrategy) Replace(_ context.Context, request *ReplacementRequest) (*ReplacementResult, error) {
 	if request == nil {
 		return nil, fmt.Errorf("replacement request cannot be nil")
 	}
 
 	var replacedText string
-	var confidence float64 = 0.85
+	var confidence = 0.85
 
 	switch strings.ToLower(request.DetectedType) {
 	case "name", "person_name":
@@ -216,9 +216,9 @@ func (s *FakeDataStrategy) generateGenericFakeData(original string) string {
 
 	if length <= 5 {
 		return "FAKE"
-	} else if length <= 15 {
-		return "FAKE_DATA"
-	} else {
-		return "REALISTIC_FAKE_DATA_PLACEHOLDER"
 	}
+	if length <= 15 {
+		return "FAKE_DATA"
+	}
+	return "REALISTIC_FAKE_DATA_PLACEHOLDER"
 }
