@@ -258,44 +258,44 @@ func (re *Engine) restoreTextInternal(token string) (string, error) {
 	return tokenInfo.OriginalText, nil
 }
 
+// replacementMap is a package-level map of redaction types to their replacement strings
+// This avoids repeated allocations in generateReplacement function
+var replacementMap = map[Type]string{
+	TypeEmail:               "[EMAIL_REDACTED]",
+	TypePhone:               "[PHONE_REDACTED]",
+	TypeCreditCard:          "[CREDIT_CARD_REDACTED]",
+	TypeSSN:                 "[SSN_REDACTED]",
+	TypeAddress:             "[ADDRESS_REDACTED]",
+	TypeName:                "[NAME_REDACTED]",
+	TypeIPAddress:           "[IP_ADDRESS_REDACTED]",
+	TypeDate:                "[DATE_REDACTED]",
+	TypeTime:                "[TIME_REDACTED]",
+	TypeLink:                "[LINK_REDACTED]",
+	TypeZipCode:             "[ZIP_CODE_REDACTED]",
+	TypePoBox:               "[PO_BOX_REDACTED]",
+	TypeBTCAddress:          "[BTC_ADDRESS_REDACTED]",
+	TypeMD5Hex:              "[MD5_HASH_REDACTED]",
+	TypeSHA1Hex:             "[SHA1_HASH_REDACTED]",
+	TypeSHA256Hex:           "[SHA256_HASH_REDACTED]",
+	TypeGUID:                "[GUID_REDACTED]",
+	TypeISBN:                "[ISBN_REDACTED]",
+	TypeMACAddress:          "[MAC_ADDRESS_REDACTED]",
+	TypeIBAN:                "[IBAN_REDACTED]",
+	TypeGitRepo:             "[GIT_REPO_REDACTED]",
+	TypeUKNationalInsurance: "[UK_NATIONAL_INSURANCE_REDACTED]",
+	TypeUKNHSNumber:         "[UK_NHS_NUMBER_REDACTED]",
+	TypeUKPostcode:          "[UK_POSTCODE_REDACTED]",
+	TypeUKPhoneNumber:       "[UK_PHONE_NUMBER_REDACTED]",
+	TypeUKMobileNumber:      "[UK_MOBILE_NUMBER_REDACTED]",
+	TypeUKSortCode:          "[UK_SORT_CODE_REDACTED]",
+	TypeUKIBAN:              "[UK_IBAN_REDACTED]",
+	TypeUKCompanyNumber:     "[UK_COMPANY_NUMBER_REDACTED]",
+	TypeUKDrivingLicense:    "[UK_DRIVING_LICENSE_REDACTED]",
+	TypeUKPassportNumber:    "[UK_PASSPORT_NUMBER_REDACTED]",
+}
+
 // generateReplacement generates a replacement string for redacted content
 func (re *Engine) generateReplacement(redactionType Type, _ string) string {
-	// Map of redaction types to their replacement strings
-	// This reduces cyclomatic complexity from 32 to 1
-	replacementMap := map[Type]string{
-		TypeEmail:                    "[EMAIL_REDACTED]",
-		TypePhone:                    "[PHONE_REDACTED]",
-		TypeCreditCard:               "[CREDIT_CARD_REDACTED]",
-		TypeSSN:                      "[SSN_REDACTED]",
-		TypeAddress:                  "[ADDRESS_REDACTED]",
-		TypeName:                     "[NAME_REDACTED]",
-		TypeIPAddress:                "[IP_ADDRESS_REDACTED]",
-		TypeDate:                     "[DATE_REDACTED]",
-		TypeTime:                     "[TIME_REDACTED]",
-		TypeLink:                     "[LINK_REDACTED]",
-		TypeZipCode:                  "[ZIP_CODE_REDACTED]",
-		TypePoBox:                    "[PO_BOX_REDACTED]",
-		TypeBTCAddress:               "[BTC_ADDRESS_REDACTED]",
-		TypeMD5Hex:                   "[MD5_HASH_REDACTED]",
-		TypeSHA1Hex:                  "[SHA1_HASH_REDACTED]",
-		TypeSHA256Hex:                "[SHA256_HASH_REDACTED]",
-		TypeGUID:                     "[GUID_REDACTED]",
-		TypeISBN:                     "[ISBN_REDACTED]",
-		TypeMACAddress:               "[MAC_ADDRESS_REDACTED]",
-		TypeIBAN:                     "[IBAN_REDACTED]",
-		TypeGitRepo:                  "[GIT_REPO_REDACTED]",
-		TypeUKNationalInsurance:      "[UK_NATIONAL_INSURANCE_REDACTED]",
-		TypeUKNHSNumber:              "[UK_NHS_NUMBER_REDACTED]",
-		TypeUKPostcode:               "[UK_POSTCODE_REDACTED]",
-		TypeUKPhoneNumber:            "[UK_PHONE_NUMBER_REDACTED]",
-		TypeUKMobileNumber:           "[UK_MOBILE_NUMBER_REDACTED]",
-		TypeUKSortCode:               "[UK_SORT_CODE_REDACTED]",
-		TypeUKIBAN:                   "[UK_IBAN_REDACTED]",
-		TypeUKCompanyNumber:          "[UK_COMPANY_NUMBER_REDACTED]",
-		TypeUKDrivingLicense:         "[UK_DRIVING_LICENSE_REDACTED]",
-		TypeUKPassportNumber:         "[UK_PASSPORT_NUMBER_REDACTED]",
-	}
-
 	if replacement, exists := replacementMap[redactionType]; exists {
 		return replacement
 	}
