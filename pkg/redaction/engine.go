@@ -520,12 +520,12 @@ func (re *Engine) ApplyPolicyRules(ctx context.Context, request *PolicyRequest) 
 		if !rule.Enabled {
 			continue
 		}
-		
+
 		// Apply rule conditions
 		if !re.evaluateConditions(rule.Conditions, request) {
 			continue
 		}
-		
+
 		// Apply the rule patterns (simplified implementation)
 		// In a full implementation, this would integrate more deeply
 		// with the pattern matching and redaction process
@@ -538,7 +538,7 @@ func (re *Engine) ApplyPolicyRules(ctx context.Context, request *PolicyRequest) 
 // ValidatePolicy validates that policy rules are compatible with this engine
 func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []ValidationError {
 	var errors []ValidationError
-	
+
 	for _, rule := range rules {
 		// Validate rule name
 		if rule.Name == "" {
@@ -548,7 +548,7 @@ func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []Vali
 				Code:    "EMPTY_RULE_NAME",
 			})
 		}
-		
+
 		// Validate patterns
 		if len(rule.Patterns) == 0 {
 			errors = append(errors, ValidationError{
@@ -557,7 +557,7 @@ func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []Vali
 				Code:    "NO_PATTERNS",
 			})
 		}
-		
+
 		// Validate priority
 		if rule.Priority < 0 {
 			errors = append(errors, ValidationError{
@@ -566,7 +566,7 @@ func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []Vali
 				Code:    "INVALID_PRIORITY",
 			})
 		}
-		
+
 		// Validate mode
 		validModes := []Mode{ModeReplace, ModeMask, ModeRemove, ModeTokenize, ModeHash, ModeEncrypt}
 		modeValid := false
@@ -584,7 +584,7 @@ func (re *Engine) ValidatePolicy(ctx context.Context, rules []PolicyRule) []Vali
 			})
 		}
 	}
-	
+
 	return errors
 }
 
@@ -594,7 +594,7 @@ func (re *Engine) evaluateConditions(conditions []PolicyCondition, request *Poli
 	if len(conditions) == 0 {
 		return true
 	}
-	
+
 	// Evaluate each condition
 	for _, condition := range conditions {
 		switch condition.Field {
@@ -614,7 +614,7 @@ func (re *Engine) evaluateConditions(conditions []PolicyCondition, request *Poli
 			continue
 		}
 	}
-	
+
 	return true
 }
 
@@ -624,16 +624,16 @@ func (re *Engine) evaluateStringCondition(fieldValue string, operator string, ex
 	if !ok {
 		return false
 	}
-	
+
 	switch operator {
 	case "eq", "equals":
 		return fieldValue == expectedStr
 	case "ne", "not_equals":
 		return fieldValue != expectedStr
 	case "contains":
-		return len(fieldValue) > 0 && len(expectedStr) > 0 && 
-			   fieldValue != expectedStr && 
-			   (fieldValue == expectedStr || len(fieldValue) > len(expectedStr))
+		return len(fieldValue) > 0 && len(expectedStr) > 0 &&
+			fieldValue != expectedStr &&
+			(fieldValue == expectedStr || len(fieldValue) > len(expectedStr))
 	default:
 		return false
 	}
@@ -716,15 +716,15 @@ func (re *Engine) resolveOverlappingRedactions(redactions []Redaction) []Redacti
 	}
 
 	var resolved []Redaction
-	
+
 	for _, current := range redactions {
 		overlaps := false
-		
+
 		// Check if current redaction overlaps with any already resolved redaction
 		for i, existing := range resolved {
 			if re.redactionsOverlap(current, existing) {
 				overlaps = true
-				
+
 				// Conflict resolution: prefer longer match, then by type priority
 				if re.shouldReplaceRedaction(current, existing) {
 					resolved[i] = current // Replace existing with current
@@ -733,13 +733,13 @@ func (re *Engine) resolveOverlappingRedactions(redactions []Redaction) []Redacti
 				break
 			}
 		}
-		
+
 		// If no overlap, add the redaction
 		if !overlaps {
 			resolved = append(resolved, current)
 		}
 	}
-	
+
 	return resolved
 }
 
@@ -752,16 +752,16 @@ func (re *Engine) redactionsOverlap(a, b Redaction) bool {
 func (re *Engine) shouldReplaceRedaction(new, existing Redaction) bool {
 	newLength := new.End - new.Start
 	existingLength := existing.End - existing.Start
-	
+
 	// Prefer longer matches
 	if newLength != existingLength {
 		return newLength > existingLength
 	}
-	
+
 	// If same length, prefer by type priority (UK-specific types have higher priority)
 	newPriority := re.getTypePriority(new.Type)
 	existingPriority := re.getTypePriority(existing.Type)
-	
+
 	return newPriority > existingPriority
 }
 
