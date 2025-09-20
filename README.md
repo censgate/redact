@@ -1,4 +1,4 @@
-# CensGate Redact
+![censgate redact logo](assets/censgate-redact-logo-v1.png "censgate redact logo")
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/censgate/redact.svg)](https://pkg.go.dev/github.com/censgate/redact)
 [![Go Report Card](https://goreportcard.com/badge/github.com/censgate/redact)](https://goreportcard.com/report/github.com/censgate/redact)
@@ -37,7 +37,7 @@ A powerful, extensible redaction library for Go that provides comprehensive PII/
 ### Installation
 
 ```bash
-go get github.com/censgate/redact@v0.1.0
+go get github.com/censgate/redact@v0.3.0
 ```
 
 ### Basic Usage
