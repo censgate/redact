@@ -132,7 +132,7 @@ func TestUKNHSNumbers(t *testing.T) {
 		},
 		{
 			name:     "Multiple NHS Numbers",
-			text:     "Process NHS numbers 123 456 7890 and 9876543210 for patients",
+			text:     "Process NHS numbers 123 456 7890 and NHS: 9876543210 for patients",
 			expected: true,
 			count:    2,
 		},

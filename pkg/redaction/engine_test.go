@@ -263,8 +263,8 @@ func TestRedactionStats(t *testing.T) {
 	}
 
 	t.Logf("Actual patterns: %v", stats["active_patterns"])
-	if stats["active_patterns"] != 19 { // Default patterns (19 types initialized)
-		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
+	if stats["active_patterns"] != 29 { // Default patterns (19 original + 10 UK patterns)
+		t.Errorf("Expected 29 active patterns, got %v", stats["active_patterns"])
 	}
 
 	tokensByType, ok := stats["tokens_by_type"].(map[Type]int)
@@ -348,7 +348,7 @@ func TestInvalidCustomPattern(t *testing.T) {
 
 	// Verify pattern wasn't added
 	stats := engine.GetRedactionStats()
-	if stats["active_patterns"] != 19 { // Should still be default patterns
-		t.Errorf("Expected 19 active patterns, got %v", stats["active_patterns"])
+	if stats["active_patterns"] != 29 { // Should still be default patterns (19 original + 10 UK patterns)
+		t.Errorf("Expected 29 active patterns, got %v", stats["active_patterns"])
 	}
 }

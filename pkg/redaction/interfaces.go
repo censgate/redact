@@ -19,46 +19,63 @@ const (
 	ModeLLM      Mode = "llm"      // Use LLM for context-aware redaction
 )
 
-// Provider defines the interface for redaction implementations
-// This allows for pluggable redaction strategies including LLM-based redaction
-type Provider interface {
+// RedactionEngine defines the interface for redaction implementations
+// This allows for pluggable redaction strategies including pattern-based and LLM-based redaction
+type RedactionEngine interface {
 	// RedactText performs redaction on the input text according to the strategy
 	RedactText(ctx context.Context, request *Request) (*Result, error)
 
 	// RestoreText restores redacted text using a token (if supported)
 	RestoreText(ctx context.Context, token string) (*RestoreResult, error)
 
-	// GetCapabilities returns the capabilities of this redaction provider
-	GetCapabilities() *ProviderCapabilities
+	// GetCapabilities returns the capabilities of this redaction engine
+	GetCapabilities() *EngineCapabilities
 
-	// GetStats returns provider-specific statistics
+	// GetStats returns engine-specific statistics
 	GetStats() map[string]interface{}
 
 	// Cleanup performs any necessary cleanup operations
 	Cleanup() error
 }
 
-// PolicyAwareProvider extends Provider with policy integration
-type PolicyAwareProvider interface {
-	Provider
+// Provider is deprecated, use RedactionEngine instead
+// Maintained for backward compatibility
+type Provider = RedactionEngine
+
+// PolicyAwareEngine extends RedactionEngine with policy integration
+type PolicyAwareEngine interface {
+	RedactionEngine
 
 	// ApplyPolicyRules applies policy-defined redaction rules
 	ApplyPolicyRules(ctx context.Context, request *PolicyRequest) (*Result, error)
 
-	// ValidatePolicy validates that policy rules are compatible with this provider
+	// ValidatePolicy validates that policy rules are compatible with this engine
 	ValidatePolicy(ctx context.Context, rules []PolicyRule) []ValidationError
 }
 
-// LLMProvider defines interface for LLM-based redaction
-type LLMProvider interface {
-	PolicyAwareProvider
+// LLMEngine defines interface for LLM-based redaction
+type LLMEngine interface {
+	PolicyAwareEngine
 
-	// RedactWithLLM uses LLM to perform context-aware redaction
-	RedactWithLLM(ctx context.Context, request *LLMRequest) (*Result, error)
-
-	// GenerateSuggestions uses LLM to suggest redaction patterns
-	GenerateSuggestions(ctx context.Context, text string, context *Context) ([]Suggestion, error)
+	// AnalyzeContext performs context analysis for intelligent redaction
+	AnalyzeContext(ctx context.Context, request *ContextAnalysisRequest) (*ContextAnalysis, error)
 }
+
+// PatternProvider defines interface for pattern-based redaction (database-agnostic)
+type PatternProvider interface {
+	// GetPatterns returns patterns for a given context
+	GetPatterns(ctx context.Context, request *PatternRequest) ([]*Pattern, error)
+
+	// ValidatePattern validates a pattern definition
+	ValidatePattern(ctx context.Context, pattern *Pattern) error
+
+	// GetPatternsByCategory returns patterns filtered by category
+	GetPatternsByCategory(ctx context.Context, category string) ([]*Pattern, error)
+}
+
+// Backward compatibility aliases
+type PolicyAwareProvider = PolicyAwareEngine
+type LLMProvider = LLMEngine
 
 // TenantAwareProvider defines interface for multi-tenant redaction
 type TenantAwareProvider interface {
@@ -176,8 +193,8 @@ type TenantPolicy struct {
 	Version        string                 `json:"version"`
 }
 
-// ProviderCapabilities describes what a redaction provider can do
-type ProviderCapabilities struct {
+// EngineCapabilities describes what a redaction engine can do
+type EngineCapabilities struct {
 	Name                string          `json:"name"`
 	Version             string          `json:"version"`
 	SupportedTypes      []Type          `json:"supported_types"`
@@ -191,10 +208,52 @@ type ProviderCapabilities struct {
 	Features            map[string]bool `json:"features,omitempty"`
 }
 
+// ProviderCapabilities is deprecated, use EngineCapabilities instead
+type ProviderCapabilities = EngineCapabilities
+
 // ValidationError represents a policy validation error
 type ValidationError struct {
 	Rule    string `json:"rule"`
 	Field   string `json:"field,omitempty"`
 	Message string `json:"message"`
 	Code    string `json:"code"`
+}
+
+// Pattern represents a redaction pattern with metadata
+type Pattern struct {
+	ID          string                 `json:"id" yaml:"id"`
+	Name        string                 `json:"name" yaml:"name"`
+	Category    string                 `json:"category" yaml:"category"`
+	Regex       string                 `json:"regex" yaml:"regex"`
+	Replacement string                 `json:"replacement" yaml:"replacement"`
+	Confidence  float64                `json:"confidence" yaml:"confidence"`
+	Description string                 `json:"description" yaml:"description"`
+	Examples    []string               `json:"examples" yaml:"examples"`
+	Metadata    map[string]interface{} `json:"metadata" yaml:"metadata"`
+	Enabled     bool                   `json:"enabled" yaml:"enabled"`
+}
+
+// PatternRequest represents a request for patterns
+type PatternRequest struct {
+	Context       *Context `json:"context,omitempty"`
+	Categories    []string `json:"categories,omitempty"`
+	TenantID      string   `json:"tenant_id,omitempty"`
+	IncludeGlobal bool     `json:"include_global"`
+}
+
+// ContextAnalysisRequest represents a request for context analysis
+type ContextAnalysisRequest struct {
+	Text     string   `json:"text"`
+	Context  *Context `json:"context,omitempty"`
+	Language string   `json:"language,omitempty"`
+}
+
+// ContextAnalysis represents the result of context analysis
+type ContextAnalysis struct {
+	DetectedTypes   []Type                 `json:"detected_types"`
+	Confidence      float64                `json:"confidence"`
+	Suggestions     []Suggestion           `json:"suggestions"`
+	RiskAssessment  string                 `json:"risk_assessment"`
+	RecommendedMode Mode                   `json:"recommended_mode"`
+	Metadata        map[string]interface{} `json:"metadata"`
 }

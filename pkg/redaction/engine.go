@@ -194,43 +194,43 @@ func (re *Engine) initDefaultPatterns() {
 func (re *Engine) initUKPatterns() {
 	// UK National Insurance Number: Two letters, six digits, one letter (A, B, C, or D)
 	// Format: AB123456C
-	re.patterns[TypeUKNationalInsurance] = regexp.MustCompile(`\b[A-Z]{2}\d{6}[A-D]\b`)
+	re.patterns[TypeUKNationalInsurance] = regexp.MustCompile(`(?i)\b[A-Z]{2}\d{6}[A-D]\b`)
 
 	// UK NHS Number: 10 digits, often with spaces after 3rd and 6th digits
-	// Format: 123 456 7890 or 1234567890
-	re.patterns[TypeUKNHSNumber] = regexp.MustCompile(`\b\d{3}\s?\d{3}\s?\d{4}\b|\b\d{10}\b`)
+	// Format: NHS Number: 123 456 7890, NHS: 1234567890, NHS 987 654 3210
+	re.patterns[TypeUKNHSNumber] = regexp.MustCompile(`(?i)\bNHS\s+Numbers?\s*:?\s*\d{3}\s\d{3}\s\d{4}\b|\bNHS:?\s*\d{10}\b|\bNHS\s+\d{3}\s\d{3}\s\d{4}\b`)
 
 	// UK Postcode: Complex format with area, district, sector, and unit codes
 	// Format: SW1A 1AA, M1 1AA, B33 8TH (but not M11 1AA - invalid format)
-	re.patterns[TypeUKPostcode] = regexp.MustCompile(`\b[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}\b`)
+	re.patterns[TypeUKPostcode] = regexp.MustCompile(`(?i)\b[A-Z]{1,2}[0-9][A-Z0-9]?\s?[0-9][A-Z]{2}\b`)
 
 	// UK Phone Numbers (International format): +44 followed by area code and number
 	// Format: +44 20 1234 5678, +44 161 123 4567
-	re.patterns[TypeUKPhoneNumber] = regexp.MustCompile(`\+44\s?\d{2,4}\s?\d{3,4}\s?\d{3,4}`)
+	re.patterns[TypeUKPhoneNumber] = regexp.MustCompile(`(?i)\+44\s?\d{2,4}\s?\d{3,4}\s?\d{3,4}`)
 
 	// UK Mobile Numbers: 07 followed by 9 digits
 	// Format: 07123456789, 07 123 456 789
-	re.patterns[TypeUKMobileNumber] = regexp.MustCompile(`\b07\d{9}\b|07\s?\d{3}\s?\d{3}\s?\d{3}`)
+	re.patterns[TypeUKMobileNumber] = regexp.MustCompile(`(?i)\b07\d{9}\b|07\s?\d{3}\s?\d{3}\s?\d{3}`)
 
 	// UK Bank Sort Code: 6 digits in format XX-XX-XX
 	// Format: 12-34-56
-	re.patterns[TypeUKSortCode] = regexp.MustCompile(`\b\d{2}-\d{2}-\d{2}\b`)
+	re.patterns[TypeUKSortCode] = regexp.MustCompile(`(?i)\b\d{2}-\d{2}-\d{2}\b`)
 
 	// UK IBAN: GB followed by 2 digits, 4 letters, and 14 digits
 	// Format: GB82 WEST 1234 5698 7654 32
-	re.patterns[TypeUKIBAN] = regexp.MustCompile(`\bGB\d{2}\s?[A-Z]{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{2}\b`)
+	re.patterns[TypeUKIBAN] = regexp.MustCompile(`(?i)\bGB\d{2}\s?[A-Z]{4}\s?\d{4}\s?\d{4}\s?\d{4}\s?\d{2}\b`)
 
 	// UK Company Number: 8 digits assigned by Companies House
 	// Format: 12345678 (context-dependent, so we'll be conservative)
-	re.patterns[TypeUKCompanyNumber] = regexp.MustCompile(`\b(?:Company\s+(?:No\.?|Number)\s*:?\s*)?\d{8}\b`)
+	re.patterns[TypeUKCompanyNumber] = regexp.MustCompile(`(?i)\b(?:Company\s+(?:No\.?|Number)\s*:?\s*)?\d{8}\b`)
 
 	// UK Driving License Number: Complex format with letters and numbers
 	// Format: MORGA657054SM9IJ (5 letters, 6 digits, 2 letters, 1 digit, 2 letters)
-	re.patterns[TypeUKDrivingLicense] = regexp.MustCompile(`\b[A-Z]{5}\d{6}[A-Z]{2}\d[A-Z]{2}\b`)
+	re.patterns[TypeUKDrivingLicense] = regexp.MustCompile(`(?i)\b[A-Z]{5}\d{6}[A-Z]{2}\d[A-Z]{2}\b`)
 
 	// UK Passport Number: 9 digits
 	// Format: 123456789 (context-dependent, so we'll be conservative)
-	re.patterns[TypeUKPassportNumber] = regexp.MustCompile(`\b(?:Passport\s+(?:No\.?|Number)\s*:?\s*)?\d{9}\b`)
+	re.patterns[TypeUKPassportNumber] = regexp.MustCompile(`(?i)\b(?:Passport\s+(?:No\.?|Number)\s*:?\s*)?\d{9}\b`)
 }
 
 // AddCustomPattern adds a custom detection pattern

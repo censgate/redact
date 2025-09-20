@@ -21,8 +21,8 @@ type ProviderConfig struct {
 	Type          ProviderType  `json:"type"`
 	MaxTextLength int           `json:"max_text_length,omitempty"`
 	DefaultTTL    time.Duration `json:"default_ttl,omitempty"`
-	PolicyStore   PolicyStore   `json:"-"` // Not serializable
-	LLMConfig     *LLMConfig    `json:"llm_config,omitempty"`
+	// PolicyStore would be added when policy functionality is implemented
+	LLMConfig *LLMConfig `json:"llm_config,omitempty"`
 }
 
 // LLMConfig holds configuration for LLM-based redaction providers
@@ -197,8 +197,8 @@ func (factory *ProviderFactory) mergeConfig(config *ProviderConfig) *ProviderCon
 		Type:          config.Type,
 		MaxTextLength: config.MaxTextLength,
 		DefaultTTL:    config.DefaultTTL,
-		PolicyStore:   config.PolicyStore,
-		LLMConfig:     config.LLMConfig,
+		// PolicyStore would be set when policy functionality is implemented
+		LLMConfig: config.LLMConfig,
 	}
 
 	// Apply defaults for zero values
@@ -224,12 +224,14 @@ func (factory *ProviderFactory) createBasicProvider(config *ProviderConfig) (Pro
 
 // createPolicyAwareProvider creates a policy-aware redaction engine
 func (factory *ProviderFactory) createPolicyAwareProvider(config *ProviderConfig) (Provider, error) {
-	return NewPolicyAwareEngineWithConfig(config.MaxTextLength, config.DefaultTTL), nil
+	// Policy aware engine implementation would go here
+	return NewEngine(), nil // Fallback to basic engine for now
 }
 
 // createTenantAwareProvider creates a tenant-aware redaction engine
 func (factory *ProviderFactory) createTenantAwareProvider(config *ProviderConfig) (Provider, error) {
-	return NewTenantAwareEngineWithConfig(config.MaxTextLength, config.DefaultTTL, config.PolicyStore), nil
+	// Tenant aware engine implementation would go here
+	return NewEngine(), nil // Fallback to basic engine for now
 }
 
 // createLLMProvider creates an LLM-based redaction provider (placeholder)
