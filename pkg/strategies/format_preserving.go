@@ -3,10 +3,8 @@ package strategies
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // FormatPreservingStrategy replaces sensitive data while preserving the original format
@@ -99,45 +97,42 @@ func (s *FormatPreservingStrategy) GetCapabilities() *StrategyCapabilities {
 
 func (s *FormatPreservingStrategy) preserveSSNFormat(original string) string {
 	// Match common SSN formats: XXX-XX-XXXX, XXXXXXXXX, XXX XX XXXX
-	rand.Seed(time.Now().UnixNano())
 
 	if strings.Contains(original, "-") {
 		return fmt.Sprintf("%03d-%02d-%04d",
-			rand.Intn(900)+100,
-			rand.Intn(100),
-			rand.Intn(10000))
+			randIntRange(100, 1000),
+			randInt(100),
+			randInt(10000))
 	} else if strings.Contains(original, " ") {
 		return fmt.Sprintf("%03d %02d %04d",
-			rand.Intn(900)+100,
-			rand.Intn(100),
-			rand.Intn(10000))
+			randIntRange(100, 1000),
+			randInt(100),
+			randInt(10000))
 	} else {
-		return fmt.Sprintf("%09d", rand.Intn(1000000000))
+		return fmt.Sprintf("%09d", randInt(1000000000))
 	}
 }
 
 func (s *FormatPreservingStrategy) preservePhoneFormat(original string) string {
-	rand.Seed(time.Now().UnixNano())
 
 	// Analyze the format of the original phone number
 	format := s.analyzePhoneFormat(original)
 
 	switch format {
 	case "xxx-xxx-xxxx":
-		return fmt.Sprintf("555-%03d-%04d", rand.Intn(1000), rand.Intn(10000))
+		return fmt.Sprintf("555-%03d-%04d", randInt(1000), randInt(10000))
 	case "(xxx) xxx-xxxx":
-		return fmt.Sprintf("(555) %03d-%04d", rand.Intn(1000), rand.Intn(10000))
+		return fmt.Sprintf("(555) %03d-%04d", randInt(1000), randInt(10000))
 	case "xxx.xxx.xxxx":
-		return fmt.Sprintf("555.%03d.%04d", rand.Intn(1000), rand.Intn(10000))
+		return fmt.Sprintf("555.%03d.%04d", randInt(1000), randInt(10000))
 	case "xxxxxxxxxx":
-		return fmt.Sprintf("555%03d%04d", rand.Intn(1000), rand.Intn(10000))
+		return fmt.Sprintf("555%03d%04d", randInt(1000), randInt(10000))
 	default:
 		return "555-123-4567" // Default format
 	}
 }
 
 func (s *FormatPreservingStrategy) preserveCreditCardFormat(original string) string {
-	rand.Seed(time.Now().UnixNano())
 
 	// Preserve spacing and separators
 	if strings.Contains(original, "-") {
@@ -150,43 +145,40 @@ func (s *FormatPreservingStrategy) preserveCreditCardFormat(original string) str
 }
 
 func (s *FormatPreservingStrategy) preserveDateFormat(original string) string {
-	rand.Seed(time.Now().UnixNano())
 
 	// Analyze date format patterns
 	if matched, _ := regexp.MatchString(`\d{4}-\d{2}-\d{2}`, original); matched {
 		return fmt.Sprintf("%04d-%02d-%02d",
-			rand.Intn(50)+1970, rand.Intn(12)+1, rand.Intn(28)+1)
+			randIntRange(1970, 2020), randIntRange(1, 13), randIntRange(1, 29))
 	} else if matched, _ := regexp.MatchString(`\d{2}/\d{2}/\d{4}`, original); matched {
 		return fmt.Sprintf("%02d/%02d/%04d",
-			rand.Intn(12)+1, rand.Intn(28)+1, rand.Intn(50)+1970)
+			randIntRange(1, 13), randIntRange(1, 29), randIntRange(1970, 2020))
 	} else if matched, _ := regexp.MatchString(`\d{2}-\d{2}-\d{4}`, original); matched {
 		return fmt.Sprintf("%02d-%02d-%04d",
-			rand.Intn(12)+1, rand.Intn(28)+1, rand.Intn(50)+1970)
+			randIntRange(1, 13), randIntRange(1, 29), randIntRange(1970, 2020))
 	}
 
 	return "01-01-1990" // Default format
 }
 
 func (s *FormatPreservingStrategy) preserveZipFormat(original string) string {
-	rand.Seed(time.Now().UnixNano())
 
 	if len(original) == 5 {
-		return fmt.Sprintf("%05d", rand.Intn(100000))
+		return fmt.Sprintf("%05d", randInt(100000))
 	} else if len(original) == 10 && strings.Contains(original, "-") {
-		return fmt.Sprintf("%05d-%04d", rand.Intn(100000), rand.Intn(10000))
+		return fmt.Sprintf("%05d-%04d", randInt(100000), randInt(10000))
 	}
 
 	return "12345"
 }
 
 func (s *FormatPreservingStrategy) preserveAccountNumberFormat(original string) string {
-	rand.Seed(time.Now().UnixNano())
 
 	// Preserve length and any separators
 	result := ""
 	for _, char := range original {
 		if char >= '0' && char <= '9' {
-			result += fmt.Sprintf("%d", rand.Intn(10))
+			result += fmt.Sprintf("%d", randInt(10))
 		} else {
 			result += string(char)
 		}
@@ -196,18 +188,17 @@ func (s *FormatPreservingStrategy) preserveAccountNumberFormat(original string) 
 }
 
 func (s *FormatPreservingStrategy) preserveGenericFormat(original string) string {
-	rand.Seed(time.Now().UnixNano())
 
 	// Replace each character while preserving structure
 	result := ""
 	for _, char := range original {
 		switch {
 		case char >= '0' && char <= '9':
-			result += fmt.Sprintf("%d", rand.Intn(10))
+			result += fmt.Sprintf("%d", randInt(10))
 		case char >= 'A' && char <= 'Z':
-			result += string(rune('A' + rand.Intn(26)))
+			result += string(rune('A' + randInt(26)))
 		case char >= 'a' && char <= 'z':
-			result += string(rune('a' + rand.Intn(26)))
+			result += string(rune('a' + randInt(26)))
 		default:
 			result += string(char) // Preserve special characters
 		}

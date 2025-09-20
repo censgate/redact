@@ -3,9 +3,7 @@ package strategies
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strings"
-	"time"
 )
 
 // FakeDataStrategy replaces sensitive data with realistic fake data
@@ -117,9 +115,8 @@ func (s *FakeDataStrategy) generateFakeName() string {
 		"Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker", "Young",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	firstName := firstNames[rand.Intn(len(firstNames))]
-	lastName := lastNames[rand.Intn(len(lastNames))]
+	firstName := firstNames[randInt(len(firstNames))]
+	lastName := lastNames[randInt(len(lastNames))]
 
 	return fmt.Sprintf("%s %s", firstName, lastName)
 }
@@ -135,29 +132,26 @@ func (s *FakeDataStrategy) generateFakeEmail() string {
 		"jordan.davis", "casey.miller", "riley.garcia", "avery.martinez", "drew.anderson",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	username := usernames[rand.Intn(len(usernames))]
-	domain := domains[rand.Intn(len(domains))]
+	username := usernames[randInt(len(usernames))]
+	domain := domains[randInt(len(domains))]
 
 	return fmt.Sprintf("%s@%s", username, domain)
 }
 
 func (s *FakeDataStrategy) generateFakePhone() string {
-	rand.Seed(time.Now().UnixNano())
 	// Use 555 prefix which is reserved for fictional use
-	return fmt.Sprintf("555-%03d-%04d", rand.Intn(1000), rand.Intn(10000))
+	return fmt.Sprintf("555-%03d-%04d", randInt(1000), randInt(10000))
 }
 
 func (s *FakeDataStrategy) generateFakeAddress() string {
-	streetNumbers := rand.Intn(9999) + 1
+	streetNumbers := randInt(9999) + 1
 	streetNames := []string{
 		"Main St", "Oak Ave", "Pine Rd", "Elm Dr", "First St", "Second Ave",
 		"Third Blvd", "Fourth Pl", "Fifth Way", "Sixth Ct", "Maple St", "Cedar Ave",
 		"Birch Rd", "Willow Dr", "Cherry St", "Walnut Ave", "Hickory Blvd",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	streetName := streetNames[rand.Intn(len(streetNames))]
+	streetName := streetNames[randInt(len(streetNames))]
 
 	return fmt.Sprintf("%d %s", streetNumbers, streetName)
 }
@@ -173,18 +167,16 @@ func (s *FakeDataStrategy) generateFakeCompany() string {
 		"Industries", "Group", "Associates", "Partners", "Consulting", "Holdings",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	prefix := prefixes[rand.Intn(len(prefixes))]
-	suffix := suffixes[rand.Intn(len(suffixes))]
+	prefix := prefixes[randInt(len(prefixes))]
+	suffix := suffixes[randInt(len(suffixes))]
 
 	return fmt.Sprintf("%s %s", prefix, suffix)
 }
 
 func (s *FakeDataStrategy) generateFakeDate() string {
-	rand.Seed(time.Now().UnixNano())
-	year := rand.Intn(50) + 1970 // 1970-2020
-	month := rand.Intn(12) + 1   // 1-12
-	day := rand.Intn(28) + 1     // 1-28 (safe for all months)
+	year := randIntRange(1970, 2020) // 1970-2020
+	month := randIntRange(1, 13)     // 1-12
+	day := randIntRange(1, 29)       // 1-28 (safe for all months)
 
 	return fmt.Sprintf("%04d-%02d-%02d", year, month, day)
 }
@@ -196,8 +188,7 @@ func (s *FakeDataStrategy) generateFakeCity() string {
 		"Auburn", "Milton", "Lexington", "Riverside", "Arlington", "Fairfield",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	return cities[rand.Intn(len(cities))]
+	return cities[randInt(len(cities))]
 }
 
 func (s *FakeDataStrategy) generateFakeState() string {
@@ -207,8 +198,7 @@ func (s *FakeDataStrategy) generateFakeState() string {
 		"Washington", "Arizona", "Massachusetts", "Tennessee", "Indiana", "Missouri",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	return states[rand.Intn(len(states))]
+	return states[randInt(len(states))]
 }
 
 func (s *FakeDataStrategy) generateFakeCountry() string {
@@ -218,8 +208,7 @@ func (s *FakeDataStrategy) generateFakeCountry() string {
 		"Switzerland", "Austria", "Belgium", "Finland", "Ireland", "New Zealand",
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	return countries[rand.Intn(len(countries))]
+	return countries[randInt(len(countries))]
 }
 
 func (s *FakeDataStrategy) generateGenericFakeData(original string) string {

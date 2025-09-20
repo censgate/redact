@@ -3,9 +3,7 @@ package strategies
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"strings"
-	"time"
 )
 
 // SemanticStrategy replaces sensitive data with semantically similar but fake data
@@ -101,56 +99,49 @@ func (s *SemanticStrategy) generateFakeEmail() string {
 	domains := []string{"example.com", "test.org", "sample.net", "demo.co"}
 	names := []string{"john.doe", "jane.smith", "alex.johnson", "chris.wilson"}
 
-	rand.Seed(time.Now().UnixNano())
-	name := names[rand.Intn(len(names))]
-	domain := domains[rand.Intn(len(domains))]
+	name := names[randInt(len(names))]
+	domain := domains[randInt(len(domains))]
 
 	return fmt.Sprintf("%s@%s", name, domain)
 }
 
 func (s *SemanticStrategy) generateFakePhone() string {
-	rand.Seed(time.Now().UnixNano())
-	return fmt.Sprintf("555-%03d-%04d", rand.Intn(1000), rand.Intn(10000))
+	return fmt.Sprintf("555-%03d-%04d", randInt(1000), randInt(10000))
 }
 
 func (s *SemanticStrategy) generateFakeSSN() string {
-	rand.Seed(time.Now().UnixNano())
 	return fmt.Sprintf("%03d-%02d-%04d",
-		rand.Intn(900)+100, // First 3 digits (100-999)
-		rand.Intn(100),     // Middle 2 digits (00-99)
-		rand.Intn(10000))   // Last 4 digits (0000-9999)
+		randIntRange(100, 1000), // First 3 digits (100-999)
+		randInt(100),            // Middle 2 digits (00-99)
+		randInt(10000))          // Last 4 digits (0000-9999)
 }
 
 func (s *SemanticStrategy) generateFakeCreditCard() string {
-	rand.Seed(time.Now().UnixNano())
-	return fmt.Sprintf("4111-1111-1111-%04d", rand.Intn(10000))
+	return fmt.Sprintf("4111-1111-1111-%04d", randInt(10000))
 }
 
 func (s *SemanticStrategy) generateFakeName() string {
 	firstNames := []string{"John", "Jane", "Alex", "Chris", "Taylor", "Jordan"}
 	lastNames := []string{"Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia"}
 
-	rand.Seed(time.Now().UnixNano())
-	firstName := firstNames[rand.Intn(len(firstNames))]
-	lastName := lastNames[rand.Intn(len(lastNames))]
+	firstName := firstNames[randInt(len(firstNames))]
+	lastName := lastNames[randInt(len(lastNames))]
 
 	return fmt.Sprintf("%s %s", firstName, lastName)
 }
 
 func (s *SemanticStrategy) generateFakeAddress() string {
 	streets := []string{"Main St", "Oak Ave", "Pine Rd", "Elm Dr", "First St"}
-	rand.Seed(time.Now().UnixNano())
-	number := rand.Intn(9999) + 1
-	street := streets[rand.Intn(len(streets))]
+	number := randInt(9999) + 1
+	street := streets[randInt(len(streets))]
 
 	return fmt.Sprintf("%d %s", number, street)
 }
 
 func (s *SemanticStrategy) generateFakeDate() string {
-	rand.Seed(time.Now().UnixNano())
-	year := rand.Intn(50) + 1970 // 1970-2020
-	month := rand.Intn(12) + 1   // 1-12
-	day := rand.Intn(28) + 1     // 1-28 (safe for all months)
+	year := randIntRange(1970, 2020) // 1970-2020
+	month := randIntRange(1, 13)     // 1-12
+	day := randIntRange(1, 29)       // 1-28 (safe for all months)
 
 	return fmt.Sprintf("%04d-%02d-%02d", year, month, day)
 }
