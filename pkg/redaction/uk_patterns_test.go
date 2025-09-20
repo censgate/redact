@@ -94,11 +94,11 @@ func TestUKNationalInsuranceNumbers(t *testing.T) {
 				t.Errorf("Expected %d NI numbers, got %d for text: %s", tc.count, niCount, tc.text)
 			}
 
-		// If we expected to find NI numbers, verify they were redacted
-		if tc.expected && !strings.Contains(result.RedactedText, "AB123456C") && !strings.Contains(result.RedactedText, "JK987654A") {
-			// This is good - the NI numbers should be redacted
-			t.Logf("NI numbers were properly redacted")
-		}
+			// If we expected to find NI numbers, verify they were redacted
+			if tc.expected && !strings.Contains(result.RedactedText, "AB123456C") && !strings.Contains(result.RedactedText, "JK987654A") {
+				// This is good - the NI numbers should be redacted
+				t.Logf("NI numbers were properly redacted")
+			}
 		})
 	}
 }

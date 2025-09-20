@@ -81,7 +81,6 @@ type PolicyAwareProvider = PolicyAwareEngine
 // LLMProvider is a backward compatibility alias for LLMEngine.
 type LLMProvider = LLMEngine
 
-
 // Request represents a redaction request
 type Request struct {
 	Text           string                 `json:"text"`
