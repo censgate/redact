@@ -168,6 +168,7 @@ update_changelog() {
     local today=$(date +"%Y-%m-%d")
     local temp_file=$(mktemp)
     
+    # Create header
     cat > "$temp_file" << EOF
 # Changelog
 
@@ -176,25 +177,28 @@ All notable changes to this project will be documented in this file.
 ## [$new_version] - $today
 
 ### Added
-- Interactive CLI mode with `redactctl interactive` command
-- Comprehensive help text for all CLI commands
-- Automated version management system
+- 
 
 ### Fixed
-- Fixed stdin input handling for piped commands
-- Fixed configuration duration parsing (30d -> 720h)
-- Updated license references from MIT to Apache 2.0
+- 
 
 ### Changed
-- Improved CLI command structure and help documentation
-- Enhanced error handling and user feedback
+- 
 
 EOF
     
-    # Append existing changelog content (skip header lines)
+    # Append existing changelog content (preserve formatting)
     if [[ -s "$file" ]]; then
-        # Skip the header lines: "# Changelog" and "All notable changes..." and empty lines
-        tail -n +2 "$file" | sed '/^All notable changes to this project will be documented in this file\.$/d' | sed '/^$/d' >> "$temp_file"
+        # Skip only the header lines, preserve everything else including empty lines
+        # Find the first line that starts with "## [" (version entry)
+        local first_version_line=$(grep -n "^## \[" "$file" | head -1 | cut -d: -f1)
+        if [[ -n "$first_version_line" ]]; then
+            # Copy everything from the first version line onwards
+            tail -n +"$first_version_line" "$file" >> "$temp_file"
+        else
+            # If no version found, skip just the header lines
+            tail -n +4 "$file" >> "$temp_file"
+        fi
     fi
     
     mv "$temp_file" "$file"
