@@ -491,6 +491,132 @@ func TestGenerateReplacementMethod(t *testing.T) {
 	}
 }
 
+// TestOverlappingRedactions tests the fix for the overlapping redactions bug
+func TestOverlappingRedactions(t *testing.T) {
+	engine := NewEngine()
+
+	t.Run("Multiple overlaps resolved correctly", func(t *testing.T) {
+		// Create a scenario where one redaction overlaps with multiple existing ones
+		// This tests the specific bug where the break statement prevented checking all overlaps
+
+		// Create test redactions that will overlap
+		redactions := []Redaction{
+			{Type: TypeEmail, Start: 0, End: 10, Original: "test@email", Replacement: "[EMAIL]"},
+			{Type: TypePhone, Start: 15, End: 25, Original: "1234567890", Replacement: "[PHONE]"},         // Overlaps with SSN
+			{Type: TypeSSN, Start: 20, End: 30, Original: "123456789", Replacement: "[SSN]"},              // Overlaps with phone and credit card
+			{Type: TypeCreditCard, Start: 25, End: 42, Original: "4444555566667777", Replacement: "[CC]"}, // Overlaps with SSN
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		// The credit card redaction (longest) should win and replace both phone and SSN
+		// Email should remain as it doesn't overlap with any others
+		if len(resolved) != 2 {
+			t.Errorf("Expected 2 resolved redactions, got %d", len(resolved))
+			for i, r := range resolved {
+				t.Logf("Resolved[%d]: Type=%s, Start=%d, End=%d", i, r.Type, r.Start, r.End)
+			}
+		}
+
+		// Check that we have email and credit card (the winners)
+		hasEmail := false
+		hasCreditCard := false
+		for _, r := range resolved {
+			if r.Type == TypeEmail {
+				hasEmail = true
+			}
+			if r.Type == TypeCreditCard {
+				hasCreditCard = true
+			}
+		}
+
+		if !hasEmail {
+			t.Error("Expected email redaction to be preserved")
+		}
+		if !hasCreditCard {
+			t.Error("Expected credit card redaction to win over overlapping phone and SSN")
+		}
+	})
+
+	t.Run("Priority-based resolution", func(t *testing.T) {
+		// Test that UK-specific types have higher priority
+		redactions := []Redaction{
+			{Type: TypePhone, Start: 0, End: 15, Original: "+44 20 1234 5678", Replacement: "[PHONE]"},
+			{Type: TypeUKPhoneNumber, Start: 0, End: 15, Original: "+44 20 1234 5678", Replacement: "[UK_PHONE]"},
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		if len(resolved) != 1 {
+			t.Errorf("Expected 1 resolved redaction, got %d", len(resolved))
+		}
+
+		if resolved[0].Type != TypeUKPhoneNumber {
+			t.Errorf("Expected UK phone number to win over generic phone, got %s", resolved[0].Type)
+		}
+	})
+
+	t.Run("Length-based resolution", func(t *testing.T) {
+		// Test that longer matches win over shorter ones
+		redactions := []Redaction{
+			{Type: TypeZipCode, Start: 0, End: 5, Original: "12345", Replacement: "[ZIP]"},
+			{Type: TypeSSN, Start: 0, End: 11, Original: "123-45-6789", Replacement: "[SSN]"}, // Longer match
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		if len(resolved) != 1 {
+			t.Errorf("Expected 1 resolved redaction, got %d", len(resolved))
+		}
+
+		if resolved[0].Type != TypeSSN {
+			t.Errorf("Expected SSN (longer match) to win over ZIP code, got %s", resolved[0].Type)
+		}
+	})
+
+	t.Run("No overlaps - all preserved", func(t *testing.T) {
+		// Test that non-overlapping redactions are all preserved
+		redactions := []Redaction{
+			{Type: TypeEmail, Start: 0, End: 10, Original: "test@email", Replacement: "[EMAIL]"},
+			{Type: TypePhone, Start: 15, End: 25, Original: "1234567890", Replacement: "[PHONE]"},
+			{Type: TypeSSN, Start: 30, End: 40, Original: "123456789", Replacement: "[SSN]"},
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		if len(resolved) != 3 {
+			t.Errorf("Expected 3 resolved redactions (no overlaps), got %d", len(resolved))
+		}
+	})
+
+	t.Run("Chain of overlaps", func(t *testing.T) {
+		// Test a chain where A overlaps B, B overlaps C, etc.
+		redactions := []Redaction{
+			{Type: TypeEmail, Start: 0, End: 10, Original: "test@email", Replacement: "[EMAIL]"},
+			{Type: TypePhone, Start: 8, End: 18, Original: "1234567890", Replacement: "[PHONE]"},          // Overlaps with email
+			{Type: TypeSSN, Start: 16, End: 26, Original: "123456789", Replacement: "[SSN]"},              // Overlaps with phone
+			{Type: TypeCreditCard, Start: 24, End: 40, Original: "4444555566667777", Replacement: "[CC]"}, // Overlaps with SSN
+		}
+
+		resolved := engine.resolveOverlappingRedactions(redactions)
+
+		// Each should win based on length and priority rules
+		// This tests that the fix correctly handles the chain without the break statement issue
+		if len(resolved) == 0 {
+			t.Error("Expected at least one resolved redaction")
+		}
+
+		// Verify no overlaps remain in the final result
+		for i := 0; i < len(resolved); i++ {
+			for j := i + 1; j < len(resolved); j++ {
+				if engine.redactionsOverlap(resolved[i], resolved[j]) {
+					t.Errorf("Found overlapping redactions in final result: %v and %v", resolved[i], resolved[j])
+				}
+			}
+		}
+	})
+}
+
 // Helper function to extract redaction types from results
 func getRedactionTypes(redactions []Redaction) []Type {
 	types := make([]Type, len(redactions))

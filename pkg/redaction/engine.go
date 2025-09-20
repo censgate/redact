@@ -717,25 +717,44 @@ func (re *Engine) resolveOverlappingRedactions(redactions []Redaction) []Redacti
 	var resolved []Redaction
 
 	for _, current := range redactions {
-		overlaps := false
+		overlappingIndices := []int{}
 
-		// Check if current redaction overlaps with any already resolved redaction
+		// Find all overlapping redactions
 		for i, existing := range resolved {
 			if re.redactionsOverlap(current, existing) {
-				overlaps = true
-
-				// Conflict resolution: prefer longer match, then by type priority
-				if re.shouldReplaceRedaction(current, existing) {
-					resolved[i] = current // Replace existing with current
-				}
-				// If existing wins, do nothing (keep existing)
-				break
+				overlappingIndices = append(overlappingIndices, i)
 			}
 		}
 
-		// If no overlap, add the redaction
-		if !overlaps {
+		if len(overlappingIndices) == 0 {
+			// No overlaps, add the redaction
 			resolved = append(resolved, current)
+		} else {
+			// Handle overlaps - determine if current should replace any/all overlapping redactions
+			shouldAdd := true
+			indicesToRemove := []int{}
+
+			for _, idx := range overlappingIndices {
+				existing := resolved[idx]
+				if re.shouldReplaceRedaction(current, existing) {
+					// Current wins over this existing redaction
+					indicesToRemove = append(indicesToRemove, idx)
+				} else {
+					// Existing redaction wins, don't add current
+					shouldAdd = false
+					break
+				}
+			}
+
+			if shouldAdd {
+				// Remove overlapping redactions that current wins against (in reverse order to maintain indices)
+				for i := len(indicesToRemove) - 1; i >= 0; i-- {
+					idx := indicesToRemove[i]
+					resolved = append(resolved[:idx], resolved[idx+1:]...)
+				}
+				// Add the current redaction
+				resolved = append(resolved, current)
+			}
 		}
 	}
 
