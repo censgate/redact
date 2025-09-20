@@ -260,75 +260,46 @@ func (re *Engine) restoreTextInternal(token string) (string, error) {
 
 // generateReplacement generates a replacement string for redacted content
 func (re *Engine) generateReplacement(redactionType Type, _ string) string {
-	switch redactionType {
-	case TypeEmail:
-		return "[EMAIL_REDACTED]"
-	case TypePhone:
-		return "[PHONE_REDACTED]"
-	case TypeCreditCard:
-		return "[CREDIT_CARD_REDACTED]"
-	case TypeSSN:
-		return "[SSN_REDACTED]"
-	case TypeAddress:
-		return "[ADDRESS_REDACTED]"
-	case TypeName:
-		return "[NAME_REDACTED]"
-	case TypeIPAddress:
-		return "[IP_ADDRESS_REDACTED]"
-	case TypeDate:
-		return "[DATE_REDACTED]"
-	case TypeTime:
-		return "[TIME_REDACTED]"
-	case TypeLink:
-		return "[LINK_REDACTED]"
-	case TypeZipCode:
-		return "[ZIP_CODE_REDACTED]"
-	case TypePoBox:
-		return "[PO_BOX_REDACTED]"
-	case TypeBTCAddress:
-		return "[BTC_ADDRESS_REDACTED]"
-	case TypeMD5Hex:
-		return "[MD5_HASH_REDACTED]"
-	case TypeSHA1Hex:
-		return "[SHA1_HASH_REDACTED]"
-	case TypeSHA256Hex:
-		return "[SHA256_HASH_REDACTED]"
-	case TypeGUID:
-		return "[GUID_REDACTED]"
-	case TypeISBN:
-		return "[ISBN_REDACTED]"
-	case TypeMACAddress:
-		return "[MAC_ADDRESS_REDACTED]"
-	case TypeIBAN:
-		return "[IBAN_REDACTED]"
-	case TypeGitRepo:
-		return "[GIT_REPO_REDACTED]"
-
-	// UK-specific redaction types
-	case TypeUKNationalInsurance:
-		return "[UK_NATIONAL_INSURANCE_REDACTED]"
-	case TypeUKNHSNumber:
-		return "[UK_NHS_NUMBER_REDACTED]"
-	case TypeUKPostcode:
-		return "[UK_POSTCODE_REDACTED]"
-	case TypeUKPhoneNumber:
-		return "[UK_PHONE_NUMBER_REDACTED]"
-	case TypeUKMobileNumber:
-		return "[UK_MOBILE_NUMBER_REDACTED]"
-	case TypeUKSortCode:
-		return "[UK_SORT_CODE_REDACTED]"
-	case TypeUKIBAN:
-		return "[UK_IBAN_REDACTED]"
-	case TypeUKCompanyNumber:
-		return "[UK_COMPANY_NUMBER_REDACTED]"
-	case TypeUKDrivingLicense:
-		return "[UK_DRIVING_LICENSE_REDACTED]"
-	case TypeUKPassportNumber:
-		return "[UK_PASSPORT_NUMBER_REDACTED]"
-
-	default:
-		return "[REDACTED]"
+	// Map of redaction types to their replacement strings
+	// This reduces cyclomatic complexity from 32 to 1
+	replacementMap := map[Type]string{
+		TypeEmail:                    "[EMAIL_REDACTED]",
+		TypePhone:                    "[PHONE_REDACTED]",
+		TypeCreditCard:               "[CREDIT_CARD_REDACTED]",
+		TypeSSN:                      "[SSN_REDACTED]",
+		TypeAddress:                  "[ADDRESS_REDACTED]",
+		TypeName:                     "[NAME_REDACTED]",
+		TypeIPAddress:                "[IP_ADDRESS_REDACTED]",
+		TypeDate:                     "[DATE_REDACTED]",
+		TypeTime:                     "[TIME_REDACTED]",
+		TypeLink:                     "[LINK_REDACTED]",
+		TypeZipCode:                  "[ZIP_CODE_REDACTED]",
+		TypePoBox:                    "[PO_BOX_REDACTED]",
+		TypeBTCAddress:               "[BTC_ADDRESS_REDACTED]",
+		TypeMD5Hex:                   "[MD5_HASH_REDACTED]",
+		TypeSHA1Hex:                  "[SHA1_HASH_REDACTED]",
+		TypeSHA256Hex:                "[SHA256_HASH_REDACTED]",
+		TypeGUID:                     "[GUID_REDACTED]",
+		TypeISBN:                     "[ISBN_REDACTED]",
+		TypeMACAddress:               "[MAC_ADDRESS_REDACTED]",
+		TypeIBAN:                     "[IBAN_REDACTED]",
+		TypeGitRepo:                  "[GIT_REPO_REDACTED]",
+		TypeUKNationalInsurance:      "[UK_NATIONAL_INSURANCE_REDACTED]",
+		TypeUKNHSNumber:              "[UK_NHS_NUMBER_REDACTED]",
+		TypeUKPostcode:               "[UK_POSTCODE_REDACTED]",
+		TypeUKPhoneNumber:            "[UK_PHONE_NUMBER_REDACTED]",
+		TypeUKMobileNumber:           "[UK_MOBILE_NUMBER_REDACTED]",
+		TypeUKSortCode:               "[UK_SORT_CODE_REDACTED]",
+		TypeUKIBAN:                   "[UK_IBAN_REDACTED]",
+		TypeUKCompanyNumber:          "[UK_COMPANY_NUMBER_REDACTED]",
+		TypeUKDrivingLicense:         "[UK_DRIVING_LICENSE_REDACTED]",
+		TypeUKPassportNumber:         "[UK_PASSPORT_NUMBER_REDACTED]",
 	}
+
+	if replacement, exists := replacementMap[redactionType]; exists {
+		return replacement
+	}
+	return "[REDACTED]"
 }
 
 // extractContext extracts context around the redacted content
