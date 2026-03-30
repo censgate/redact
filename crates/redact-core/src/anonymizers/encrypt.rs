@@ -11,7 +11,7 @@ use aes_gcm::{
 };
 use anyhow::{anyhow, Result};
 use pbkdf2::pbkdf2_hmac;
-use rand::Rng;
+use rand::RngExt;
 use sha2::Sha256;
 use uuid::Uuid;
 
@@ -47,16 +47,16 @@ impl EncryptAnonymizer {
 
     /// Encrypt a value
     fn encrypt_value(&self, value: &str, password: &str) -> Result<(String, Vec<u8>)> {
-        // Generate cryptographically secure random salt using thread_rng
-        let mut rng = rand::thread_rng();
-        let salt: [u8; 16] = rng.gen();
+        // Generate cryptographically secure random salt
+        let mut rng = rand::rng();
+        let salt: [u8; 16] = rng.random();
 
         // Derive key
         let key_bytes = self.derive_key(password, &salt);
         let cipher = Aes256Gcm::new((&key_bytes).into());
 
         // Generate cryptographically secure random nonce
-        let nonce_bytes: [u8; 12] = rng.gen();
+        let nonce_bytes: [u8; 12] = rng.random();
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         // Encrypt

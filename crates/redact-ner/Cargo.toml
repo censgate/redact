@@ -15,7 +15,7 @@ description = "Named Entity Recognition for PII detection using ONNX Runtime"
 redact-core = { path = "../redact-core", version = "0.7.1" }
 ort = { workspace = true }
 ndarray = { workspace = true }
-tokenizers = "0.20"
+tokenizers = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

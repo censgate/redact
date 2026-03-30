@@ -320,8 +320,10 @@ impl NerRecognizer {
             if model_path.exists() {
                 debug!("Loading ONNX model from: {}", config.model_path);
                 match Session::builder()?
-                    .with_optimization_level(GraphOptimizationLevel::Level3)?
-                    .with_intra_threads(4)?
+                    .with_optimization_level(GraphOptimizationLevel::Level3)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
+                    .with_intra_threads(4)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
                     .commit_from_file(&config.model_path)
                 {
                     Ok(s) => {

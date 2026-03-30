@@ -29,7 +29,7 @@ rand = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-rayon = "1.10"
+rayon = "1.11"
 
 [lib]
 name = "redact_core"
