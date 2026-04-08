@@ -10,8 +10,8 @@ homepage.workspace = true
 description = "REST API service for PII detection and anonymization"
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.7.1" }
-redact-ner = { path = "../redact-ner", version = "0.7.1" }
+redact-core = { path = "../redact-core", version = "0.8.0" }
+redact-ner = { path = "../redact-ner", version = "0.8.0" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }

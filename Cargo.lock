@@ -2220,7 +2220,7 @@ dependencies = [
 
 [[package]]
 name = "redact-api"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "redact-cli"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2253,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "redact-core"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2275,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "redact-examples"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "redact-api",
@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "redact-ner"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "ndarray",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "redact-wasm"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "js-sys",
  "redact-core",
