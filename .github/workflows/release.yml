@@ -4,13 +4,19 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v0.8.1)'
+        required: true
+        type: string
 
 permissions:
   contents: write
   packages: write
 
 env:
-  VERSION: ${{ github.ref_name }}
+  VERSION: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build-binaries:
@@ -39,6 +45,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -101,6 +109,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -114,10 +124,10 @@ jobs:
       - name: Create draft GitHub Release and upload assets
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
           draft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.VERSION, '-') }}
           generate_release_notes: true
           files: artifacts/*
         env:
@@ -125,7 +135,7 @@ jobs:
 
       - name: Publish release
         run: |
-          gh release edit ${{ github.ref_name }} --draft=false
+          gh release edit ${{ env.VERSION }} --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -135,6 +145,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -143,7 +155,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Get version from tag
-        run: echo "TAG_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+        run: |
+          TAG_VERSION="${VERSION#v}"
+          echo "TAG_VERSION=$TAG_VERSION" >> $GITHUB_ENV
 
       - name: Verify version matches tag
         run: |
@@ -181,6 +195,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -195,16 +211,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Compute Docker tags
         id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+        run: |
+          VER="${VERSION#v}"
+          MAJOR="${VER%%.*}"
+          MINOR="${VER%.*}"
+          IMAGE="ghcr.io/${{ github.repository }}"
+          TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -212,7 +227,6 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
@@ -223,6 +237,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -237,16 +253,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (full image tags)
+      - name: Compute Docker tags (full)
         id: meta-full
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=full
-            type=semver,pattern={{version}}-full
-            type=semver,pattern={{major}}.{{minor}}-full
-            type=semver,pattern={{major}}-full
+        run: |
+          VER="${VERSION#v}"
+          MAJOR="${VER%%.*}"
+          MINOR="${VER%.*}"
+          IMAGE="ghcr.io/${{ github.repository }}"
+          TAGS="${IMAGE}:full,${IMAGE}:${VER}-full,${IMAGE}:${MINOR}-full,${IMAGE}:${MAJOR}-full"
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build full image for smoke test (amd64 only)
         uses: docker/build-push-action@v5
@@ -319,7 +334,6 @@ jobs:
           file: ./Dockerfile.ner
           push: true
           tags: ${{ steps.meta-full.outputs.tags }}
-          labels: ${{ steps.meta-full.outputs.labels }}
           build-args: |
             NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v1
           cache-from: type=gha,scope=ner-full

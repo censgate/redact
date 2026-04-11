@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   create-tag:
@@ -58,5 +59,13 @@ jobs:
             -f ref="refs/tags/${{ steps.resolve.outputs.tag }}" \
             -f sha="${{ steps.resolve.outputs.sha }}"
           echo "Created tag ${{ steps.resolve.outputs.tag }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger release workflow
+        run: |
+          gh workflow run release.yml \
+            -f tag="${{ steps.resolve.outputs.tag }}"
+          echo "Triggered release workflow for ${{ steps.resolve.outputs.tag }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
