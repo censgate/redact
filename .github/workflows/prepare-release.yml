@@ -84,7 +84,7 @@ jobs:
         run: |
           gh pr create \
             --title "chore: release v${{ env.VERSION }}" \
-            --body "Automated release PR. After merging, create tag: git tag -a v${{ env.VERSION }} -m Release && git push origin v${{ env.VERSION }}" \
+            --body "Automated release PR. Merging will automatically create the \`v${{ env.VERSION }}\` tag and trigger the release workflow." \
             --base main \
             --head release/v${{ env.VERSION }}
         env:

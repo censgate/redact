@@ -1,0 +1,62 @@
+name: Create Release Tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag to create (e.g., v0.8.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    name: Create Release Tag
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag and commit
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.version }}"
+            TAG="${TAG#v}"
+            TAG="v${TAG}"
+            SHA=$(git rev-parse HEAD)
+          else
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+            TAG="${BRANCH#release/}"
+            SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "Will create tag $TAG at $SHA"
+
+      - name: Verify tag does not exist
+        run: |
+          if git tag -l "${{ steps.resolve.outputs.tag }}" | grep -q .; then
+            echo "::error::Tag ${{ steps.resolve.outputs.tag }} already exists"
+            exit 1
+          fi
+
+      - name: Create tag
+        run: |
+          gh api repos/${{ github.repository }}/git/refs \
+            -f ref="refs/tags/${{ steps.resolve.outputs.tag }}" \
+            -f sha="${{ steps.resolve.outputs.sha }}"
+          echo "Created tag ${{ steps.resolve.outputs.tag }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
