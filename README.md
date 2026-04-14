@@ -483,7 +483,9 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 
 ## Roadmap
 
-### v0.6.0 (Current)
+### Pre-1.0.0
+
+#### v0.6.0 (Current)
 
 - [x] Complete Rust rewrite (replacing Go v0.1.0-v0.4.1)
 - [x] 36 pattern-based entity types with checksum validation
@@ -495,6 +497,13 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [x] Full Docker image with embedded NER model (`ghcr.io/censgate/redact:full`)
 - [x] Comprehensive test suite (~75% coverage)
 - [x] Entity overlap resolution with specificity scoring
+
+#### v0.9.0 (Planned)
+
+- [x] Publish crates to crates.io
+- [ ] WebAssembly (WASM) browser support
+- [ ] Streaming API for large texts
+- [ ] Enhanced documentation
 
 ## Contributing
 
