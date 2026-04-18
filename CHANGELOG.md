@@ -55,7 +55,7 @@ Benchmarked against Microsoft Presidio:
 
 The Rust version is a complete rewrite with a different API. Key differences:
 
-| Go (v0.4.x) | Rust (v0.5.0) |
+| Go (v0.4.x) | Rust (v0.8.2) |
 |-------------|---------------|
 | `redactctl` CLI | `redact` CLI |
 | Go library import | Rust crate dependency |
@@ -69,4 +69,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.5.0+.
+Those versions are no longer maintained. Please upgrade to v0.8.2 or later.
