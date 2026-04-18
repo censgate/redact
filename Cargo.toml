@@ -16,6 +16,7 @@ authors = ["Censgate LLC <support@censgate.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/censgate/redact"
 homepage = "https://github.com/censgate/redact"
+readme = "README.md"
 keywords = ["pii", "redaction", "privacy", "gdpr", "hipaa"]
 categories = ["text-processing", "web-programming", "wasm"]
 

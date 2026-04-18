@@ -7,6 +7,8 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+readme.workspace = true
+documentation = "https://docs.rs/redact-wasm"
 description = "WASM bindings for browser and mobile"
 
 [lib]
