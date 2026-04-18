@@ -23,7 +23,7 @@ The **REST API benchmark is the fairest comparison** because:
 ## Quick Start
 
 ```bash
-# Install oha
+# Optional: install oha (the script can download a pinned v1.10.0 binary if your system oha mis-handles -c)
 cargo install oha
 
 # Run benchmark (requires Docker for Presidio)
@@ -35,9 +35,8 @@ cargo install oha
 
 ## Requirements
 
-- [oha](https://github.com/hatoo/oha) (`cargo install oha`)
+- [oha](https://github.com/hatoo/oha) on `PATH`, or set `OHA_BIN` to a compatible binary; `curl` is used to auto-download a pinned release if needed
 - Docker (for Presidio container)
-- Rust toolchain
 - `jq`
 
 ## Output
@@ -45,7 +44,7 @@ cargo install oha
 The benchmark produces:
 
 1. **Console output** - oha's histogram and statistics for each service
-2. **JSON files** - Raw data (`redact-*.json`, `presidio-*.json`)
+2. **Raw text** - oha output (`redact-*.txt`, `presidio-*.txt`)
 3. **Markdown report** - Summary comparison (`results-*.md`)
 
 ## Criterion Micro-Benchmarks
@@ -63,22 +62,24 @@ Benchmarks include:
 - Anonymization strategies (replace, mask, hash)
 - Cold vs warm start performance
 
-## Latest Results (2026-01-31)
+## Latest Results (2026-04-18)
+
+The **current** release is **[v0.8.2](https://github.com/censgate/redact/releases/tag/v0.8.2)**. Full report: [results-20260418-175909.md](results-20260418-175909.md).
 
 ### Latency (concurrency=1)
 
 | Metric | Redact (Rust) | Presidio (Python) | Speedup |
 |--------|---------------|-------------------|---------|
-| p50 Latency | 0.20 ms | 6.96 ms | **34x** |
-| p99 Latency | 0.96 ms | 22.50 ms | **23x** |
-| Avg Latency | 0.24 ms | 7.78 ms | **32x** |
+| p50 Latency | 0.196 ms | 6.25 ms | **32x** |
+| p99 Latency | 1.90 ms | 21.68 ms | **11x** |
+| Avg Latency | 0.25 ms | 7.19 ms | — |
 
 ### Throughput (concurrency=10)
 
 | Metric | Redact (Rust) | Presidio (Python) | Speedup |
 |--------|---------------|-------------------|---------|
-| Requests/sec | 16,223 | 171 | **95x** |
+| Requests/sec | 19,416 | 170 | **114x** |
 
-**Environment:** Darwin arm64, Docker containers (distroless for Redact)
+**Environment:** Darwin arm64, Docker containers (builder: `rust:1.93-slim`; Redact runtime uses distroless). Benchmark tool: oha v1.10.0
 
 Results vary by hardware. Run `./scripts/benchmark-comparison.sh` to benchmark on your system.

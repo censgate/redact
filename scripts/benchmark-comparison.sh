@@ -7,7 +7,8 @@
 #
 # Requirements:
 #   - Docker
-#   - oha (cargo install oha)
+#   - oha (https://github.com/hatoo/oha), or set OHA_BIN to a compatible binary.
+#     Some Homebrew builds mis-map -c; this script falls back to pinned v1.10.0.
 #   - jq
 #
 # Usage:
@@ -56,9 +57,43 @@ cleanup() {
 trap cleanup EXIT
 
 # Check dependencies
-command -v oha >/dev/null || err "oha not found. Install: cargo install oha"
 command -v docker >/dev/null || err "docker not found"
 command -v jq >/dev/null || err "jq not found"
+command -v curl >/dev/null || err "curl not found (needed for oha fallback)"
+
+# Resolve oha: optional OHA_BIN, else PATH; if -c is broken, use pinned release binary.
+resolve_oha() {
+    if [[ -n "${OHA_BIN:-}" ]]; then
+        [[ -x "$OHA_BIN" ]] || err "OHA_BIN is not executable: $OHA_BIN"
+        OHABIN=$OHA_BIN
+        return
+    fi
+    command -v oha >/dev/null || err "oha not found. Install from https://github.com/hatoo/oha/releases or set OHA_BIN"
+    local probe
+    probe=$(oha -n 1 -c 1 http://127.0.0.1:1/ 2>&1) || true
+    if echo "$probe" | grep -q "invalid value.*no-color"; then
+        local cache="${HOME}/.cache/redact-benchmark"
+        local ver="1.10.0"
+        local asset
+        case "$(uname -s)/$(uname -m)" in
+            Darwin/arm64) asset="oha-macos-arm64" ;;
+            Darwin/x86_64) asset="oha-macos-amd64" ;;
+            Linux/x86_64) asset="oha-linux-amd64" ;;
+            Linux/aarch64) asset="oha-linux-arm64" ;;
+            *) err "Unsupported OS/arch for automatic oha download; set OHA_BIN" ;;
+        esac
+        mkdir -p "$cache"
+        if [[ ! -x "${cache}/oha-${ver}" ]]; then
+            info "Downloading oha ${ver} (${asset}) — system oha mis-handles -c..."
+            curl -fsSL "https://github.com/hatoo/oha/releases/download/v${ver}/${asset}" -o "${cache}/oha-${ver}"
+            chmod +x "${cache}/oha-${ver}"
+        fi
+        OHABIN="${cache}/oha-${ver}"
+    else
+        OHABIN=oha
+    fi
+}
+resolve_oha
 
 echo ""
 echo "========================================"
@@ -122,7 +157,7 @@ echo ""
 info "Latency Test (concurrency=1, requests=$REQUESTS)"
 echo ""
 echo "--- Redact ---"
-oha -n "$REQUESTS" -c 1 \
+"$OHABIN" -n "$REQUESTS" -c 1 \
     --method POST \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
@@ -131,7 +166,7 @@ oha -n "$REQUESTS" -c 1 \
 
 echo ""
 echo "--- Presidio ---"
-oha -n "$REQUESTS" -c 1 \
+"$OHABIN" -n "$REQUESTS" -c 1 \
     --method POST \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
@@ -144,7 +179,7 @@ echo ""
 info "Throughput Test (concurrency=10, requests=$THROUGHPUT_REQUESTS)"
 echo ""
 echo "--- Redact ---"
-oha -n "$THROUGHPUT_REQUESTS" -c 10 \
+"$OHABIN" -n "$THROUGHPUT_REQUESTS" -c 10 \
     --method POST \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
@@ -153,7 +188,7 @@ oha -n "$THROUGHPUT_REQUESTS" -c 10 \
 
 echo ""
 echo "--- Presidio ---"
-oha -n "$THROUGHPUT_REQUESTS" -c 10 \
+"$OHABIN" -n "$THROUGHPUT_REQUESTS" -c 10 \
     --method POST \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" \
@@ -222,7 +257,7 @@ Entities detected: EMAIL_ADDRESS, PHONE_NUMBER, US_SSN
 
 - **Redact:** Docker container (rust:1.93-slim base)
 - **Presidio:** Docker container (mcr.microsoft.com/presidio-analyzer:latest)
-- **Benchmark tool:** oha v$(oha --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")
+- **Benchmark tool:** oha v$("$OHABIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")
 
 ## Raw Data
 
