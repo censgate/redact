@@ -14,7 +14,7 @@ documentation = "https://docs.rs/redact-ner"
 description = "Named Entity Recognition for PII detection using ONNX Runtime"
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.8.2" }
+redact-core = { path = "../redact-core", version = "0.8.3" }
 ort = { workspace = true }
 ndarray = { workspace = true }
 tokenizers = "0.22"

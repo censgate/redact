@@ -12,8 +12,8 @@ documentation = "https://docs.rs/redact-cli"
 description = "CLI tool for PII detection and anonymization"
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.8.2" }
-redact-ner = { path = "../redact-ner", version = "0.8.2" }
+redact-core = { path = "../redact-core", version = "0.8.3" }
+redact-ner = { path = "../redact-ner", version = "0.8.3" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
