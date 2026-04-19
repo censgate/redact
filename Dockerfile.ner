@@ -20,14 +20,14 @@
 #   and layers it on top, keeping release builds fast (~5 min vs 40-100+ min).
 #
 # Local dev (without pre-built base):
-#   docker build -f Dockerfile.ner-base -t ghcr.io/censgate/redact-ner-base:v1 .
+#   docker build -f Dockerfile.ner-base -t ghcr.io/censgate/redact-ner-base:v2 .
 #   docker build -f Dockerfile.ner -t ghcr.io/censgate/redact:full .
 
 # -----------------------------------------------------------------------------
 # NER base image: pre-built ONNX Runtime + NER model (built asynchronously)
 # Override with --build-arg for local dev or testing a new model.
 # -----------------------------------------------------------------------------
-ARG NER_BASE=ghcr.io/censgate/redact-ner-base:v1
+ARG NER_BASE=ghcr.io/censgate/redact-ner-base:v2
 
 FROM ${NER_BASE} AS ner-base
 

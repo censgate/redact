@@ -133,6 +133,8 @@ docker build -f Dockerfile.ner -t ghcr.io/censgate/redact:full .
 docker run -p 8080:8080 ghcr.io/censgate/redact:full
 ```
 
+The full image uses a pre-built [NER base layer](https://github.com/censgate/redact/pkgs/container/redact-ner-base) (`NER_BASE`, default `ghcr.io/censgate/redact-ner-base:v2`). Override with `--build-arg NER_BASE=...` only if you publish a different tag.
+
 The full image bakes in a pre-exported NER model (`dslim/bert-base-NER`) and sets `NER_MODEL_PATH=/app/model/model.onnx`, so NER is enabled at startup. To enable NER with the default image, mount a directory containing `model.onnx` and `tokenizer.json` and set:
 
 ```bash

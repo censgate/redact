@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Base image version tag (e.g. v1, v2)'
+        description: 'Base image version tag (e.g. v2, v3) — immutable; bump when base contents change'
         required: true
-        default: 'v1'
+        default: 'v2'
       ner_model:
         description: 'HuggingFace NER model name'
         required: true

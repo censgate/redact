@@ -8,7 +8,7 @@
 #   /app/model/config.json       - Label mappings for redact-ner
 #
 # Build:
-#   docker build -f Dockerfile.ner-base -t ghcr.io/censgate/redact-ner-base:v1 .
+#   docker build -f Dockerfile.ner-base -t ghcr.io/censgate/redact-ner-base:v2 .
 #
 # Rebuild only when:
 #   - ONNX Runtime version changes (ONNX_VERSION arg)

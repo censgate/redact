@@ -271,7 +271,7 @@ jobs:
           load: true
           tags: redact-full:smoke-test
           build-args: |
-            NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v1
+            NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v2
           cache-from: type=gha,scope=ner-full
           cache-to: type=gha,mode=max,scope=ner-full
 
@@ -335,7 +335,7 @@ jobs:
           push: true
           tags: ${{ steps.meta-full.outputs.tags }}
           build-args: |
-            NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v1
+            NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v2
           cache-from: type=gha,scope=ner-full
           cache-to: type=gha,mode=max,scope=ner-full
           platforms: linux/amd64,linux/arm64
