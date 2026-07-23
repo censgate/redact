@@ -501,7 +501,7 @@ redact/
 cargo run -p gateway -- --backend-url http://127.0.0.1:11434
 ```
 
-`POST /v1/chat/completions` redacts message content in-process via `redact-core`, then forwards to an OpenAI-compatible upstream. See [`crates/gateway/README.md`](crates/gateway/README.md).
+`POST /v1/chat/completions` (including `stream: true`) redacts prompt and model-output content in-process via `redact-core`, then returns JSON or SSE to the client. See [`crates/gateway/README.md`](crates/gateway/README.md).
 
 ## Testing
 
