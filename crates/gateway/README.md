@@ -2,9 +2,9 @@
 
 OpenAI-compatible AI privacy gateway that embeds [`redact-core`](../redact-core) in-process.
 
-Redacts PII/PHI in chat prompts **before** forwarding to an upstream OpenAI-compatible backend (OpenAI, Azure OpenAI, Ollama, etc.).
+Redacts PII/PHI in **prompts and model outputs** before they leave the gateway boundary.
 
-> **Status:** Early open-core foundation. Bidirectional restore, token vault, OIDC, and immutable audit are planned follow-ups. Streaming is not implemented yet.
+> **Status:** Open-core foundation. Token vault / reversible restore, OIDC, and immutable audit are planned follow-ups.
 
 ## Quick start
 
@@ -13,17 +13,40 @@ Redacts PII/PHI in chat prompts **before** forwarding to an upstream OpenAI-comp
 cargo run -p gateway -- --backend-url http://127.0.0.1:11434
 
 curl -s http://127.0.0.1:8080/health
+
+# Non-streaming
 curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model": "llama3.2",
     "messages": [{"role":"user","content":"Email me at alice@example.com"}]
   }'
+
+# Streaming (SSE)
+curl -sN http://127.0.0.1:8080/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "llama3.2",
+    "stream": true,
+    "messages": [{"role":"user","content":"Email me at alice@example.com"}]
+  }'
 ```
+
+## Behavior
+
+| Direction | Behavior |
+|-----------|----------|
+| **Request** | Anonymize `messages[].content` with `redact-core`, then forward |
+| **Response (JSON)** | Anonymize `choices[].message.content` before returning |
+| **Response (stream)** | Consume upstream SSE, concatenate `delta.content`, redact the full text, re-emit OpenAI-compatible SSE |
+
+Streaming buffers the upstream event stream on purpose so entities split across token deltas are not missed. Clients still receive `text/event-stream` with `data: [DONE]`.
 
 Response headers:
 
-- `x-censgate-redactions-applied`
+- `x-censgate-redactions-applied` — request + response total
+- `x-censgate-request-redactions`
+- `x-censgate-response-redactions`
 - `x-censgate-redaction-types`
 
 ## Configuration
@@ -40,13 +63,16 @@ Response headers:
 ## Library
 
 ```rust
-use gateway::redact::redact_chat_request;
+use gateway::redact::{redact_chat_request, redact_chat_response_json};
 use gateway::openai::ChatCompletionRequest;
 use redact_core::{AnalyzerEngine, AnonymizerConfig};
 
 let engine = AnalyzerEngine::new();
+let config = AnonymizerConfig::default();
 let mut req = /* ChatCompletionRequest */;
-let outcome = redact_chat_request(&engine, &mut req, &AnonymizerConfig::default())?;
+redact_chat_request(&engine, &mut req, &config)?;
+let mut resp = /* serde_json::Value chat.completion */;
+redact_chat_response_json(&engine, &mut resp, &config)?;
 ```
 
 ## Open core

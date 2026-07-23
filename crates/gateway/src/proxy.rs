@@ -20,6 +20,12 @@ pub struct UpstreamResponse {
     pub body: Value,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpstreamStreamResponse {
+    pub status: u16,
+    pub body: String,
+}
+
 impl HttpChatUpstream {
     pub fn new(backend_url: impl AsRef<str>, api_key: Option<String>) -> Result<Self> {
         let base = backend_url.as_ref().trim_end_matches('/');
@@ -30,7 +36,7 @@ impl HttpChatUpstream {
         })
     }
 
-    pub async fn chat_completions(&self, body: &Value) -> Result<UpstreamResponse> {
+    fn auth_headers(&self) -> Result<HeaderMap> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         if let Some(key) = &self.api_key {
@@ -41,11 +47,14 @@ impl HttpChatUpstream {
                     .map_err(|e| anyhow!("invalid api key header: {e}"))?,
             );
         }
+        Ok(headers)
+    }
 
+    pub async fn chat_completions(&self, body: &Value) -> Result<UpstreamResponse> {
         let response = self
             .client
             .post(&self.chat_url)
-            .headers(headers)
+            .headers(self.auth_headers()?)
             .json(body)
             .send()
             .await?;
@@ -61,5 +70,23 @@ impl HttpChatUpstream {
         });
 
         Ok(UpstreamResponse { status, body })
+    }
+
+    /// Request a streaming chat completion and buffer the full SSE body.
+    ///
+    /// Buffering is intentional: response redaction requires complete content so
+    /// entities split across token deltas are not missed.
+    pub async fn chat_completions_stream(&self, body: &Value) -> Result<UpstreamStreamResponse> {
+        let response = self
+            .client
+            .post(&self.chat_url)
+            .headers(self.auth_headers()?)
+            .json(body)
+            .send()
+            .await?;
+
+        let status = response.status().as_u16();
+        let body = response.text().await?;
+        Ok(UpstreamStreamResponse { status, body })
     }
 }

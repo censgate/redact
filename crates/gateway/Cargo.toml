@@ -27,6 +27,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
 clap = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

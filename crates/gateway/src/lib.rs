@@ -13,6 +13,7 @@ pub mod proxy;
 pub mod redact;
 pub mod routes;
 pub mod server;
+pub mod stream;
 
 pub use config::GatewayConfig;
 pub use server::GatewayServer;
