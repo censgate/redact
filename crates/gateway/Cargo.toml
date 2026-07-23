@@ -1,0 +1,39 @@
+[package]
+name = "gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/gateway"
+description = "OpenAI-compatible AI privacy gateway embedding redact-core"
+keywords = ["pii", "redaction", "gateway", "openai", "privacy"]
+categories = ["web-programming", "network-programming"]
+
+[dependencies]
+redact-core = { path = "../redact-core", version = "0.8.3" }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
+axum = { workspace = true }
+
+[[bin]]
+name = "gateway"
+path = "src/main.rs"
