@@ -390,3 +390,249 @@ fn test_multiple_entity_filters() {
         .stdout(predicate::str::contains("UsSsn"))
         .stdout(predicate::str::contains("PhoneNumber").not());
 }
+
+#[test]
+fn test_fail_on_detect_clean_text_exits_zero() {
+    cli()
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("This text has no PII")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No PII entities detected"));
+}
+
+#[test]
+fn test_fail_on_detect_with_pii_exits_nonzero() {
+    cli()
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("Contact me at john@example.com")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("EmailAddress"))
+        .stdout(predicate::str::contains("john@example.com"));
+}
+
+#[test]
+fn test_fail_on_detect_json_output_with_pii_exits_nonzero() {
+    cli()
+        .arg("--format")
+        .arg("json")
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("Email: john@example.com")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("detected_entities"))
+        .stdout(predicate::str::contains("EMAIL_ADDRESS"));
+}
+
+#[test]
+fn test_fail_on_detect_flag_off_by_default() {
+    // Without the flag, PII detection must still exit 0 (backwards compatible).
+    cli()
+        .arg("analyze")
+        .arg("Contact me at john@example.com")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("EmailAddress"));
+}
+
+#[test]
+fn test_fail_on_detect_from_file_exits_nonzero() {
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "Contact: john@example.com").unwrap();
+    temp_file.flush().unwrap();
+
+    cli()
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("-i")
+        .arg(temp_file.path())
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("EmailAddress"));
+}
+
+#[test]
+fn test_analyze_multiple_files_text() {
+    let mut file_a = NamedTempFile::new().unwrap();
+    writeln!(file_a, "Email: alice@example.com").unwrap();
+    file_a.flush().unwrap();
+
+    let mut file_b = NamedTempFile::new().unwrap();
+    writeln!(file_b, "SSN: 123-45-6789").unwrap();
+    file_b.flush().unwrap();
+
+    cli()
+        .arg("analyze")
+        .arg("-i")
+        .arg(file_a.path())
+        .arg(file_b.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("---"))
+        .stdout(predicate::str::contains("EmailAddress"))
+        .stdout(predicate::str::contains("UsSsn"));
+}
+
+#[test]
+fn test_analyze_multiple_files_json_array() {
+    let mut file_a = NamedTempFile::new().unwrap();
+    writeln!(file_a, "Email: alice@example.com").unwrap();
+    file_a.flush().unwrap();
+
+    let mut file_b = NamedTempFile::new().unwrap();
+    writeln!(file_b, "SSN: 123-45-6789").unwrap();
+    file_b.flush().unwrap();
+
+    let output = cli()
+        .arg("--format")
+        .arg("json")
+        .arg("analyze")
+        .arg("-i")
+        .arg(file_a.path())
+        .arg(file_b.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(parsed.is_array(), "multi-file JSON output must be an array");
+    let arr = parsed.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert!(arr[0].get("file").is_some());
+    assert!(arr[0].get("result").is_some());
+    assert!(arr[1].get("file").is_some());
+    assert!(arr[1].get("result").is_some());
+}
+
+#[test]
+fn test_analyze_multiple_files_fail_on_detect_any() {
+    // One clean file, one with PII -> exit 1 because at least one file has detections.
+    let mut file_clean = NamedTempFile::new().unwrap();
+    writeln!(file_clean, "nothing here").unwrap();
+    file_clean.flush().unwrap();
+
+    let mut file_pii = NamedTempFile::new().unwrap();
+    writeln!(file_pii, "Email: alice@example.com").unwrap();
+    file_pii.flush().unwrap();
+
+    cli()
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("-i")
+        .arg(file_clean.path())
+        .arg(file_pii.path())
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("EmailAddress"));
+}
+
+#[test]
+fn test_analyze_multiple_files_all_clean_exits_zero() {
+    let mut file_a = NamedTempFile::new().unwrap();
+    writeln!(file_a, "nothing here").unwrap();
+    file_a.flush().unwrap();
+
+    let mut file_b = NamedTempFile::new().unwrap();
+    writeln!(file_b, "also clean").unwrap();
+    file_b.flush().unwrap();
+
+    cli()
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("-i")
+        .arg(file_a.path())
+        .arg(file_b.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_analyze_long_file_flag() {
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "Email: alice@example.com").unwrap();
+    file.flush().unwrap();
+
+    cli()
+        .arg("analyze")
+        .arg("--file")
+        .arg(file.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("EmailAddress"));
+}
+
+#[test]
+fn test_analyze_multiple_files_repeated_flag() {
+    // Backward-compatible repeated -i flags also work.
+    let mut file_a = NamedTempFile::new().unwrap();
+    writeln!(file_a, "Email: alice@example.com").unwrap();
+    file_a.flush().unwrap();
+
+    let mut file_b = NamedTempFile::new().unwrap();
+    writeln!(file_b, "SSN: 123-45-6789").unwrap();
+    file_b.flush().unwrap();
+
+    cli()
+        .arg("analyze")
+        .arg("-i")
+        .arg(file_a.path())
+        .arg("-i")
+        .arg(file_b.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("EmailAddress"))
+        .stdout(predicate::str::contains("UsSsn"));
+}
+
+#[test]
+fn test_anonymize_multiple_files_text() {
+    let mut file_a = NamedTempFile::new().unwrap();
+    writeln!(file_a, "Email: alice@example.com").unwrap();
+    file_a.flush().unwrap();
+
+    let mut file_b = NamedTempFile::new().unwrap();
+    writeln!(file_b, "SSN: 123-45-6789").unwrap();
+    file_b.flush().unwrap();
+
+    cli()
+        .arg("anonymize")
+        .arg("-i")
+        .arg(file_a.path())
+        .arg(file_b.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("---"))
+        .stdout(predicate::str::contains("[EMAIL_ADDRESS]"))
+        .stdout(predicate::str::contains("[US_SSN]"));
+}
+
+#[test]
+fn test_analyze_single_file_json_no_array_wrapper() {
+    // Single-file JSON must remain a bare object (backward compatible), not an array.
+    let mut temp_file = NamedTempFile::new().unwrap();
+    writeln!(temp_file, "Email: john@example.com").unwrap();
+    temp_file.flush().unwrap();
+
+    let output = cli()
+        .arg("--format")
+        .arg("json")
+        .arg("analyze")
+        .arg("-i")
+        .arg(temp_file.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(parsed.is_object(), "single-file JSON must be an object");
+    assert!(!parsed.is_array());
+    assert!(parsed.get("detected_entities").is_some());
+}

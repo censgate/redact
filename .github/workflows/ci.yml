@@ -55,6 +55,49 @@ jobs:
       - name: Run doc tests
         run: cargo test --workspace --doc
 
+  wasm:
+    name: WASM (pattern-only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pin wasm-pack; taiki-e/install-action is widely used and keeps tools
+      # version-pinned without relying on Node 16-era third-party actions.
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@0.13.1
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: wasm
+
+      # Phase 1 WASM scope: the pattern engine from redact-core compiles to
+      # wasm32-unknown-unknown. NER (redact-ner / ONNX) is intentionally not
+      # part of this build — see the README "WebAssembly" section.
+      # Supported entry point is `redact-wasm` only (not standalone redact-core).
+      - name: Check redact-wasm compiles for wasm32
+        run: cargo check --target wasm32-unknown-unknown -p redact-wasm
+
+      # Execute bindings under Node (wasm-bindgen-test). Proves constructor,
+      # analyze (Timer/Instant path), anonymize, supported_entities, and the
+      # salted-hash error/success contract actually run on wasm32-unknown-unknown.
+      - name: Run WASM runtime tests (Node)
+        run: wasm-pack test --node crates/redact-wasm
+
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest

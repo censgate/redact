@@ -58,7 +58,7 @@ pbkdf2 = { version = "0.13.0-rc.10", features = ["hmac", "sha2"] }
 rand = "0.10"
 
 # Time handling
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 
 # UUID generation
 uuid = { version = "1.23", features = ["v4", "serde"] }
