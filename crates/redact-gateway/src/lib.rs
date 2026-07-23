@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-//! Censgate Gateway — OpenAI-compatible AI privacy gateway.
+//! `redact-gateway` — OpenAI-compatible AI privacy gateway.
 //!
 //! Embeds [`redact_core::AnalyzerEngine`] in-process to redact prompts before
 //! forwarding to an upstream OpenAI-compatible backend.
