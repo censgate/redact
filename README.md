@@ -103,8 +103,10 @@ of detections, preserving existing behavior.
 # Fail the build if a file contains PII
 redact analyze --fail-on-detect -i secrets-check.txt
 
-# Pre-commit hook example (one path per -i argument)
-git diff --cached --name-only -z --diff-filter=ACMRT | xargs -0 redact analyze --fail-on-detect -i || exit 1
+# Pre-commit hook example (NUL-safe paths; skip when nothing is staged)
+if [ "$(git diff --cached --name-only -z --diff-filter=ACMRT | wc -c)" -gt 0 ]; then
+  git diff --cached --name-only -z --diff-filter=ACMRT | xargs -0 redact analyze --fail-on-detect -i || exit 1
+fi
 ```
 
 ### Filter by Entity Type
@@ -117,23 +119,42 @@ redact analyze --entities EmailAddress --entities UsSsn \
 
 ## WebAssembly
 
-The `redact-wasm` crate compiles `redact-core`'s **pattern engine** to
-`wasm32-unknown-unknown` for use in browsers and edge runtimes such as
-Cloudflare Workers. It exposes a `RedactEngine` with `analyze`, `anonymize`, and
+The **`redact-wasm`** crate is the supported WASM entry point. It compiles
+`redact-core`'s **pattern engine** to `wasm32-unknown-unknown` for browsers and
+edge runtimes such as Cloudflare Workers, and wires the JS RNG backends
+(`getrandom` / `uuid`) required on that target. Compiling `redact-core` alone
+for `wasm32-unknown-unknown` is **not** supported.
+
+It exposes a `RedactEngine` with `analyze`, `anonymize` (replace/mask),
+`anonymize_with_hash` (requires a non-empty caller-provided salt), and
 `supported_entities` via `wasm-bindgen`.
 
 ```bash
 # Build (requires wasm-pack and the wasm32-unknown-unknown target)
 rustup target add wasm32-unknown-unknown
-cargo install wasm-pack
+cargo install wasm-pack --version 0.13.1
 wasm-pack build --target web crates/redact-wasm
+
+# Runtime tests under Node (wasm-bindgen-test)
+wasm-pack test --node crates/redact-wasm
+```
+
+```js
+import init, { RedactEngine } from "./pkg/redact_wasm.js";
+await init();
+const engine = new RedactEngine();
+engine.analyze("Contact john@example.com");
+engine.anonymize("Email: john@example.com", "replace");
+// Hash requires caller-provided salt (never generated randomly):
+engine.anonymize_with_hash("SSN 123-45-6789", "app-secret-salt");
 ```
 
 ### What is available
 
 All **36 pattern-based entity types** (email, phone, SSN, credit cards, IBAN, UK
 identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates, ...) and the
-replace/mask/hash anonymization strategies. Typical bundle size is ~1-3 MB.
+replace/mask anonymization strategies, plus salted hash via
+`anonymize_with_hash`. Typical bundle size is ~1-3 MB.
 
 ### What is NOT available in WASM
 

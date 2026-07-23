@@ -13,8 +13,14 @@
 //! - **NER Support**: Named Entity Recognition using ONNX Runtime (via redact-ner)
 //! - **Multiple Anonymization Strategies**: Replace, mask, hash, encrypt
 //! - **Policy-Aware**: Configurable rules and thresholds
-//! - **Multi-platform**: Server, WASM, mobile support
+//! - **Multi-platform**: Server, CLI, and (via `redact-wasm`) WebAssembly
 //! - **High Performance**: Zero-copy where possible, efficient overlap resolution
+//!
+//! # WebAssembly
+//!
+//! For `wasm32-unknown-unknown`, use the **`redact-wasm`** crate as the supported
+//! entry point. It enables the JS RNG backends (`getrandom` / `uuid`) required by
+//! this crate on WASM. Building `redact-core` alone for wasm32 is not supported.
 //!
 //! # Example
 //!

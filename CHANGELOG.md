@@ -17,9 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for multiple files is a single array of `{ "file", "result" }` objects. Single-file
   and inline-text output are unchanged (#94).
 - WASM: `redact-wasm` now exposes a real `RedactEngine` backed by `redact-core`'s
-  pattern engine (36 entity types) via `wasm-bindgen`, with `analyze`, `anonymize`,
-  and `supported_entities` bindings. Compiles for `wasm32-unknown-unknown`; covered
-  by a new CI job.
+  pattern engine (36 entity types) via `wasm-bindgen`, with `analyze`,
+  `anonymize` (replace/mask), `anonymize_with_hash` (required non-empty salt),
+  and `supported_entities` bindings. Compiles for `wasm32-unknown-unknown`; CI
+  runs `cargo check` plus Node `wasm-pack test` runtime coverage. `redact-wasm`
+  is the only supported WASM entry point (standalone `redact-core` wasm32 builds
+  are not supported).
 
 ### Changed
 
@@ -34,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- WASM: `anonymize(..., "hash")` is rejected; unsalted hashing of low-entropy PII
+  is enumerable. Callers must use `anonymize_with_hash(text, salt)` with
+  non-empty caller-provided salt for deterministic pseudonymization (no random
+  salt is generated).
 - Bump `openssl` to 0.10.80 to fix CVE-2026-45784 (GHSA-phqj-4mhp-q6mq, out-of-bounds write in AES-KW-PAD cipher path)
 - Bump `rand` to 0.9.3 to fix GHSA-cq8v-f236-94qc (unsoundness UB when custom logger accesses ThreadRng during reseeding)
   - Updated transitive dependencies in `quinn-proto` and `tokenizers` that also depended on `rand 0.9.2`
