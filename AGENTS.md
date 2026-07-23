@@ -200,3 +200,13 @@ Before committing:
 - **Rust**: 1.93.0 (see `.tool-versions`)
 - **MSRV**: 1.88
 - **Python**: 3.8+ (for NER model export only)
+
+## Cursor Cloud specific instructions
+
+Rust is pinned via **mise** (`.tool-versions`), but `cargo`/`rustc` are the system rustup proxies at `/usr/local/cargo/bin` — non-interactive shells need that on `PATH` (and `~/.local/bin/mise` for mise). Build/test with `mise exec -- cargo ...` from the repo root.
+
+Non-obvious notes:
+
+- The **CLI binary is named `redact`** (crate `redact-cli`), not `redact-cli`: run `mise exec -- cargo run --bin redact -- analyze "test@example.com"` (or `target/debug/redact`). The API binary is `redact-api` (health at `/healthz`, endpoints `POST /api/v1/analyze` and `/api/v1/anonymize`); it honors `HOST`/`PORT`.
+- Building `redact-ner` / the `tokenizers` (`esaxx-rs`) C++ code needs a **GCC** C++ toolchain. The image's default `c++` alias is clang, which fails to find libstdc++ headers (`'cstdint' file not found`); the working setup repoints `c++`/`cc` to `g++`/`gcc`.
+- `redact-core` builds/tests need no ML model; NER e2e (`cargo test -p redact-ner --test ner_e2e -- --ignored`) requires an exported ONNX model.
