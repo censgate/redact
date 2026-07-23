@@ -40,7 +40,7 @@ pub fn create_router(state: AppState) -> Router {
 async fn health() -> impl IntoResponse {
     Json(json!({
         "status": "ok",
-        "service": "gateway",
+        "service": "redact-gateway",
     }))
 }
 

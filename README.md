@@ -488,7 +488,7 @@ redact/
 │   ├── redact-api/       # REST API service (Axum)
 │   ├── redact-cli/       # Command-line tool
 │   ├── redact-wasm/      # WebAssembly bindings
-│   └── gateway/          # OpenAI-compatible privacy gateway (embeds redact-core)
+│   └── redact-gateway/   # OpenAI-compatible privacy gateway (embeds redact-core)
 ├── patterns/             # PII detection patterns (GDPR, HIPAA, CCPA)
 ├── scripts/              # Utility scripts (model export)
 ├── examples/             # Usage examples
@@ -498,10 +498,10 @@ redact/
 ### Privacy gateway (open core)
 
 ```bash
-cargo run -p gateway -- --backend-url http://127.0.0.1:11434
+cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
 ```
 
-`POST /v1/chat/completions` (including `stream: true`) redacts prompt and model-output content in-process via `redact-core`, then returns JSON or SSE to the client. See [`crates/gateway/README.md`](crates/gateway/README.md).
+`POST /v1/chat/completions` (including `stream: true`) redacts prompt and model-output content in-process via `redact-core`, then returns JSON or SSE to the client. See [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md).
 
 ## Testing
 

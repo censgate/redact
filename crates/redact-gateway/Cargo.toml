@@ -1,5 +1,5 @@
 [package]
-name = "gateway"
+name = "redact-gateway"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
-documentation = "https://docs.rs/gateway"
+documentation = "https://docs.rs/redact-gateway"
 description = "OpenAI-compatible AI privacy gateway embedding redact-core"
 keywords = ["pii", "redaction", "gateway", "openai", "privacy"]
 categories = ["web-programming", "network-programming"]
@@ -36,5 +36,5 @@ http-body-util = "0.1"
 axum = { workspace = true }
 
 [[bin]]
-name = "gateway"
+name = "redact-gateway"
 path = "src/main.rs"

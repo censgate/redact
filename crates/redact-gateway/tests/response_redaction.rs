@@ -2,8 +2,8 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-use gateway::redact::redact_chat_response_json;
 use redact_core::{AnalyzerEngine, AnonymizationStrategy, AnonymizerConfig};
+use redact_gateway::redact::redact_chat_response_json;
 use serde_json::json;
 
 #[test]

@@ -3,12 +3,12 @@
 // in the project root for license information.
 
 use clap::Parser;
-use gateway::{GatewayConfig, GatewayServer};
+use redact_gateway::{GatewayConfig, GatewayServer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "gateway",
+    name = "redact-gateway",
     about = "Censgate AI privacy gateway (OpenAI-compatible, embeds redact-core)"
 )]
 struct Cli {
@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "gateway=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "redact_gateway=info,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();

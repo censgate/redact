@@ -60,7 +60,7 @@ impl GatewayServer {
         let addr: SocketAddr = bind_addr.parse()?;
         let listener = TcpListener::bind(addr).await?;
 
-        info!("Censgate gateway listening on {}", addr);
+        info!("Censgate redact-gateway listening on {}", addr);
         info!("Upstream backend: {}", self.config.backend_url);
         info!("Endpoints:");
         info!("  GET  /health                 - Health check");

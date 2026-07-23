@@ -2,9 +2,9 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-use gateway::openai::{ChatCompletionRequest, ChatMessage};
-use gateway::redact::{redact_chat_request, RedactionOutcome};
 use redact_core::{AnalyzerEngine, AnonymizationStrategy, AnonymizerConfig};
+use redact_gateway::openai::{ChatCompletionRequest, ChatMessage};
+use redact_gateway::redact::{redact_chat_request, RedactionOutcome};
 
 #[test]
 fn redact_chat_request_replaces_email_in_user_message() {

@@ -1,6 +1,6 @@
-# Censgate Gateway
+# redact-gateway
 
-OpenAI-compatible AI privacy gateway that embeds [`redact-core`](../redact-core) in-process.
+OpenAI-compatible AI privacy gateway crate (`redact-gateway`) that embeds [`redact-core`](../redact-core) in-process.
 
 Redacts PII/PHI in **prompts and model outputs** before they leave the gateway boundary.
 
@@ -10,7 +10,7 @@ Redacts PII/PHI in **prompts and model outputs** before they leave the gateway b
 
 ```bash
 # From repo root
-cargo run -p gateway -- --backend-url http://127.0.0.1:11434
+cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
 
 curl -s http://127.0.0.1:8080/health
 
@@ -63,8 +63,8 @@ Response headers:
 ## Library
 
 ```rust
-use gateway::redact::{redact_chat_request, redact_chat_response_json};
-use gateway::openai::ChatCompletionRequest;
+use redact_gateway::redact::{redact_chat_request, redact_chat_response_json};
+use redact_gateway::openai::ChatCompletionRequest;
 use redact_core::{AnalyzerEngine, AnonymizerConfig};
 
 let engine = AnalyzerEngine::new();
