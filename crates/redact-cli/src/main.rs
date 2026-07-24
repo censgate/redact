@@ -9,9 +9,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use redact_core::{
     anonymizers::{AnonymizationStrategy, AnonymizerConfig},
-    AnalyzerEngine, EntityType,
+    AnalysisResult, AnalyzerEngine, EntityType,
 };
-use serde_json;
 use std::io::{self, Read};
 use std::path::PathBuf;
 
@@ -39,22 +38,31 @@ enum Commands {
         /// Text to analyze (reads from stdin if not provided)
         text: Option<String>,
 
-        /// Read from file instead
-        #[arg(short = 'i', long)]
-        file: Option<PathBuf>,
+        /// Read from file(s) instead. Accepts multiple paths: `-i f1 f2` or repeated `-i f1 -i f2`.
+        #[arg(short = 'i', long = "file", alias = "files", num_args = 1..)]
+        files: Vec<PathBuf>,
 
         /// Entity types to detect (all if not specified)
         #[arg(short, long)]
         entities: Vec<String>,
+
+        /// Exit with code 1 when PII entities are detected.
+        ///
+        /// Useful for CI gates and pre-commit hooks. Output is printed
+        /// normally before exiting. Default (off) preserves existing
+        /// behavior of exiting 0 on successful analysis regardless of
+        /// detections.
+        #[arg(long, alias = "fail-on-detection", visible_alias = "fail-on-find")]
+        fail_on_detect: bool,
     },
     /// Anonymize detected PII
     Anonymize {
         /// Text to anonymize (reads from stdin if not provided)
         text: Option<String>,
 
-        /// Read from file instead
-        #[arg(short = 'i', long)]
-        file: Option<PathBuf>,
+        /// Read from file(s) instead. Accepts multiple paths: `-i f1 f2` or repeated `-i f1 -i f2`.
+        #[arg(short = 'i', long = "file", alias = "files", num_args = 1..)]
+        files: Vec<PathBuf>,
 
         /// Anonymization strategy
         #[arg(short, long, value_enum, default_value = "replace")]
@@ -104,26 +112,30 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Analyze {
             text,
-            file,
+            files,
             entities,
+            fail_on_detect,
         } => {
-            let input = get_input(text, file)?;
+            let inputs = collect_inputs(text, &files)?;
             let entity_types = parse_entity_types(&entities)?;
-            analyze(&input, &cli.language, entity_types, cli.format)?;
+            let detected = analyze(&inputs, &cli.language, &entity_types, cli.format)?;
+            if fail_on_detect && detected > 0 {
+                std::process::exit(1);
+            }
         }
         Commands::Anonymize {
             text,
-            file,
+            files,
             strategy,
             entities,
         } => {
-            let input = get_input(text, file)?;
+            let inputs = collect_inputs(text, &files)?;
             let entity_types = parse_entity_types(&entities)?;
             anonymize(
-                &input,
+                &inputs,
                 &cli.language,
                 strategy.into(),
-                entity_types,
+                &entity_types,
                 cli.format,
             )?;
         }
@@ -132,17 +144,26 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn get_input(text: Option<String>, file: Option<PathBuf>) -> Result<String> {
+fn collect_inputs(
+    text: Option<String>,
+    files: &[PathBuf],
+) -> Result<Vec<(Option<String>, String)>> {
     if let Some(text) = text {
-        Ok(text)
-    } else if let Some(file_path) = file {
-        Ok(std::fs::read_to_string(file_path)?)
-    } else {
-        // Read from stdin
-        let mut buffer = String::new();
-        io::stdin().read_to_string(&mut buffer)?;
-        Ok(buffer)
+        return Ok(vec![(None, text)]);
     }
+    if !files.is_empty() {
+        let mut inputs = Vec::with_capacity(files.len());
+        for f in files {
+            let content = std::fs::read_to_string(f)
+                .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", f.display(), e))?;
+            inputs.push((Some(f.display().to_string()), content));
+        }
+        return Ok(inputs);
+    }
+    // Read from stdin
+    let mut buffer = String::new();
+    io::stdin().read_to_string(&mut buffer)?;
+    Ok(vec![(None, buffer)])
 }
 
 fn parse_entity_types(entities: &[String]) -> Result<Option<Vec<EntityType>>> {
@@ -206,86 +227,123 @@ fn parse_entity_types(entities: &[String]) -> Result<Option<Vec<EntityType>>> {
 }
 
 fn analyze(
-    text: &str,
+    inputs: &[(Option<String>, String)],
     language: &str,
-    entity_types: Option<Vec<EntityType>>,
+    entity_types: &Option<Vec<EntityType>>,
     format: OutputFormat,
-) -> Result<()> {
+) -> Result<usize> {
     let engine = AnalyzerEngine::new();
+    let multi = inputs.len() > 1;
+    let is_json = matches!(format, OutputFormat::Json);
+    let mut total = 0;
+    let mut json_entries: Vec<serde_json::Value> = Vec::new();
 
-    let result = if let Some(types) = entity_types {
-        engine.analyze_with_entities(text, &types, Some(language))?
-    } else {
-        engine.analyze(text, Some(language))?
-    };
+    for (label, content) in inputs {
+        let result = if let Some(types) = entity_types {
+            engine.analyze_with_entities(content, types, Some(language))?
+        } else {
+            engine.analyze(content, Some(language))?
+        };
+        total += result.detected_entities.len();
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&result)?);
-        }
-        OutputFormat::Text => {
-            if result.detected_entities.is_empty() {
-                println!("No PII entities detected.");
+        if is_json {
+            if multi {
+                let entry = serde_json::json!({
+                    "file": label,
+                    "result": serde_json::to_value(&result)?,
+                });
+                json_entries.push(entry);
             } else {
-                println!(
-                    "Detected {} PII entities:\n",
-                    result.detected_entities.len()
-                );
-                for entity in &result.detected_entities {
-                    let text_preview = entity.text.as_deref().unwrap_or("");
-                    println!(
-                        "  {:?} at {}..{} (score: {:.2}): {}",
-                        entity.entity_type, entity.start, entity.end, entity.score, text_preview
-                    );
-                }
-                println!(
-                    "\nProcessing time: {}ms",
-                    result.metadata.processing_time_ms
-                );
+                println!("{}", serde_json::to_string_pretty(&result)?);
             }
+        } else {
+            if multi {
+                println!("--- {} ---", label.as_deref().unwrap_or("stdin"));
+            }
+            print_analysis_text(&result);
         }
     }
 
-    Ok(())
+    if is_json && multi {
+        println!("{}", serde_json::to_string_pretty(&json_entries)?);
+    }
+
+    Ok(total)
+}
+
+fn print_analysis_text(result: &AnalysisResult) {
+    if result.detected_entities.is_empty() {
+        println!("No PII entities detected.");
+    } else {
+        println!(
+            "Detected {} PII entities:\n",
+            result.detected_entities.len()
+        );
+        for entity in &result.detected_entities {
+            let text_preview = entity.text.as_deref().unwrap_or("");
+            println!(
+                "  {:?} at {}..{} (score: {:.2}): {}",
+                entity.entity_type, entity.start, entity.end, entity.score, text_preview
+            );
+        }
+        println!(
+            "\nProcessing time: {}ms",
+            result.metadata.processing_time_ms
+        );
+    }
 }
 
 fn anonymize(
-    text: &str,
+    inputs: &[(Option<String>, String)],
     language: &str,
     strategy: AnonymizationStrategy,
-    entity_types: Option<Vec<EntityType>>,
+    entity_types: &Option<Vec<EntityType>>,
     format: OutputFormat,
 ) -> Result<()> {
     let engine = AnalyzerEngine::new();
-
-    // First analyze with entity type filtering if specified
-    let analysis = if let Some(ref types) = entity_types {
-        engine.analyze_with_entities(text, types, Some(language))?
-    } else {
-        engine.analyze(text, Some(language))?
-    };
-
     let config = AnonymizerConfig {
         strategy,
         ..Default::default()
     };
+    let multi = inputs.len() > 1;
+    let is_json = matches!(format, OutputFormat::Json);
+    let mut json_entries: Vec<serde_json::Value> = Vec::new();
 
-    // Then anonymize the detected entities
-    let anonymized = engine.anonymizer_registry().anonymize(
-        text,
-        analysis.detected_entities.clone(),
-        &config,
-    )?;
+    for (label, content) in inputs {
+        let analysis = if let Some(ref types) = entity_types {
+            engine.analyze_with_entities(content, types, Some(language))?
+        } else {
+            engine.analyze(content, Some(language))?
+        };
 
-    match format {
-        OutputFormat::Json => {
+        let anonymized = engine.anonymizer_registry().anonymize(
+            content,
+            analysis.detected_entities.clone(),
+            &config,
+        )?;
+
+        if is_json {
             let mut result = analysis;
             result.anonymized = Some(anonymized);
-            println!("{}", serde_json::to_string_pretty(&result)?);
-        }
-        OutputFormat::Text => {
+            if multi {
+                let entry = serde_json::json!({
+                    "file": label,
+                    "result": serde_json::to_value(&result)?,
+                });
+                json_entries.push(entry);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            }
+        } else {
+            if multi {
+                println!("--- {} ---", label.as_deref().unwrap_or("stdin"));
+            }
             println!("{}", anonymized.text);
         }
+    }
+
+    if is_json && multi {
+        println!("{}", serde_json::to_string_pretty(&json_entries)?);
     }
 
     Ok(())

@@ -9,6 +9,32 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// Monotonic timer for `processing_time_ms`.
+///
+/// `std::time::Instant::now()` is not implemented on `wasm32-unknown-unknown`
+/// (it panics at runtime). On WASM we record no elapsed time; on every other
+/// target we use a real `Instant`, preserving native behavior exactly.
+struct Timer {
+    start: Option<Instant>,
+}
+
+impl Timer {
+    fn new() -> Self {
+        Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            start: Some(Instant::now()),
+            #[cfg(target_arch = "wasm32")]
+            start: None,
+        }
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        self.start
+            .map(|s| s.elapsed().as_millis() as u64)
+            .unwrap_or(0)
+    }
+}
+
 /// Main analyzer engine that coordinates recognition and anonymization
 #[derive(Debug, Clone)]
 pub struct AnalyzerEngine {
@@ -74,12 +100,12 @@ impl AnalyzerEngine {
 
     /// Analyze text and detect PII entities
     pub fn analyze(&self, text: &str, language: Option<&str>) -> Result<AnalysisResult> {
-        let start = Instant::now();
+        let start = Timer::new();
         let lang = language.unwrap_or(&self.default_language);
 
         let detected_entities = self.recognizer_registry.analyze(text, lang)?;
 
-        let processing_time_ms = start.elapsed().as_millis() as u64;
+        let processing_time_ms = start.elapsed_ms();
 
         Ok(AnalysisResult {
             original_text: None,
@@ -101,14 +127,14 @@ impl AnalyzerEngine {
         entity_types: &[EntityType],
         language: Option<&str>,
     ) -> Result<AnalysisResult> {
-        let start = Instant::now();
+        let start = Timer::new();
         let lang = language.unwrap_or(&self.default_language);
 
         let detected_entities =
             self.recognizer_registry
                 .analyze_with_entities(text, lang, entity_types)?;
 
-        let processing_time_ms = start.elapsed().as_millis() as u64;
+        let processing_time_ms = start.elapsed_ms();
 
         Ok(AnalysisResult {
             original_text: None,
@@ -147,7 +173,7 @@ impl AnalyzerEngine {
         language: Option<&str>,
         config: &AnonymizerConfig,
     ) -> Result<AnalysisResult> {
-        let start = Instant::now();
+        let start = Timer::new();
         let lang = language.unwrap_or(&self.default_language);
 
         // Analyze
@@ -159,7 +185,7 @@ impl AnalyzerEngine {
                 .anonymize(text, result.detected_entities.clone(), config)?;
 
         result.anonymized = Some(anonymized);
-        result.metadata.processing_time_ms = start.elapsed().as_millis() as u64;
+        result.metadata.processing_time_ms = start.elapsed_ms();
 
         Ok(result)
     }

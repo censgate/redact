@@ -22,3 +22,16 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 js-sys = { workspace = true }
 web-sys = { workspace = true, features = ["console"] }
+
+# WASM-only: enable the JavaScript backend for `getrandom` so that `rand`/`uuid`
+# (used by redact-core's anonymizers) compile on wasm32-unknown-unknown.
+# Multiple `getrandom` major versions appear in the dependency graph; each needs
+# its own wasm feature enabled (js for 0.2, wasm_js for 0.3+).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+getrandom03 = { package = "getrandom", version = "0.3", default-features = false, features = ["wasm_js"] }
+getrandom04 = { package = "getrandom", version = "0.4", default-features = false, features = ["wasm_js"] }
+uuid = { workspace = true, features = ["js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
