@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-use crate::openai::ChatCompletionRequest;
+use crate::openai::{ChatCompletionRequest, MessageContent};
 use anyhow::Result;
 use redact_core::{AnalyzerEngine, AnonymizerConfig};
 use serde_json::Value;
@@ -49,7 +49,7 @@ pub fn redact_text(
     Ok((anonymized.text, outcome))
 }
 
-/// Anonymize string content in each chat message in place.
+/// Anonymize message content and privacy-sensitive top-level request fields.
 pub fn redact_chat_request(
     engine: &AnalyzerEngine,
     request: &mut ChatCompletionRequest,
@@ -61,12 +61,39 @@ pub fn redact_chat_request(
         let Some(content) = message.content.as_mut() else {
             continue;
         };
-        let (redacted, part) = redact_text(engine, content, config)?;
-        if part.redactions_applied == 0 {
-            continue;
+        match content {
+            MessageContent::Text(text) => {
+                let (redacted, part) = redact_text(engine, text, config)?;
+                if part.redactions_applied > 0 {
+                    outcome.merge(&part);
+                    *text = redacted;
+                }
+            }
+            MessageContent::Parts(parts) => {
+                for part in parts {
+                    if part.kind == "text" {
+                        if let Some(text) = part.text.as_mut() {
+                            let (redacted, redaction) = redact_text(engine, text, config)?;
+                            if redaction.redactions_applied > 0 {
+                                outcome.merge(&redaction);
+                                *text = redacted;
+                            }
+                        }
+                    }
+                }
+            }
         }
-        outcome.merge(&part);
-        *content = redacted;
+    }
+
+    // OpenAI `user` is commonly an email or internal id — redact in place when present.
+    if let Some(Value::String(user)) = request.extra.get("user").cloned() {
+        let (redacted, part) = redact_text(engine, &user, config)?;
+        if part.redactions_applied > 0 {
+            outcome.merge(&part);
+            request
+                .extra
+                .insert("user".to_string(), Value::String(redacted));
+        }
     }
 
     Ok(outcome)
@@ -85,17 +112,29 @@ pub fn redact_chat_response_json(
     };
 
     for choice in choices {
-        if let Some(content) = choice
-            .pointer_mut("/message/content")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-        {
-            let (redacted, part) = redact_text(engine, &content, config)?;
-            if part.redactions_applied > 0 {
-                outcome.merge(&part);
-                if let Some(slot) = choice.pointer_mut("/message/content") {
-                    *slot = Value::String(redacted);
+        if let Some(content_val) = choice.pointer_mut("/message/content") {
+            match content_val {
+                Value::String(text) => {
+                    let (redacted, part) = redact_text(engine, text, config)?;
+                    if part.redactions_applied > 0 {
+                        outcome.merge(&part);
+                        *text = redacted;
+                    }
                 }
+                Value::Array(parts) => {
+                    for part in parts {
+                        if part.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            if let Some(Value::String(text)) = part.get_mut("text") {
+                                let (redacted, redaction) = redact_text(engine, text, config)?;
+                                if redaction.redactions_applied > 0 {
+                                    outcome.merge(&redaction);
+                                    *text = redacted;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -108,6 +147,8 @@ mod tests {
     use super::*;
     use crate::openai::ChatMessage;
     use redact_core::AnonymizationStrategy;
+    use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn skips_messages_without_content() {
@@ -121,11 +162,33 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "assistant".into(),
                 content: None,
+                extra: Default::default(),
             }],
             stream: None,
             extra: Default::default(),
         };
         let outcome = redact_chat_request(&engine, &mut request, &config).unwrap();
         assert_eq!(outcome.redactions_applied, 0);
+    }
+
+    #[test]
+    fn redacts_top_level_user_field() {
+        let engine = AnalyzerEngine::new();
+        let config = AnonymizerConfig {
+            strategy: AnonymizationStrategy::Replace,
+            ..Default::default()
+        };
+        let mut request = ChatCompletionRequest {
+            model: "m".into(),
+            messages: vec![ChatMessage::text("user", "hello")],
+            stream: None,
+            extra: HashMap::from([("user".into(), json!("alice@example.com"))]),
+        };
+        let outcome = redact_chat_request(&engine, &mut request, &config).unwrap();
+        assert!(outcome.redactions_applied >= 1);
+        assert_eq!(
+            request.extra.get("user").and_then(|v| v.as_str()),
+            Some("[EMAIL_ADDRESS]")
+        );
     }
 }

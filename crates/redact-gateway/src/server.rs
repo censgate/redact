@@ -3,12 +3,13 @@
 // in the project root for license information.
 
 use crate::config::GatewayConfig;
-use crate::proxy::HttpChatUpstream;
+use crate::proxy::{HttpChatUpstream, UpstreamClientOptions};
 use crate::routes::{create_router, AppState};
 use axum::serve;
 use redact_core::AnalyzerEngine;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -41,9 +42,14 @@ impl GatewayServer {
     pub async fn run(self) -> anyhow::Result<()> {
         let bind_addr = self.bind_address();
         let enable_tracing = self.config.enable_tracing;
-        let upstream = HttpChatUpstream::new(
+        let upstream = HttpChatUpstream::with_options(
             &self.config.backend_url,
             self.config.backend_api_key.clone(),
+            UpstreamClientOptions {
+                connect_timeout: Duration::from_secs(self.config.connect_timeout_secs),
+                request_timeout: Duration::from_secs(self.config.request_timeout_secs),
+                max_body_bytes: self.config.max_upstream_body_bytes,
+            },
         )?;
 
         let state = AppState {

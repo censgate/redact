@@ -3,6 +3,7 @@
 // in the project root for license information.
 
 use redact_core::{AnonymizationStrategy, AnonymizerConfig};
+use thiserror::Error;
 
 /// Runtime configuration for the gateway binary / server.
 #[derive(Debug, Clone)]
@@ -15,6 +16,12 @@ pub struct GatewayConfig {
     pub backend_api_key: Option<String>,
     pub anonymizer: AnonymizerConfig,
     pub enable_tracing: bool,
+    /// TCP connect timeout for upstream requests.
+    pub connect_timeout_secs: u64,
+    /// Overall upstream request timeout (streams may run for minutes).
+    pub request_timeout_secs: u64,
+    /// Max buffered upstream response body bytes (JSON or SSE).
+    pub max_upstream_body_bytes: usize,
 }
 
 impl Default for GatewayConfig {
@@ -29,12 +36,28 @@ impl Default for GatewayConfig {
                 ..Default::default()
             },
             enable_tracing: true,
+            connect_timeout_secs: 10,
+            request_timeout_secs: 600,
+            max_upstream_body_bytes: 32 * 1024 * 1024,
         }
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    #[error("invalid PORT value {0:?}: {1}")]
+    InvalidPort(String, String),
+    #[error("invalid REDACTION_STRATEGY {0:?}: expected one of replace, mask, hash")]
+    InvalidStrategy(String),
+    #[error("invalid ENABLE_TRACING value {0:?}: {1}")]
+    InvalidTracing(String, String),
+    #[error("invalid {0} value {1:?}: {2}")]
+    InvalidNumber(&'static str, String, String),
+}
+
 impl GatewayConfig {
-    /// Load from environment variables.
+    /// Load from environment variables. Returns an error on invalid values
+    /// instead of silently falling back.
     ///
     /// - `HOST` (default `0.0.0.0`)
     /// - `PORT` (default `8080`)
@@ -42,7 +65,10 @@ impl GatewayConfig {
     /// - `BACKEND_API_KEY` / `OPENAI_API_KEY`
     /// - `REDACTION_STRATEGY` (`replace`|`mask`|`hash`, default `replace`)
     /// - `ENABLE_TRACING` (default `true`)
-    pub fn from_env() -> Self {
+    /// - `CONNECT_TIMEOUT_SECS` (default `10`)
+    /// - `REQUEST_TIMEOUT_SECS` (default `600`)
+    /// - `MAX_UPSTREAM_BODY_BYTES` (default `33554432`)
+    pub fn try_from_env() -> Result<Self, ConfigError> {
         let mut config = Self::default();
 
         if let Ok(host) = std::env::var("HOST") {
@@ -51,8 +77,10 @@ impl GatewayConfig {
             }
         }
         if let Ok(port) = std::env::var("PORT") {
-            if let Ok(p) = port.parse() {
-                config.port = p;
+            if !port.is_empty() {
+                config.port = port
+                    .parse::<u16>()
+                    .map_err(|e| ConfigError::InvalidPort(port.clone(), e.to_string()))?;
             }
         }
         if let Ok(url) = std::env::var("BACKEND_URL") {
@@ -70,19 +98,56 @@ impl GatewayConfig {
             });
 
         if let Ok(strategy) = std::env::var("REDACTION_STRATEGY") {
-            config.anonymizer.strategy = match strategy.to_ascii_lowercase().as_str() {
-                "mask" => AnonymizationStrategy::Mask,
-                "hash" => AnonymizationStrategy::Hash,
-                _ => AnonymizationStrategy::Replace,
-            };
-        }
-
-        if let Ok(tracing) = std::env::var("ENABLE_TRACING") {
-            if let Ok(v) = tracing.parse() {
-                config.enable_tracing = v;
+            if !strategy.is_empty() {
+                config.anonymizer.strategy = parse_strategy(&strategy)?;
             }
         }
 
-        config
+        if let Ok(tracing) = std::env::var("ENABLE_TRACING") {
+            if !tracing.is_empty() {
+                config.enable_tracing = tracing
+                    .parse::<bool>()
+                    .map_err(|e| ConfigError::InvalidTracing(tracing.clone(), e.to_string()))?;
+            }
+        }
+
+        if let Ok(v) = std::env::var("CONNECT_TIMEOUT_SECS") {
+            if !v.is_empty() {
+                config.connect_timeout_secs = parse_u64("CONNECT_TIMEOUT_SECS", &v)?;
+            }
+        }
+        if let Ok(v) = std::env::var("REQUEST_TIMEOUT_SECS") {
+            if !v.is_empty() {
+                config.request_timeout_secs = parse_u64("REQUEST_TIMEOUT_SECS", &v)?;
+            }
+        }
+        if let Ok(v) = std::env::var("MAX_UPSTREAM_BODY_BYTES") {
+            if !v.is_empty() {
+                config.max_upstream_body_bytes = parse_u64("MAX_UPSTREAM_BODY_BYTES", &v)? as usize;
+            }
+        }
+
+        Ok(config)
     }
+
+    /// Load from environment, panicking on invalid values.
+    /// Prefer [`Self::try_from_env`] when you want to handle errors.
+    pub fn from_env() -> Self {
+        Self::try_from_env()
+            .unwrap_or_else(|err| panic!("invalid gateway configuration from environment: {err}"))
+    }
+}
+
+pub fn parse_strategy(strategy: &str) -> Result<AnonymizationStrategy, ConfigError> {
+    match strategy.to_ascii_lowercase().as_str() {
+        "replace" => Ok(AnonymizationStrategy::Replace),
+        "mask" => Ok(AnonymizationStrategy::Mask),
+        "hash" => Ok(AnonymizationStrategy::Hash),
+        other => Err(ConfigError::InvalidStrategy(other.to_string())),
+    }
+}
+
+fn parse_u64(name: &'static str, raw: &str) -> Result<u64, ConfigError> {
+    raw.parse::<u64>()
+        .map_err(|e| ConfigError::InvalidNumber(name, raw.to_string(), e.to_string()))
 }

@@ -32,7 +32,7 @@ async fn streaming_chat_completions_redacts_request_and_response() {
                     "data: {\"id\":\"chatcmpl-s\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Call \"},\"finish_reason\":null}]}\n\n",
                     "data: {\"id\":\"chatcmpl-s\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"leak@example.com\"},\"finish_reason\":null}]}\n\n",
                     "data: {\"id\":\"chatcmpl-s\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" now\"},\"finish_reason\":null}]}\n\n",
-                    "data: {\"id\":\"chatcmpl-s\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                    "data: {\"id\":\"chatcmpl-s\",\"object\":\"chat.completion.chunk\",\"created\":99,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n",
                     "data: [DONE]\n\n",
                 );
                 (
@@ -113,6 +113,14 @@ async fn streaming_chat_completions_redacts_request_and_response() {
         "expected redacted placeholder in stream: {sse}"
     );
     assert!(sse.contains("data: [DONE]"), "expected stream terminator");
+    assert!(
+        sse.contains("\"finish_reason\":\"length\""),
+        "expected upstream finish_reason preserved: {sse}"
+    );
+    assert!(
+        sse.contains("\"created\":99"),
+        "expected upstream created preserved: {sse}"
+    );
 }
 
 #[tokio::test]

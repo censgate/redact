@@ -12,6 +12,8 @@ documentation = "https://docs.rs/redact-gateway"
 description = "OpenAI-compatible AI privacy gateway embedding redact-core"
 keywords = ["pii", "redaction", "gateway", "openai", "privacy"]
 categories = ["web-programming", "network-programming"]
+# Not feature-complete for crates.io yet (open-core foundation).
+publish = false
 
 [dependencies]
 redact-core = { path = "../redact-core", version = "0.8.3" }
@@ -25,7 +27,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+futures-util = "0.3"
 clap = { workspace = true }
 uuid = { workspace = true }
 

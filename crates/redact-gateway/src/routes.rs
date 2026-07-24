@@ -7,7 +7,7 @@ use crate::proxy::HttpChatUpstream;
 use crate::redact::{
     redact_chat_request, redact_chat_response_json, redact_text, RedactionOutcome,
 };
-use crate::stream::{build_redacted_sse, extract_sse_model, extract_sse_text_content};
+use crate::stream::{build_redacted_sse, extract_sse};
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -166,9 +166,9 @@ async fn stream_chat_completions(
                     .into_response();
             }
 
-            let raw_content = extract_sse_text_content(&upstream.body);
+            let extracted = extract_sse(&upstream.body);
             let (redacted_content, response_outcome) =
-                match redact_text(&state.engine, &raw_content, &state.anonymizer) {
+                match redact_text(&state.engine, &extracted.content, &state.anonymizer) {
                     Ok(v) => v,
                     Err(err) => {
                         warn!(error = %err, "stream response redaction failed");
@@ -190,8 +190,14 @@ async fn stream_chat_completions(
             );
 
             let id = format!("chatcmpl-{}", Uuid::new_v4());
-            let model_name = extract_sse_model(&upstream.body, model);
-            let sse = build_redacted_sse(&id, &model_name, &redacted_content);
+            let model_name = extracted.model.as_deref().unwrap_or(model);
+            let sse = build_redacted_sse(
+                &id,
+                model_name,
+                &redacted_content,
+                extracted.finish_reason.as_deref(),
+                extracted.created,
+            );
 
             let mut headers = compliance_headers(&request_outcome, &response_outcome);
             headers.insert(

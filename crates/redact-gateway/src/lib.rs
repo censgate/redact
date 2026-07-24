@@ -15,5 +15,5 @@ pub mod routes;
 pub mod server;
 pub mod stream;
 
-pub use config::GatewayConfig;
+pub use config::{parse_strategy, ConfigError, GatewayConfig};
 pub use server::GatewayServer;
