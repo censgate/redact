@@ -5,6 +5,7 @@ members = [
     "crates/redact-api",
     "crates/redact-wasm",
     "crates/redact-cli",
+    "crates/redact-gateway",
 ]
 resolver = "2"
 

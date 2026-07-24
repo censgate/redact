@@ -20,7 +20,8 @@ crates/
 ├── redact-ner/     # ONNX-based Named Entity Recognition (CRITICAL)
 ├── redact-api/     # REST API server (Axum)
 ├── redact-cli/     # Command-line interface (Clap)
-└── redact-wasm/    # WebAssembly bindings
+├── redact-wasm/    # WebAssembly bindings
+└── redact-gateway/ # OpenAI-compatible privacy gateway (embeds redact-core)
 ```
 
 ### Crate Dependencies
@@ -30,6 +31,7 @@ redact-ner ──────► redact-core
 redact-api ──────► redact-core
 redact-cli ──────► redact-core
 redact-wasm ─────► redact-core
+redact-gateway ─► redact-core
 ```
 
 ### Critical Components
