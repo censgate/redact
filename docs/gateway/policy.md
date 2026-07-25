@@ -36,6 +36,8 @@ Aliases accepted when parsing: `pass`→`allow`, `reject`→`block`, `redact`→
 
 One pass can mix actions: a string may mask a card number, tokenize a name, and block an API key at the same time.
 
+`tokenize` describes what happens to outbound content. When a model's own answer contains a detected value, there is nobody downstream to restore a placeholder for, so a tokenize rule acts as `replace` on the response path. The value is removed either way.
+
 ## Confidence floors
 
 Each profile has `min_confidence` (default `0.5`). Per-entity rules may set their own floor. Detections below the applicable floor are treated as `allow`, so low-confidence noise never rewrites user content.

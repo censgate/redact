@@ -43,6 +43,8 @@ Algorithm (per flush):
 4. Align to a UTF-8 character boundary.
 5. Redact and emit the prefix; retain the suffix.
 
+A token placeholder that would be split by the cut is also carried forward, because half a placeholder can never be restored. That carry-forward is bounded by the hold-back size, so a stray `[` in ordinary prose cannot stall the stream.
+
 Size the window above the longest entity you must catch in incremental mode (emails and phone numbers typically fit in 256 bytes; long private-key blocks do not).
 
 ## What the rebuilt stream preserves
