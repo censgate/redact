@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `redact-gateway`: streaming redaction modes `buffered` (default, full-stream
   detection) and `incremental` (hold-back window), preserving tool-call,
   usage, and multi-choice passthrough frames on rebuild.
+- `redact-gateway`: deployment assets — `Dockerfile.gateway`,
+  `docker-compose.gateway.yml`, an audit-grade OpenTelemetry Collector config
+  and Kubernetes manifests under `deploy/`, and example configurations under
+  `crates/redact-gateway/examples/` validated in CI.
 - Docs: operator guide under `docs/gateway/` and rewritten
   `crates/redact-gateway/README.md`.
 - `redact-core`: 18 new secret/credential entity types (`PRIVATE_KEY`, `JWT_TOKEN`,
@@ -72,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WASM scope: NER (`PERSON`, `ORGANIZATION`, `LOCATION` in prose) is not available in
   the WASM build because the ONNX model + runtime do not fit browser/Cloudflare Workers
   limits. See the README "WebAssembly" section for the hybrid alternative.
+
+### Fixed
+
+- `patterns/security/credentials.yaml`: the password-field pattern escaped a
+  quote with a backslash inside a single-quoted YAML scalar, which made the
+  whole pack unparseable. Pattern packs are now parsed strictly rather than
+  repaired by the loader.
 
 ### Security
 
