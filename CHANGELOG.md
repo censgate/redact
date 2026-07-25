@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `redact-core`: 18 new secret/credential entity types (`PRIVATE_KEY`, `JWT_TOKEN`,
+  `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`,
+  `STRIPE_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `NPM_TOKEN`, `PYPI_TOKEN`, `SENDGRID_API_KEY`, `TWILIO_API_KEY`,
+  `TELEGRAM_BOT_TOKEN`, `HASHICORP_VAULT_TOKEN`, `DATABASE_CONNECTION_STRING`),
+  bringing the pattern-based entity count to 54. Detection uses anchored,
+  high-precision prefix regexes (e.g. `AKIA...`, `ghp_...`, `sk-ant-...`,
+  `-----BEGIN ... PRIVATE KEY-----` blocks); generic `key=...` / `password=...`
+  catch-alls are deliberately excluded pending entropy scoring. Available via
+  `--entities` in the CLI. Phase 1 of #101.
 - CLI: `redact analyze --fail-on-detect` opt-in flag exits with code 1 when PII is
   detected, for CI gates and pre-commit hooks. Default behavior (exit 0 on success)
   is unchanged (#95).

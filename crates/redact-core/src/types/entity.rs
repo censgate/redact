@@ -68,6 +68,26 @@ pub enum EntityType {
     Sha1Hash,
     Sha256Hash,
 
+    // Secrets and credentials
+    PrivateKey,
+    JwtToken,
+    AwsAccessKey,
+    GithubToken,
+    GitlabToken,
+    SlackToken,
+    SlackWebhook,
+    StripeApiKey,
+    GoogleApiKey,
+    OpenAiApiKey,
+    AnthropicApiKey,
+    NpmToken,
+    PyPiToken,
+    SendGridApiKey,
+    TwilioApiKey,
+    TelegramBotToken,
+    HashicorpVaultToken,
+    DatabaseConnectionString,
+
     // Generic
     Custom(String),
 }
@@ -116,6 +136,24 @@ impl EntityType {
             EntityType::Md5Hash => "MD5_HASH",
             EntityType::Sha1Hash => "SHA1_HASH",
             EntityType::Sha256Hash => "SHA256_HASH",
+            EntityType::PrivateKey => "PRIVATE_KEY",
+            EntityType::JwtToken => "JWT_TOKEN",
+            EntityType::AwsAccessKey => "AWS_ACCESS_KEY",
+            EntityType::GithubToken => "GITHUB_TOKEN",
+            EntityType::GitlabToken => "GITLAB_TOKEN",
+            EntityType::SlackToken => "SLACK_TOKEN",
+            EntityType::SlackWebhook => "SLACK_WEBHOOK",
+            EntityType::StripeApiKey => "STRIPE_API_KEY",
+            EntityType::GoogleApiKey => "GOOGLE_API_KEY",
+            EntityType::OpenAiApiKey => "OPENAI_API_KEY",
+            EntityType::AnthropicApiKey => "ANTHROPIC_API_KEY",
+            EntityType::NpmToken => "NPM_TOKEN",
+            EntityType::PyPiToken => "PYPI_TOKEN",
+            EntityType::SendGridApiKey => "SENDGRID_API_KEY",
+            EntityType::TwilioApiKey => "TWILIO_API_KEY",
+            EntityType::TelegramBotToken => "TELEGRAM_BOT_TOKEN",
+            EntityType::HashicorpVaultToken => "HASHICORP_VAULT_TOKEN",
+            EntityType::DatabaseConnectionString => "DATABASE_CONNECTION_STRING",
             EntityType::Custom(name) => name,
         }
     }
@@ -136,6 +174,24 @@ impl EntityType {
                 | EntityType::UkNhs
                 | EntityType::UkNino
                 | EntityType::MedicalLicense
+                | EntityType::PrivateKey
+                | EntityType::JwtToken
+                | EntityType::AwsAccessKey
+                | EntityType::GithubToken
+                | EntityType::GitlabToken
+                | EntityType::SlackToken
+                | EntityType::SlackWebhook
+                | EntityType::StripeApiKey
+                | EntityType::GoogleApiKey
+                | EntityType::OpenAiApiKey
+                | EntityType::AnthropicApiKey
+                | EntityType::NpmToken
+                | EntityType::PyPiToken
+                | EntityType::SendGridApiKey
+                | EntityType::TwilioApiKey
+                | EntityType::TelegramBotToken
+                | EntityType::HashicorpVaultToken
+                | EntityType::DatabaseConnectionString
         )
     }
 
@@ -202,6 +258,26 @@ impl EntityType {
             EntityType::Sha1Hash => 30,
             EntityType::Sha256Hash => 35,
 
+            // Secrets - anchored, high-precision prefixes
+            EntityType::PrivateKey => 100,
+            EntityType::JwtToken => 95,
+            EntityType::AwsAccessKey => 100,
+            EntityType::GithubToken => 100,
+            EntityType::GitlabToken => 100,
+            EntityType::SlackToken => 100,
+            EntityType::SlackWebhook => 100,
+            EntityType::StripeApiKey => 100,
+            EntityType::GoogleApiKey => 100,
+            EntityType::OpenAiApiKey => 95,
+            EntityType::AnthropicApiKey => 100,
+            EntityType::NpmToken => 100,
+            EntityType::PyPiToken => 100,
+            EntityType::SendGridApiKey => 100,
+            EntityType::TwilioApiKey => 90,
+            EntityType::TelegramBotToken => 100,
+            EntityType::HashicorpVaultToken => 100,
+            EntityType::DatabaseConnectionString => 95,
+
             // Custom types default to medium specificity
             EntityType::Custom(_) => 50,
         }
@@ -238,11 +314,36 @@ impl EntityType {
 
         // Hash types: longer hashes suppress shorter ones at same position
         // (SHA256 contains valid MD5 and SHA1 patterns)
+        // A hex run can also occur inside a PEM key body, so the whole
+        // private key block should win over any hash detected within it.
         if *self == EntityType::Md5Hash {
-            return matches!(other, EntityType::Sha1Hash | EntityType::Sha256Hash);
+            return matches!(
+                other,
+                EntityType::Sha1Hash | EntityType::Sha256Hash | EntityType::PrivateKey
+            );
         }
         if *self == EntityType::Sha1Hash {
-            return *other == EntityType::Sha256Hash;
+            return matches!(other, EntityType::Sha256Hash | EntityType::PrivateKey);
+        }
+        if *self == EntityType::Sha256Hash {
+            return *other == EntityType::PrivateKey;
+        }
+
+        // An Anthropic key (`sk-ant-...`) also matches the generic OpenAI
+        // `sk-...` shape; the more specific Anthropic match must win.
+        if *self == EntityType::OpenAiApiKey {
+            return *other == EntityType::AnthropicApiKey;
+        }
+
+        // Slack incoming webhook URLs are also valid generic URLs / domains.
+        if *self == EntityType::Url {
+            return *other == EntityType::SlackWebhook;
+        }
+        if *self == EntityType::DomainName {
+            return matches!(
+                other,
+                EntityType::SlackWebhook | EntityType::DatabaseConnectionString
+            );
         }
 
         false
@@ -291,6 +392,24 @@ impl From<String> for EntityType {
             "MD5_HASH" => EntityType::Md5Hash,
             "SHA1_HASH" => EntityType::Sha1Hash,
             "SHA256_HASH" => EntityType::Sha256Hash,
+            "PRIVATE_KEY" => EntityType::PrivateKey,
+            "JWT_TOKEN" => EntityType::JwtToken,
+            "AWS_ACCESS_KEY" => EntityType::AwsAccessKey,
+            "GITHUB_TOKEN" => EntityType::GithubToken,
+            "GITLAB_TOKEN" => EntityType::GitlabToken,
+            "SLACK_TOKEN" => EntityType::SlackToken,
+            "SLACK_WEBHOOK" => EntityType::SlackWebhook,
+            "STRIPE_API_KEY" => EntityType::StripeApiKey,
+            "GOOGLE_API_KEY" => EntityType::GoogleApiKey,
+            "OPENAI_API_KEY" => EntityType::OpenAiApiKey,
+            "ANTHROPIC_API_KEY" => EntityType::AnthropicApiKey,
+            "NPM_TOKEN" => EntityType::NpmToken,
+            "PYPI_TOKEN" => EntityType::PyPiToken,
+            "SENDGRID_API_KEY" => EntityType::SendGridApiKey,
+            "TWILIO_API_KEY" => EntityType::TwilioApiKey,
+            "TELEGRAM_BOT_TOKEN" => EntityType::TelegramBotToken,
+            "HASHICORP_VAULT_TOKEN" => EntityType::HashicorpVaultToken,
+            "DATABASE_CONNECTION_STRING" => EntityType::DatabaseConnectionString,
             _ => EntityType::Custom(s),
         }
     }
