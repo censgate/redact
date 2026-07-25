@@ -260,50 +260,18 @@ fn alias_for_stem(stem: &str, full_id: &str) -> Option<&'static str> {
 /// `origin` is used in error messages and, when the document has no
 /// `name` field, becomes the pack's logical name.
 ///
-/// Single-quoted `regex:` lines are normalized before parsing. Pack authors
-/// often embed `\'` inside single-quoted YAML (invalid) when they mean a
-/// literal `'`; rewriting those lines as block scalars keeps third-party
-/// packs loadable without failing the whole file.
+/// Documents are parsed strictly. A pack that does not parse is reported
+/// rather than repaired, because silently rewriting a pattern would change
+/// what it matches.
 pub fn load_pack_str(yaml: &str, origin: &str) -> Result<PatternPack, PackError> {
-    let normalized = normalize_regex_lines(yaml);
-    let mut pack: PatternPack =
-        serde_norway::from_str(&normalized).map_err(|e| PackError::Parse {
-            origin: origin.to_string(),
-            message: e.to_string(),
-        })?;
+    let mut pack: PatternPack = serde_norway::from_str(yaml).map_err(|e| PackError::Parse {
+        origin: origin.to_string(),
+        message: e.to_string(),
+    })?;
     if pack.name.is_none() {
         pack.name = Some(pack_name_from_origin(origin));
     }
     Ok(pack)
-}
-
-/// Rewrite single-quoted `regex:` scalars to YAML block scalars.
-///
-/// This preserves backslashes and repairs the common `\'` mistake inside
-/// single-quoted strings.
-fn normalize_regex_lines(yaml: &str) -> String {
-    let mut out = String::with_capacity(yaml.len());
-    for line in yaml.lines() {
-        let trimmed = line.trim_start();
-        let indent_len = line.len() - trimmed.len();
-        let indent = &line[..indent_len];
-        if let Some(value) = trimmed.strip_prefix("regex:") {
-            let value = value.trim();
-            if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
-                let inner = value[1..value.len() - 1].replace("\\'", "'");
-                out.push_str(indent);
-                out.push_str("regex: |-\n");
-                out.push_str(indent);
-                out.push_str("  ");
-                out.push_str(&inner);
-                out.push('\n');
-                continue;
-            }
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
 }
 
 fn pack_name_from_origin(origin: &str) -> String {
@@ -826,12 +794,12 @@ patterns:
     }
 
     #[test]
-    fn normalizes_single_quoted_regex_with_escaped_quote() {
+    fn a_quote_inside_a_single_quoted_regex_is_doubled_per_yaml() {
         let pack = load_pack_str(
             r#"
 patterns:
   - id: "sec_password_field"
-    regex: '\b(?:password|passwd|pwd|secret)["\s:=]+([^\s"\']{8,})\b'
+    regex: '\b(?:password|secret)["\s:=]+([^\s"'']{8,})\b'
 "#,
             "creds",
         )
@@ -839,5 +807,21 @@ patterns:
         assert_eq!(pack.patterns.len(), 1);
         assert!(pack.patterns[0].regex.contains(r#"[^\s"']"#));
         Regex::new(&pack.patterns[0].regex).expect("regex compiles");
+    }
+
+    #[test]
+    fn a_malformed_document_is_reported_rather_than_repaired() {
+        // A stray `'` inside a single-quoted scalar is invalid YAML. Repairing
+        // it in the loader would silently change what the pattern matches.
+        let err = load_pack_str(
+            r#"
+patterns:
+  - id: "broken"
+    regex: '([^\s"\']{8,})'
+"#,
+            "creds",
+        )
+        .unwrap_err();
+        assert!(matches!(err, PackError::Parse { .. }));
     }
 }
