@@ -1,0 +1,90 @@
+# Local stack for redact-gateway.
+#
+# Base services (default):
+#   docker compose -f docker-compose.gateway.yml up --build
+#
+# Optional OpenBao token-map backend (compose profile `vault`):
+#   docker compose -f docker-compose.gateway.yml --profile vault up --build
+#
+# Override the upstream provider (default is the Ollama service below):
+#   BACKEND_URL=https://api.openai.com CENSGATE_BACKEND_API_KEY=sk-... \
+#     docker compose -f docker-compose.gateway.yml up --build
+
+services:
+  # OpenAI-compatible privacy gateway (redact-gateway binary).
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    ports:
+      - "8080:8080"
+    environment:
+      # Prefer CENSGATE_* names; BACKEND_URL is accepted as a legacy alias.
+      CENSGATE_BACKEND_URL: ${BACKEND_URL:-http://ollama:11434}
+      CENSGATE_BACKEND_API_KEY: ${CENSGATE_BACKEND_API_KEY:-}
+      CENSGATE_HOST: "0.0.0.0"
+      CENSGATE_PORT: "8080"
+      CENSGATE_PATTERN_PACKS: /app/patterns
+      # Pull-based Prometheus metrics on /metrics
+      CENSGATE_METRICS_ENDPOINT: "true"
+      # Operation span detail (OTLP transport is configured via OTEL_* below)
+      CENSGATE_TRACE_OPERATIONS: basic
+      # Emit audit records as OTLP log records to the collector
+      CENSGATE_AUDIT_EXPORT: otlp
+      # Standard OpenTelemetry exporter settings (not gateway-specific)
+      OTEL_SERVICE_NAME: redact-gateway
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: otlp
+      OTEL_LOGS_EXPORTER: otlp
+      # Token map (enabled when the `vault` profile is active; otherwise off)
+      CENSGATE_VAULT_BACKEND: ${CENSGATE_VAULT_BACKEND:-off}
+      CENSGATE_VAULT_ADDR: ${CENSGATE_VAULT_ADDR:-http://openbao:8200}
+      CENSGATE_VAULT_TOKEN: ${CENSGATE_VAULT_TOKEN:-dev-only-token}
+      CENSGATE_VAULT_MOUNT: ${CENSGATE_VAULT_MOUNT:-secret}
+      CENSGATE_VAULT_PATH_PREFIX: ${CENSGATE_VAULT_PATH_PREFIX:-redact-gateway/tokens}
+      # Base64-encoded 32-byte sealing key (replace in any non-local deployment)
+      CENSGATE_TOKEN_DEK: ${CENSGATE_TOKEN_DEK:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+    depends_on:
+      - ollama
+      - otel-collector
+    # Distroless has no shell/curl, so there is no compose healthcheck here.
+    # Probe http://localhost:8080/livez and /readyz from your host or orchestrator.
+
+  # Local OpenAI-compatible upstream (Ollama). Point CENSGATE_BACKEND_URL /
+  # BACKEND_URL elsewhere to use a hosted provider instead.
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
+  # OpenTelemetry Collector: receives OTLP from the gateway (traces, metrics,
+  # and audit-grade log records). See deploy/otel-collector.yaml.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - otel-audit:/var/lib/otelcol/audit
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+
+  # OpenBao (Vault-compatible) in dev mode for the vault_kv2 token map backend.
+  # Disabled by default — enable with: --profile vault
+  # Then set CENSGATE_VAULT_BACKEND=vault_kv2 when starting the gateway.
+  openbao:
+    profiles: ["vault"]
+    image: openbao/openbao:latest
+    command: server -dev -dev-root-token-id=dev-only-token -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: dev-only-token
+    ports:
+      - "8200:8200"
+
+volumes:
+  ollama-data:
+  otel-audit:

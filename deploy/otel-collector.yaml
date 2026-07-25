@@ -1,0 +1,104 @@
+# OpenTelemetry Collector configuration for redact-gateway.
+#
+# The gateway emits:
+#   - traces / metrics over OTLP (normal observability pipeline)
+#   - audit events as OTLP log records when CENSGATE_AUDIT_EXPORT=otlp
+#
+# AUDIT-GRADE LOGS: the `logs` pipeline intentionally disables sampling, uses
+# a durable on-disk sending queue with retry, and writes to a file exporter as
+# the durable sink. Immutable / WORM retention is the operator's responsibility:
+# point `file/audit.path` (or replace the exporter) at your own append-only
+# object store, WORM volume, or SIEM shipper. This file is a starting point,
+# not a compliance certification.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  # Persistent queue backing store so audit records survive collector restarts
+  # while waiting to be exported. Mount a dedicated volume at this directory.
+  file_storage/audit:
+    directory: /var/lib/otelcol/queue
+    timeout: 10s
+    compaction:
+      on_start: true
+      directory: /var/lib/otelcol/queue
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Normal observability path may batch for efficiency.
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+
+  # Audit path: no probabilistic sampling. Every log record is kept.
+  # Do not add a probabilistic_sampler or tail_sampling processor here.
+  batch/audit:
+    send_batch_size: 256
+    timeout: 2s
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  # Durable sink for audit log records. Replace the path (or this exporter)
+  # with your WORM / immutable store. Operators commonly:
+  #   - mount a volume backed by S3 Object Lock / Azure immutable blob
+  #   - swap this for kafka / splunk_hec / elasticsearch into a SIEM
+  # The Collector does not itself enforce immutability.
+  file/audit:
+    path: /var/lib/otelcol/audit/gateway-audit.jsonl
+    rotation:
+      max_megabytes: 100
+      max_days: 30
+      max_backups: 10
+    # Durable sending queue + retry: no drops on transient sink failure.
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 10000
+      storage: file_storage/audit
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 60s
+      max_elapsed_time: 0 # retry indefinitely for audit-grade delivery
+
+  # Debug exporters for local compose; replace with your backends in production.
+  debug/traces:
+    verbosity: basic
+  debug/metrics:
+    verbosity: basic
+
+service:
+  extensions: [health_check, file_storage/audit]
+  pipelines:
+    # Normal pipeline: traces
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug/traces]
+
+    # Normal pipeline: metrics
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug/metrics]
+
+    # AUDIT-GRADE pipeline: gateway audit log records (no sampling).
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/audit]
+      exporters: [file/audit]
+
+  telemetry:
+    logs:
+      level: info

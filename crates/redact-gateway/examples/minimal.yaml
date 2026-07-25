@@ -1,0 +1,12 @@
+# minimal.yaml — smallest useful gateway configuration.
+#
+# Use when you want a local or throwaway proxy in front of an OpenAI-compatible
+# provider (default upstream is Ollama on 11434) with the bundled default
+# policy. Everything omitted falls back to built-in defaults.
+
+server:
+  host: 0.0.0.0
+  port: 8080
+
+upstream:
+  base_url: http://127.0.0.1:11434

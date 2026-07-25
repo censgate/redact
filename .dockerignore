@@ -1,0 +1,21 @@
+# Keep Docker build contexts small for Dockerfile / Dockerfile.gateway / Dockerfile.ner
+.git
+.github
+target
+**/target
+node_modules
+**/node_modules
+docs
+benchmarks
+scripts
+*.md
+.env
+.env.*
+.vscode
+.idea
+.DS_Store
+coverage
+*.profraw
+*.profdata
+deploy
+docker-compose*.yml

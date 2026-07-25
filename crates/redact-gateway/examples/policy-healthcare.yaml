@@ -1,0 +1,77 @@
+# policy-healthcare.yaml — gateway config with a healthcare-oriented policy.
+#
+# Use when prompts may contain PHI (MRNs, NHS numbers, SSNs) and you need
+# stricter per-entity actions than the bundled default profile. Credentials
+# are blocked; clinical identifiers are masked; routine noise (dates, URLs)
+# is allowed. Swap `policy:` for `policy_file:` if you prefer an external doc.
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  metrics_endpoint: true
+
+upstream:
+  base_url: http://127.0.0.1:11434
+
+redaction:
+  stream_mode: buffered
+  stream_holdback_bytes: 256
+  allow_profile_header: true
+
+auth:
+  mode: none
+
+audit:
+  export: stdout
+  include_entity_types: true
+
+policy:
+  default_profile: healthcare
+  profiles:
+    healthcare:
+      description: >
+        Healthcare-oriented profile — mask PHI identifiers, block credentials,
+        and leave low-sensitivity noise alone.
+      default_action: replace
+      min_confidence: 0.55
+      restore_responses: false
+      fail_closed: true
+      entities:
+        # Credentials / secrets must never reach a model provider.
+        PRIVATE_KEY: { action: block }
+        AWS_ACCESS_KEY: { action: block }
+        GITHUB_TOKEN: { action: block }
+        GITLAB_TOKEN: { action: block }
+        OPENAI_API_KEY: { action: block }
+        ANTHROPIC_API_KEY: { action: block }
+        DATABASE_CONNECTION_STRING: { action: block }
+        HASHICORP_VAULT_TOKEN: { action: block }
+        JWT_TOKEN: { action: block }
+        STRIPE_API_KEY: { action: block }
+
+        # Clinical and government identifiers — mask shape, hide value.
+        MEDICAL_RECORD_NUMBER: { action: mask, min_confidence: 0.7 }
+        US_SSN: { action: mask, min_confidence: 0.7 }
+        UK_NHS: { action: mask, min_confidence: 0.7 }
+        UK_NINO: { action: mask, min_confidence: 0.7 }
+        CREDIT_CARD: { action: mask, min_confidence: 0.7 }
+        IBAN: { action: mask, min_confidence: 0.7 }
+        US_BANK_NUMBER: { action: mask, min_confidence: 0.7 }
+        PERSON: { action: replace, min_confidence: 0.6 }
+        PHONE_NUMBER: { action: mask }
+        EMAIL_ADDRESS: { action: replace }
+
+        # Common false positives in clinical notes.
+        DATE_TIME: { action: allow }
+        AGE: { action: allow }
+        URL: { action: allow }
+        DOMAIN_NAME: { action: allow }
+        GUID: { action: allow }
+        SHA256_HASH: { action: allow }
+        SHA1_HASH: { action: allow }
+        MD5_HASH: { action: allow }
+      mask:
+        mask_char: "*"
+        start_chars: 0
+        end_chars: 0
+        preserve_format: true
