@@ -781,6 +781,10 @@ impl ResolvedConfig {
             || self.auth.oidc.audience != next.auth.oidc.audience
             || self.auth.oidc.jwks_url != next.auth.oidc.jwks_url
             || self.auth.oidc.required_scopes != next.auth.oidc.required_scopes
+            || self.auth.oidc.tenant_claim != next.auth.oidc.tenant_claim
+            || self.auth.oidc.profile_claim != next.auth.oidc.profile_claim
+            || self.auth.oidc.jwks_refresh_secs != next.auth.oidc.jwks_refresh_secs
+            || self.auth.oidc.leeway_secs != next.auth.oidc.leeway_secs
         {
             changed.push("auth.oidc.*");
         }
@@ -974,6 +978,26 @@ mod tests {
             Some(base64::engine::general_purpose::STANDARD.encode([7u8; 16]));
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("32 bytes"), "{err}");
+    }
+
+    #[test]
+    fn every_startup_only_auth_field_is_reported_on_reload() {
+        let current = ResolvedConfig::default();
+        for mutate in [
+            (|c: &mut ResolvedConfig| c.auth.oidc.tenant_claim = Some("tid".into()))
+                as fn(&mut ResolvedConfig),
+            |c: &mut ResolvedConfig| c.auth.oidc.profile_claim = Some("profile".into()),
+            |c: &mut ResolvedConfig| c.auth.oidc.jwks_refresh_secs = 30,
+            |c: &mut ResolvedConfig| c.auth.oidc.leeway_secs = 5,
+        ] {
+            let mut next = ResolvedConfig::default();
+            mutate(&mut next);
+            assert_eq!(
+                current.restart_required_changes(&next),
+                vec!["auth.oidc.*"],
+                "an authenticator is built once at startup, so this cannot reload silently"
+            );
+        }
     }
 
     #[test]

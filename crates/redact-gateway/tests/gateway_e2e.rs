@@ -843,6 +843,20 @@ async fn metrics_exposes_gateway_instruments_after_traffic() {
     assert_eq!(chat.status, StatusCode::OK);
 
     let metrics = get_path(router, "/metrics").await;
+
+    // The exporter is part of the OpenTelemetry SDK, so an ambient
+    // OTEL_SDK_DISABLED turns the endpoint off. Assert whichever contract the
+    // environment selected rather than depending on the shell it runs in.
+    if std::env::var("OTEL_SDK_DISABLED").is_ok_and(|value| value.eq_ignore_ascii_case("true")) {
+        assert_eq!(metrics.status, StatusCode::NOT_FOUND);
+        assert!(
+            metrics.body.contains("disabled"),
+            "the 404 should explain why, got:\n{}",
+            metrics.body
+        );
+        return;
+    }
+
     assert_eq!(metrics.status, StatusCode::OK);
     assert!(
         metrics.body.contains("redact_gateway_redactions")
