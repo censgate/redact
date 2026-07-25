@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -413,10 +413,4 @@ async fn emit_with_retry(sink: &dyn AuditSink, event: &AuditEvent) -> Result<(),
         }
     }
     Err(last_err.unwrap_or_else(|| AuditError::Sink("unknown".into())))
-}
-
-/// Rate-limit helper used by tests to observe drop timing without sleeping long.
-#[doc(hidden)]
-pub fn _test_now() -> Instant {
-    Instant::now()
 }
