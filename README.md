@@ -591,18 +591,45 @@ redact/
 │   ├── redact-wasm/      # WebAssembly bindings
 │   └── redact-gateway/   # OpenAI-compatible privacy gateway (embeds redact-core)
 ├── patterns/             # PII detection patterns (GDPR, HIPAA, CCPA)
+├── deploy/               # Gateway Collector config and Kubernetes manifests
 ├── scripts/              # Utility scripts (model export)
 ├── examples/             # Usage examples
-└── docs/                 # Documentation
+├── docs/
+│   ├── gateway/          # Gateway operator documentation
+│   └── benchmarks/       # Benchmark methodology and results
+├── Dockerfile.gateway
+└── docker-compose.gateway.yml
 ```
 
-### Privacy gateway (open core)
+### Privacy gateway
+
+`redact-gateway` is an OpenAI-compatible proxy that embeds `redact-core` in-process. It sits between your application and a model provider: outbound prompts are scanned and rewritten according to a policy profile, and inbound completions can be scanned and (when using reversible tokens) restored for the caller.
 
 ```bash
+# Default upstream is Ollama on 11434
 cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
+
+curl -s http://127.0.0.1:8080/health
+
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "llama3.2",
+    "messages": [{"role":"user","content":"Email me at alice@example.com"}]
+  }'
 ```
 
-`POST /v1/chat/completions` (including `stream: true`) redacts prompt and model-output content in-process via `redact-core`, then returns JSON or SSE to the client. See [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md).
+With the bundled `default` profile the provider sees `[EMAIL_ADDRESS]` instead of the raw address. Surfaces include `/v1/chat/completions` (JSON and SSE), `/v1/completions`, `/v1/embeddings`, `/v1/redact`, `/v1/restore`, and compliance helpers. Configuration is YAML and/or `CENSGATE_*` environment variables; `validate-config`, `print-config`, and `print-policy` subcommands inspect the resolved settings without serving.
+
+| Capability | Notes |
+|------------|--------|
+| Policy profiles | Per-entity `allow` / `block` / `mask` / `replace` / `hash` / `tokenize` |
+| Token map | `off`, process-local `memory`, or shared `vault_kv2` (Vault / OpenBao) |
+| Auth | `none`, static API keys, or OIDC bearer JWTs |
+| Telemetry | OpenTelemetry traces, metrics, and audit log records (`OTEL_*` + `CENSGATE_TRACE_*`) |
+| Streaming | Buffered (default) or incremental with a hold-back window |
+
+Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gateway.yml`, `deploy/`. Full docs: [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md) and [`docs/gateway/`](docs/gateway/).
 
 ## Testing
 

@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `redact-gateway`: policy profiles with per-entity actions (`allow`, `block`,
+  `mask`, `replace`, `hash`, `tokenize`), confidence floors, scan targets, and
+  bundled `default` / `reversible` / `strict` / `secrets_only` / `permissive`
+  profiles (fail-closed by default on traffic-handling profiles).
+- `redact-gateway`: resolved configuration from YAML and/or `CENSGATE_*`
+  environment variables (`env` / `file` / `layered`), `deny_unknown_fields`
+  schema, `SIGHUP` reload that keeps the last good snapshot, and
+  `validate-config` / `print-config` / `print-policy` subcommands.
+- `redact-gateway`: reversible tokenization with AES-256-GCM sealed mappings
+  (`CENSGATE_TOKEN_DEK`) and token map backends `off`, process-local `memory`,
+  and shared `vault_kv2` (HashiCorp Vault or OpenBao KV v2).
+- `redact-gateway`: inbound authentication modes `none`, static `api_key`, and
+  OIDC/JWT resource-server validation with JWKS refresh and tenant/profile
+  claim mapping.
+- `redact-gateway`: OpenTelemetry traces, metrics, and logs (`OTEL_*`),
+  gateway operation spans (`CENSGATE_TRACE_OPERATIONS`), opt-in development-stage
+  `gen_ai.*` attributes, and audit records via `stdout` / `file` / `otlp` sinks.
+- `redact-gateway`: runtime YAML pattern packs (`CENSGATE_PATTERN_PACKS` /
+  `packs.paths`) loaded alongside or instead of built-in patterns.
+- `redact-gateway`: expanded HTTP surface — `/v1/chat/completions`,
+  `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/redact`, `/v1/restore`,
+  `/v1/compliance/status`, `/v1/compliance/check`, plus `/health`/`/livez`/
+  `/readyz`/`/metrics` outside the auth layer.
+- `redact-gateway`: streaming redaction modes `buffered` (default, full-stream
+  detection) and `incremental` (hold-back window), preserving tool-call,
+  usage, and multi-choice passthrough frames on rebuild.
+- Docs: operator guide under `docs/gateway/` and rewritten
+  `crates/redact-gateway/README.md`.
 - `redact-core`: 18 new secret/credential entity types (`PRIVATE_KEY`, `JWT_TOKEN`,
   `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`,
   `STRIPE_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
