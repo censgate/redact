@@ -7,7 +7,7 @@ Concise guidance for AI agents working with the Redact codebase.
 **Redact** is a high-performance, open-source PII (Personally Identifiable Information) detection and anonymization engine built in Rust. It serves as a drop-in replacement for Microsoft Presidio with 10-100x better performance.
 
 **Key capabilities:**
-- Pattern-based detection (36+ entity types via regex)
+- Pattern-based detection (54 entity types via regex, including secrets/credentials)
 - ML-powered NER using ONNX Runtime (BERT, RoBERTa, DistilBERT)
 - Multiple anonymization strategies (replace, mask, hash, encrypt)
 - Multi-platform: REST API, CLI, WebAssembly

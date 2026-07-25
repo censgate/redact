@@ -27,12 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for multiple files is a single array of `{ "file", "result" }` objects. Single-file
   and inline-text output are unchanged (#94).
 - WASM: `redact-wasm` now exposes a real `RedactEngine` backed by `redact-core`'s
-  pattern engine (36 entity types) via `wasm-bindgen`, with `analyze`,
-  `anonymize` (replace/mask), `anonymize_with_hash` (required non-empty salt),
-  and `supported_entities` bindings. Compiles for `wasm32-unknown-unknown`; CI
-  runs `cargo check` plus Node `wasm-pack test` runtime coverage. `redact-wasm`
-  is the only supported WASM entry point (standalone `redact-core` wasm32 builds
-  are not supported).
+  pattern engine (54 entity types, including secrets/credentials) via
+  `wasm-bindgen`, with `analyze`, `anonymize` (replace/mask),
+  `anonymize_with_hash` (required non-empty salt), and `supported_entities`
+  bindings. Compiles for `wasm32-unknown-unknown`; CI runs `cargo check` plus
+  Node `wasm-pack test` runtime coverage. `redact-wasm` is the only supported
+  WASM entry point (standalone `redact-core` wasm32 builds are not supported).
 
 ### Changed
 

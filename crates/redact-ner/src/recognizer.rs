@@ -106,7 +106,7 @@ impl Default for NerConfig {
 /// 3. Optionally provide `tokenizer_path` or place `tokenizer.json` in the same directory
 ///
 /// Without a model, this recognizer gracefully returns empty results and the system
-/// falls back to pattern-based detection (36+ entity types).
+/// falls back to pattern-based detection (54 entity types).
 pub struct NerRecognizer {
     config: NerConfig,
     tokenizer: Option<TokenizerWrapper>,
@@ -369,7 +369,7 @@ impl NerRecognizer {
         if is_available {
             info!("✓ NER is fully operational with ONNX Runtime");
         } else {
-            info!("⚠ NER not available - using pattern-based detection (36+ entity types)");
+            info!("⚠ NER not available - using pattern-based detection (54 entity types)");
             if tokenizer.is_none() {
                 debug!("  Missing: tokenizer");
             }

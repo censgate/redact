@@ -638,10 +638,10 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 
 ### Pre-1.0.0
 
-#### v0.8.2 (Current)
+#### v0.8.2
 
 - [x] Complete Rust rewrite (replacing Go v0.1.0-v0.4.1)
-- [x] 54 pattern-based entity types with checksum validation, including secrets and credentials
+- [x] 36 pattern-based entity types with checksum validation
 - [x] Full ONNX NER integration (PERSON, ORGANIZATION, LOCATION)
 - [x] 4 anonymization strategies (replace, mask, hash, encrypt)
 - [x] REST API service
@@ -650,6 +650,10 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [x] Full Docker image with embedded NER model (`ghcr.io/censgate/redact:full`)
 - [x] Comprehensive test suite (~75% coverage)
 - [x] Entity overlap resolution with specificity scoring
+
+#### Unreleased
+
+- [x] 18 secret/credential entity types (54 pattern-based total) — Phase 1 of #101
 
 #### v0.9.0 (Planned)
 

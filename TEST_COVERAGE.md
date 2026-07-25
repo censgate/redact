@@ -11,7 +11,7 @@ Comprehensive test coverage improvements addressing all critical gaps identified
 ### 1. Pattern Recognizer Coverage (37 tests)
 **File**: `crates/redact-core/tests/pattern_coverage.rs`
 
-- ✅ All 36+ entity types tested
+- ✅ All 54 pattern-based entity types tested (including secrets/credentials)
 - ✅ Edge cases and multi-entity detection
 - ✅ Context-aware pattern validation
 - ⏭️ 2 tests ignored (UK phone/mobile - patterns not implemented)
