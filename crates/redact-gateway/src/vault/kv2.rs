@@ -8,9 +8,15 @@
 //! with both HashiCorp Vault and OpenBao. The configured auth token is treated
 //! as an opaque bearer string (`X-Vault-Token`), so both `hvs.*` Vault tokens
 //! and OpenBao token formats are accepted without special handling.
+//!
+//! Concurrent `put` calls use KV v2 compare-and-set (`options.cas`) with a
+//! bounded retry loop so two writers merging into the same session cannot
+//! silently discard each other's mappings.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use vaultrs::api::kv2::requests::{ReadSecretRequest, SetSecretRequestOptions};
+use vaultrs::api::{self, kv2::responses::ReadSecretResponse};
 use vaultrs::client::{Client, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::kv2;
@@ -18,6 +24,9 @@ use vaultrs::kv2;
 use super::{merge_mappings, session_path, TokenMapError, TokenMapStore};
 use crate::config::VaultSettings;
 use crate::redact::token::TokenMapping;
+
+/// Maximum read→merge→CAS-write attempts before surfacing a conflict.
+const PUT_CAS_ATTEMPTS: u32 = 5;
 
 /// Payload written under each session path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +102,37 @@ impl Kv2Store {
             Err(err) => Err(map_client_error(err)),
         }
     }
+
+    /// Read session data and the KV v2 version needed for a CAS write.
+    ///
+    /// Uses the raw read endpoint (rather than [`kv2::read`]) so the version in
+    /// response metadata is observed atomically with the payload. A missing key
+    /// yields `cas = 0` ("create only"). Expired entries contribute no mappings
+    /// but retain their version so the subsequent write still CAS-protects.
+    async fn read_for_cas(&self, path: &str) -> Result<(Vec<TokenMapping>, u32), TokenMapError> {
+        let endpoint = ReadSecretRequest::builder()
+            .mount(self.mount.as_str())
+            .path(path)
+            .build()
+            .map_err(|e| TokenMapError::Backend(format!("invalid vault read request: {e}")))?;
+
+        let response: ReadSecretResponse = match api::exec_with_result(&self.client, endpoint).await
+        {
+            Ok(res) => res,
+            Err(ClientError::APIError { code: 404, .. }) => return Ok((Vec::new(), 0)),
+            Err(err) => return Err(map_client_error(err)),
+        };
+
+        let cas = version_to_cas(response.metadata.version)?;
+        let entry: StoredSession = serde_json::value::from_value(response.data)
+            .map_err(|e| TokenMapError::Backend(format!("invalid vault session payload: {e}")))?;
+
+        if entry.expires_at <= Utc::now() {
+            Ok((Vec::new(), cas))
+        } else {
+            Ok((entry.mappings, cas))
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -108,20 +148,35 @@ impl TokenMapStore for Kv2Store {
         mappings: &[TokenMapping],
     ) -> Result<(), TokenMapError> {
         let path = self.path(tenant, session);
-        let existing = self
-            .read_entry(&path)
-            .await?
-            .map(|entry| entry.mappings)
-            .unwrap_or_default();
-        let merged = merge_mappings(existing, mappings);
-        let payload = StoredSession {
-            mappings: merged,
-            expires_at: Utc::now() + chrono::Duration::seconds(self.ttl_secs as i64),
-        };
-        kv2::set(&self.client, &self.mount, &path, &payload)
-            .await
-            .map_err(map_client_error)?;
-        Ok(())
+        let mut last_cas_error = None;
+
+        for attempt in 1..=PUT_CAS_ATTEMPTS {
+            let (existing, cas) = self.read_for_cas(&path).await?;
+            let merged = merge_mappings(existing, mappings);
+            let payload = StoredSession {
+                mappings: merged,
+                expires_at: Utc::now() + chrono::Duration::seconds(self.ttl_secs as i64),
+            };
+            let options = SetSecretRequestOptions { cas };
+
+            match kv2::set_with_options(&self.client, &self.mount, &path, &payload, options).await {
+                Ok(_) => return Ok(()),
+                Err(err) if is_cas_conflict(&err) => {
+                    last_cas_error = Some(err.to_string());
+                    if attempt == PUT_CAS_ATTEMPTS {
+                        break;
+                    }
+                    // Another writer won the race; re-read and merge again.
+                    continue;
+                }
+                Err(err) => return Err(map_client_error(err)),
+            }
+        }
+
+        Err(TokenMapError::Backend(format!(
+            "vault KV v2 compare-and-set conflict after {PUT_CAS_ATTEMPTS} attempts: {}",
+            last_cas_error.unwrap_or_else(|| "unknown check-and-set failure".to_string())
+        )))
     }
 
     async fn get(&self, tenant: &str, session: &str) -> Result<Vec<TokenMapping>, TokenMapError> {
@@ -147,6 +202,23 @@ impl TokenMapStore for Kv2Store {
             Ok(_) => Ok(()),
             Err(err) => Err(TokenMapError::Unavailable(err.to_string())),
         }
+    }
+}
+
+fn version_to_cas(version: u64) -> Result<u32, TokenMapError> {
+    u32::try_from(version).map_err(|_| {
+        TokenMapError::Backend(format!(
+            "vault KV v2 version {version} exceeds compare-and-set u32 range"
+        ))
+    })
+}
+
+fn is_cas_conflict(err: &ClientError) -> bool {
+    match err {
+        ClientError::APIError { code: 400, errors } => errors
+            .iter()
+            .any(|msg| msg.to_ascii_lowercase().contains("check-and-set")),
+        _ => false,
     }
 }
 

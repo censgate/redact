@@ -207,11 +207,44 @@ mod kv2_mock {
     use serde_json::{json, Value};
     use tokio::sync::Mutex;
 
+    #[derive(Clone)]
+    struct SecretEntry {
+        data: Value,
+        version: u64,
+    }
+
     #[derive(Clone, Default)]
     struct MockVaultState {
-        secrets: Arc<Mutex<HashMap<String, Value>>>,
+        secrets: Arc<Mutex<HashMap<String, SecretEntry>>>,
         /// Last JSON body received by a POST to `/v1/{mount}/data/{*path}`.
         last_write: Arc<Mutex<Option<Value>>>,
+        /// Remaining times a would-be-successful CAS write is rejected to
+        /// simulate a concurrent writer winning the race.
+        cas_fail_remaining: Arc<Mutex<u32>>,
+        /// When a forced CAS failure fires, optionally apply this payload as
+        /// the concurrent writer's successful write (version bump included).
+        concurrent_data_on_cas_fail: Arc<Mutex<Option<Value>>>,
+        /// Counts POST attempts that reached the CAS check (for assertions).
+        write_attempts: Arc<Mutex<u32>>,
+    }
+
+    impl MockVaultState {
+        async fn arm_cas_fail(&self, times: u32, concurrent_data: Option<Value>) {
+            *self.cas_fail_remaining.lock().await = times;
+            *self.concurrent_data_on_cas_fail.lock().await = concurrent_data;
+        }
+    }
+
+    fn cas_conflict_response() -> axum::response::Response {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "errors": [
+                    "check-and-set parameter did not match the current version"
+                ]
+            })),
+        )
+            .into_response()
     }
 
     async fn mock_health() -> impl IntoResponse {
@@ -236,7 +269,7 @@ mod kv2_mock {
         let key = format!("{mount}/data/{path}");
         let secrets = state.secrets.lock().await;
         match secrets.get(&key) {
-            Some(data) => (
+            Some(entry) => (
                 StatusCode::OK,
                 Json(json!({
                     "request_id": "mock",
@@ -244,12 +277,12 @@ mod kv2_mock {
                     "renewable": false,
                     "lease_duration": 0,
                     "data": {
-                        "data": data,
+                        "data": entry.data,
                         "metadata": {
                             "created_time": "2024-01-01T00:00:00Z",
                             "deletion_time": "",
                             "destroyed": false,
-                            "version": 1,
+                            "version": entry.version,
                             "custom_metadata": null
                         }
                     }
@@ -278,11 +311,66 @@ mod kv2_mock {
         };
         let key = format!("{mount}/data/{path}");
         *state.last_write.lock().await = Some(body.clone());
+        *state.write_attempts.lock().await += 1;
+
         let data = body
             .get("data")
             .cloned()
             .unwrap_or(Value::Object(Default::default()));
-        state.secrets.lock().await.insert(key, data);
+        let cas = body
+            .pointer("/options/cas")
+            .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|n| n as u64)));
+
+        let mut secrets = state.secrets.lock().await;
+        let current_version = secrets.get(&key).map(|e| e.version).unwrap_or(0);
+
+        if let Some(cas) = cas {
+            if cas != current_version {
+                return cas_conflict_response();
+            }
+        }
+
+        // Simulate a concurrent writer: reject this CAS and advance the key.
+        let mut fail_remaining = state.cas_fail_remaining.lock().await;
+        if *fail_remaining > 0 {
+            *fail_remaining -= 1;
+            let concurrent = state.concurrent_data_on_cas_fail.lock().await.clone();
+            let new_version = current_version + 1;
+            if let Some(concurrent_data) = concurrent {
+                secrets.insert(
+                    key,
+                    SecretEntry {
+                        data: concurrent_data,
+                        version: new_version,
+                    },
+                );
+            } else if let Some(entry) = secrets.get_mut(&key) {
+                entry.version = new_version;
+            } else {
+                // cas=0 create race: leave a readable empty session at v1.
+                secrets.insert(
+                    key,
+                    SecretEntry {
+                        data: json!({
+                            "mappings": [],
+                            "expires_at": "2099-01-01T00:00:00Z",
+                        }),
+                        version: new_version,
+                    },
+                );
+            }
+            return cas_conflict_response();
+        }
+        drop(fail_remaining);
+
+        let new_version = current_version + 1;
+        secrets.insert(
+            key,
+            SecretEntry {
+                data,
+                version: new_version,
+            },
+        );
         (
             StatusCode::OK,
             Json(json!({
@@ -294,7 +382,7 @@ mod kv2_mock {
                     "created_time": "2024-01-01T00:00:00Z",
                     "deletion_time": "",
                     "destroyed": false,
-                    "version": 1,
+                    "version": new_version,
                     "custom_metadata": null
                 }
             })),
@@ -346,6 +434,13 @@ mod kv2_mock {
         }
     }
 
+    fn stored_session_json(mappings: &[TokenMapping]) -> Value {
+        json!({
+            "mappings": mappings,
+            "expires_at": (Utc::now() + Duration::hours(1)).to_rfc3339(),
+        })
+    }
+
     #[tokio::test]
     async fn kv2_put_get_delete_round_trip_against_mock() {
         let (addr, state) = start_mock_vault().await;
@@ -377,6 +472,10 @@ mod kv2_mock {
             rendered.contains(&sealed),
             "sealed value missing from vault payload: {rendered}"
         );
+        assert!(
+            written.pointer("/options/cas").is_some(),
+            "CAS option missing from vault write: {rendered}"
+        );
 
         let loaded = store.get("acme", "chat-1").await.unwrap();
         assert_eq!(loaded.len(), 1);
@@ -387,6 +486,48 @@ mod kv2_mock {
 
         store.delete("acme", "chat-1").await.unwrap();
         assert!(store.get("acme", "chat-1").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn kv2_first_write_to_new_session_succeeds() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed) = sealed_email("first@example.com");
+
+        store
+            .put("t", "new-sess", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+
+        let written = state.last_write.lock().await.clone().unwrap();
+        assert_eq!(
+            written.pointer("/options/cas").and_then(|v| v.as_u64()),
+            Some(0)
+        );
+        assert_eq!(store.get("t", "new-sess").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn kv2_sequential_writes_both_survive() {
+        let (addr, _) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed_a) = sealed_email("a@example.com");
+        let (_dek, sealed_b) = sealed_email("b@example.com");
+
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed_a)])
+            .await
+            .unwrap();
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_2]", &sealed_b)])
+            .await
+            .unwrap();
+
+        let loaded = store.get("t", "s").await.unwrap();
+        let tokens: Vec<_> = loaded.iter().map(|m| m.token.as_str()).collect();
+        assert_eq!(loaded.len(), 2);
+        assert!(tokens.contains(&"[EMAIL_ADDRESS_1]"));
+        assert!(tokens.contains(&"[EMAIL_ADDRESS_2]"));
     }
 
     #[tokio::test]
@@ -407,6 +548,89 @@ mod kv2_mock {
             .await
             .unwrap();
         assert_eq!(store.get("t", "s").await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn kv2_stale_cas_retries_and_keeps_both_writers() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+
+        let (_dek, sealed_a) = sealed_email("a@example.com");
+        let (_dek, sealed_b) = sealed_email("b@example.com");
+        let (_dek, sealed_c) = sealed_email("c@example.com");
+
+        // Seed version 1 with writer A's mapping.
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed_a)])
+            .await
+            .unwrap();
+
+        // Next write (writer B) will see a stale CAS: the mock applies writer C's
+        // merged result (A+C) concurrently, bumps the version, and returns a
+        // check-and-set error. B must re-read, merge, and retry so A+B+C survive.
+        let concurrent_c = stored_session_json(&[
+            mapping("[EMAIL_ADDRESS_1]", &sealed_a),
+            mapping("[EMAIL_ADDRESS_3]", &sealed_c),
+        ]);
+        state.arm_cas_fail(1, Some(concurrent_c)).await;
+
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_2]", &sealed_b)])
+            .await
+            .unwrap();
+
+        assert!(
+            *state.write_attempts.lock().await >= 3,
+            "expected seed write + failed CAS + successful retry"
+        );
+
+        let loaded = store.get("t", "s").await.unwrap();
+        let tokens: Vec<_> = loaded.iter().map(|m| m.token.as_str()).collect();
+        assert_eq!(
+            loaded.len(),
+            3,
+            "expected both writers plus seed: {tokens:?}"
+        );
+        assert!(tokens.contains(&"[EMAIL_ADDRESS_1]"));
+        assert!(tokens.contains(&"[EMAIL_ADDRESS_2]"));
+        assert!(tokens.contains(&"[EMAIL_ADDRESS_3]"));
+    }
+
+    #[tokio::test]
+    async fn kv2_exhausted_cas_retries_return_backend_error() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed_a) = sealed_email("a@example.com");
+        let (_dek, sealed_b) = sealed_email("b@example.com");
+
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed_a)])
+            .await
+            .unwrap();
+
+        // More forced failures than the client's retry budget.
+        state.arm_cas_fail(10, None).await;
+
+        let err = store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_2]", &sealed_b)])
+            .await
+            .unwrap_err();
+        match err {
+            TokenMapError::Backend(msg) => {
+                assert!(
+                    msg.to_ascii_lowercase().contains("compare-and-set")
+                        || msg.to_ascii_lowercase().contains("check-and-set"),
+                    "expected CAS conflict message, got {msg}"
+                );
+            }
+            other => panic!("expected Backend error, got {other:?}"),
+        }
+
+        // Seed mapping A must still be present — exhausted retries must not
+        // clobber existing data with a lossy unconditional write.
+        let loaded = store.get("t", "s").await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].token, "[EMAIL_ADDRESS_1]");
     }
 
     #[tokio::test]
