@@ -440,11 +440,19 @@ curl -X POST http://localhost:8080/api/v1/anonymize \
 
 `redact-gateway` is an OpenAI-compatible proxy that embeds `redact-core` in-process. It sits between your application and a model provider: outbound prompts are scanned and rewritten according to a policy profile, and inbound completions can be scanned and (when using reversible tokens) restored for the caller.
 
-```bash
-# The default provider is Ollama on 11434
-cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
+**Start here:** [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md) — `/v1/redact` with no provider, then Ollama chat, then an OpenAI SDK.
 
-curl -s http://127.0.0.1:8080/health
+```bash
+# Local redaction without a model provider
+export OTEL_SDK_DISABLED=true
+cargo run -p redact-gateway -- --host 127.0.0.1
+
+curl -s http://127.0.0.1:8080/v1/redact \
+  -H 'content-type: application/json' \
+  -d '{"text":"Email me at alice@example.com"}'
+
+# Chat proxy (requires a provider such as Ollama with a pulled model)
+cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
 
 curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H 'content-type: application/json' \
@@ -459,12 +467,12 @@ With the bundled `default` profile the provider sees `[EMAIL_ADDRESS]` instead o
 | Capability | Notes |
 |------------|--------|
 | Policy profiles | Per-entity `allow` / `block` / `mask` / `replace` / `hash` / `tokenize` |
-| Token map | `off`, process-local `memory`, or shared `vault_kv2` (Vault / OpenBao) |
+| Token map | `off`, process-local `memory`, or shared `vault_kv2` (Vault / OpenBao); configured via `CENSGATE_VAULT_BACKEND` |
 | Auth | `none`, static API keys, or OIDC bearer JWTs |
 | Telemetry | OpenTelemetry traces, metrics, and audit log records (`OTEL_*` + `CENSGATE_TRACE_*`) |
-| Streaming | Buffered (default) or incremental with a hold-back window |
+| Streaming | Buffered (default, in-place SSE rewrite) or incremental with a hold-back window |
 
-Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gateway.yml`, `deploy/`. Full docs: [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md) and [`docs/gateway/`](docs/gateway/).
+Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gateway.yml`, `deploy/`. Full docs: [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md), [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md), and [`docs/gateway/`](docs/gateway/).
 
 ## Supported Entity Types
 
@@ -666,6 +674,7 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 ## Documentation
 
 - [API Documentation](https://docs.rs/redact-core) — Rust API docs
+- [Gateway getting started](/censgate/redact/blob/main/docs/gateway/getting-started.md) — Local redaction, Ollama chat, OpenAI SDK
 - [Gateway Documentation](/censgate/redact/blob/main/docs/gateway) — Configuration, policy, tokenization, auth, telemetry, audit, streaming, deployment
 - [Test Coverage](/censgate/redact/blob/main/TEST_COVERAGE.md) — Testing details
 - [Contributing Guide](/censgate/redact/blob/main/CONTRIBUTING.md) — How to contribute

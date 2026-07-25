@@ -2,7 +2,7 @@
 
 A policy set holds named profiles. Each profile maps entity types to actions, with a confidence floor and optional per-entity overrides. Profiles are immutable once resolved; the request path only ever reads an `Arc` snapshot.
 
-Related: [configuration](configuration.md) · [tokenization](tokenization.md) · [authentication](authentication.md)
+Related: [getting started](getting-started.md) · [configuration](configuration.md) · [tokenization](tokenization.md) · [authentication](authentication.md)
 
 ## Selecting a profile
 
@@ -12,13 +12,24 @@ Resolution order for each request:
 2. Else, if `allow_profile_header` is true, the `x-censgate-profile` header (name configurable).
 3. Else the configured `default_profile`.
 
+`allow_profile_header` defaults to **`false`**: the profile header is ignored unless an operator enables it. An OIDC profile claim still selects a profile regardless. Enabling the header while `auth.mode` is `none` lets any caller choose any configured profile (including weaker ones); the gateway logs a warning for that combination.
+
 An unknown explicit name is an error (HTTP 400). The gateway never silently falls back to a weaker profile.
 
 ```bash
+# Header is honored only when allow_profile_header is true:
+export CENSGATE_ALLOW_PROFILE_HEADER=true
+
 curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H 'content-type: application/json' \
   -H 'x-censgate-profile: strict' \
   -d '{"model":"llama3.2","messages":[{"role":"user","content":"hi"}]}'
+```
+
+Without enabling the header, set the process default instead:
+
+```bash
+export CENSGATE_DEFAULT_PROFILE=strict
 ```
 
 ## The six actions

@@ -4,10 +4,13 @@ OpenAI-compatible privacy gateway that embeds [`redact-core`](../redact-core) in
 
 The gateway sits between your application and a model provider. On the way out it detects sensitive values and applies the action a policy profile specifies for each entity type (`allow`, `block`, `mask`, `replace`, `hash`, or `tokenize`). On the way back it can restore tokenized values so the caller sees a complete answer while the provider only ever saw placeholders.
 
+**Start here:** [Getting started](../../docs/gateway/getting-started.md) — local `/v1/redact` with no provider, then Ollama chat, then an OpenAI SDK.
+
 Further reading:
 
 | Topic | Page |
 |-------|------|
+| Getting started | [docs/gateway/getting-started.md](../../docs/gateway/getting-started.md) |
 | Configuration (YAML, env, reload) | [docs/gateway/configuration.md](../../docs/gateway/configuration.md) |
 | Policy profiles and actions | [docs/gateway/policy.md](../../docs/gateway/policy.md) |
 | Reversible tokenization | [docs/gateway/tokenization.md](../../docs/gateway/tokenization.md) |
@@ -19,16 +22,27 @@ Further reading:
 
 ## Quick start
 
-Requires an OpenAI-compatible provider. The default is Ollama at `http://127.0.0.1:11434`.
+The fastest path needs **no model provider**: build, run, and call `/v1/redact`. Full walkthrough: [getting-started.md](../../docs/gateway/getting-started.md).
 
 ```bash
 # From the repository root
+export OTEL_SDK_DISABLED=true
+cargo run -p redact-gateway -- --host 127.0.0.1
+
+# Redact without calling a provider
+curl -s http://127.0.0.1:8080/v1/redact \
+  -H 'content-type: application/json' \
+  -d '{"text":"Email me at alice@example.com"}'
+# → {"text":"Email me at [EMAIL_ADDRESS]", "blocked":false, …}
+```
+
+For chat completions, point at an OpenAI-compatible provider (default Ollama at `http://127.0.0.1:11434`). Pull a model first (`ollama pull llama3.2`).
+
+```bash
 cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
 
-# Health probe (no authentication)
 curl -s http://127.0.0.1:8080/health
 
-# Chat completion — the email is replaced before the provider sees it
 curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
@@ -64,7 +78,7 @@ Middleware order on the model surfaces is authenticate, evaluate policy, redact,
 **Outbound (application → provider)**
 
 1. Authenticate the caller (`none`, `api_key`, or `oidc`).
-2. Select a policy profile (credential claim wins over `x-censgate-profile`).
+2. Select a policy profile (credential claim wins; `x-censgate-profile` is honored only when `allow_profile_header` is true — **off by default**).
 3. Detect entities with `redact-core` and apply per-entity actions.
 4. Persist newly minted sealed token mappings when a token map backend is configured.
 5. Forward the rewritten body to the provider.
@@ -111,7 +125,7 @@ Worked example — select the reversible profile and round-trip an email:
 
 ```bash
 # Token map + sealing key required for durable tokenize / restore
-export CENSGATE_VAULT_BACKEND=memory
+export CENSGATE_VAULT_BACKEND=memory   # in-process token map; not HashiCorp Vault
 export CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
 export CENSGATE_DEFAULT_PROFILE=reversible
 
@@ -126,7 +140,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-The provider sees `[EMAIL_ADDRESS_1]`. When the model echoes that placeholder, the gateway restores `alice@example.com` for the caller. The same session header reuses tokens across turns.
+The provider sees `[EMAIL_ADDRESS_1]`. When the model echoes that placeholder, the gateway restores `alice@example.com` for the caller. The same session header reuses tokens across turns (with `auth.mode = none`, anyone who can reach the port and reuse that header can resume the session — trusted networks only).
 
 ## Endpoints
 
@@ -141,7 +155,7 @@ The provider sees `[EMAIL_ADDRESS_1]`. When the model echoes that placeholder, t
 | `POST` | `/v1/embeddings` | Yes | Embeddings (input scanned; vectors not) |
 | `GET` | `/v1/models` | Yes | Proxied model list |
 | `POST` | `/v1/redact` | Yes | Redact text without calling a provider |
-| `POST` | `/v1/restore` | Yes | Restore tokens for a session |
+| `POST` | `/v1/restore` | Yes | Restore tokens for a session (requires `api_key` or `oidc`; **403** when `auth.mode` is `none`) |
 | `GET` | `/v1/compliance/status` | Yes | Effective profiles and runtime summary |
 | `POST` | `/v1/compliance/check` | Yes | Dry-run policy decision (tokens not persisted) |
 
@@ -149,11 +163,11 @@ The provider sees `[EMAIL_ADDRESS_1]`. When the model echoes that placeholder, t
 
 Configuration reaches the request path as a single [`ResolvedConfig`](src/config/mod.rs). Sources: environment only (`env`), YAML only (`file`), or YAML overlaid by environment (`layered`). When `CENSGATE_CONFIG_SOURCE` is unset, the gateway uses `layered` if `CENSGATE_CONFIG_FILE` is set and `env` otherwise.
 
-Full tables, YAML schema, and reload semantics: [configuration.md](../../docs/gateway/configuration.md).
+Full tables, YAML schema, validation rules, and reload semantics: [configuration.md](../../docs/gateway/configuration.md).
 
 ### Environment variables
 
-Every gateway knob uses the `CENSGATE_` prefix. Legacy unprefixed names remain accepted where noted. Telemetry transport uses standard `OTEL_*` variables (see [telemetry.md](../../docs/gateway/telemetry.md)).
+Every gateway knob uses the `CENSGATE_` prefix (one name per setting). The only unprefixed variables read anywhere are `VAULT_ADDR` / `VAULT_TOKEN` and their OpenBao `BAO_` spellings. Telemetry transport uses standard `OTEL_*` variables (see [telemetry.md](../../docs/gateway/telemetry.md)).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -161,13 +175,13 @@ Every gateway knob uses the `CENSGATE_` prefix. Legacy unprefixed names remain a
 | `CENSGATE_CONFIG_FILE` | unset | Path to the YAML document |
 | `CENSGATE_POLICY_FILE` | unset | Standalone policy YAML |
 | `CENSGATE_DEFAULT_PROFILE` | `default` | Default profile name |
-| `CENSGATE_HOST` / `HOST` | `0.0.0.0` | Bind address |
-| `CENSGATE_PORT` / `PORT` | `8080` | Bind port |
+| `CENSGATE_HOST` | `0.0.0.0` | Bind address |
+| `CENSGATE_PORT` | `8080` | Bind port |
 | `CENSGATE_PROVIDER_NAME` | `openai` | Provider identity reported as `gen_ai.provider.name` |
 | `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL |
 | `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token |
 | `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
-| `CENSGATE_ENABLE_TRACING` / `ENABLE_TRACING` | `true` | HTTP request tracing |
+| `CENSGATE_ENABLE_TRACING` | `true` | HTTP request tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
 | `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout |
 | `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout |
@@ -176,10 +190,10 @@ Every gateway knob uses the `CENSGATE_` prefix. Legacy unprefixed names remain a
 | `CENSGATE_STREAM_HOLDBACK_BYTES` | `256` | Hold-back window in incremental mode |
 | `CENSGATE_SESSION_HEADER` | `x-censgate-session-id` | Session id header |
 | `CENSGATE_PROFILE_HEADER` | `x-censgate-profile` | Profile selection header |
-| `CENSGATE_ALLOW_PROFILE_HEADER` | `true` | Honor the profile header |
+| `CENSGATE_ALLOW_PROFILE_HEADER` | `false` | Honor the profile header |
 | `CENSGATE_PATTERN_PACKS` | unset | Pack files/dirs (`:` / `,` / `;` separated) |
 | `CENSGATE_DISABLE_BUILTIN_PATTERNS` | `false` | Skip patterns compiled into the engine |
-| `CENSGATE_VAULT_BACKEND` | `off` | `off`, `memory`, or `vault_kv2` |
+| `CENSGATE_VAULT_BACKEND` | `off` | Token map backend: `off`, `memory`, or `vault_kv2` |
 | `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 server address |
 | `CENSGATE_VAULT_TOKEN` / `VAULT_TOKEN` / `BAO_TOKEN` | unset | KV v2 auth token |
 | `CENSGATE_VAULT_MOUNT` | `secret` | KV v2 mount |
@@ -215,7 +229,7 @@ server:      # host, port, enable_http_trace, metrics_endpoint
 provider:    # name, base_url, api_key, timeouts, max_body_bytes, forward_client_authorization
 redaction:   # stream_mode, stream_holdback_bytes, session_header, profile_header, allow_profile_header
 packs:       # paths, disable_builtin
-vault:       # backend, address, token, mount, path_prefix, namespace, ttl_secs, data_encryption_key
+vault:       # token map: backend, address, token, mount, path_prefix, namespace, ttl_secs, data_encryption_key
 auth:        # mode, api_keys, oidc: { … }
 audit:       # export, file_path, queue_capacity, include_entity_types
 telemetry:   # operations, filter, genai_attributes
@@ -223,7 +237,7 @@ policy:      # inline PolicySet  — mutually exclusive with policy_file
 policy_file: # path relative to this document
 ```
 
-CLI flags (`--config`, `--provider-base-url`, `--profile`, …) are applied through the same environment overlay, so precedence matches library loading. Subcommands: `serve` (default), `validate-config`, `print-config`, `print-policy`. On Unix, `SIGHUP` reloads configuration; a failed reload keeps the last good snapshot.
+CLI flags (`--config`, `--provider-base-url`, `--profile`, …) are applied through the same environment overlay, so precedence matches library loading. Subcommands: `serve` (default), `validate-config`, `print-config`, `print-policy`. On Unix, `SIGHUP` reloads configuration; a failed reload keeps the last good snapshot. Which settings apply on reload versus require restart is tabulated in [configuration.md](../../docs/gateway/configuration.md#reload-on-sighup).
 
 ## Library usage
 
@@ -246,11 +260,12 @@ These are present-tense boundaries of the OSS runtime. Closing each gap is an op
 | Boundary | Operator responsibility |
 |----------|-------------------------|
 | Audit emission only | The gateway emits audit records (`stdout`, `file`, or OTLP logs). Durable and immutable retention is provided by the sink you point it at — for example an OpenTelemetry Collector writing to object storage with retention locks. See [`deploy/otel-collector.yaml`](../../deploy/otel-collector.yaml). |
-| Process-local token map | With the `memory` backend, the token map is process-local: tokens do not survive a restart or reach another replica. Use the `vault_kv2` backend (HashiCorp Vault or OpenBao) for shared state, and set the same `CENSGATE_TOKEN_DEK` on every replica. |
-| Ephemeral sealing key | Without `CENSGATE_TOKEN_DEK`, the process generates an ephemeral key; tokens cannot be restored after a restart or by another replica. |
-| Auth mode `none` | Inbound authentication is off by default and is only appropriate on a trusted network. Enable `api_key` or `oidc` before exposing the gateway on an untrusted edge. |
+| Process-local token map | With the `memory` backend, the token map is process-local: tokens do not survive a restart or reach another replica. Use the `vault_kv2` backend (HashiCorp Vault or OpenBao) for shared state, and set the same `CENSGATE_TOKEN_DEK` on every replica. `off` and `memory` are not HashiCorp Vault. |
+| Ephemeral sealing key | Without `CENSGATE_TOKEN_DEK`, the process generates an ephemeral key; tokens cannot be restored after a restart or by another replica. All-zero keys are refused at startup. |
+| Auth mode `none` | Inbound authentication is off by default and is only appropriate on a trusted network. Enable `api_key` or `oidc` before exposing the gateway on an untrusted edge. `/v1/restore` returns 403 in this mode. |
+| Profile header off | `allow_profile_header` defaults to false so unauthenticated callers cannot pick a weaker profile. An OIDC profile claim still selects a profile. |
 | Fail-closed profiles | When `fail_closed` is true, token-map or tokenization failures reject the request instead of forwarding unredacted content. Keep this enabled for production profiles. |
-| Buffered streaming default | Buffered mode sees the full provider stream before redacting, so entities cannot hide in a token split. Incremental mode trades that guarantee for lower time-to-first-token within a hold-back window. |
+| Buffered streaming default | Buffered mode sees the full provider stream before redacting, so entities cannot hide in a token split. It rewrites `delta.content` / tool-call arguments in place (every choice, including `n > 1`), coalescing fragments onto the first content chunk. Incremental mode trades that guarantee for lower time-to-first-token within a hold-back window. |
 
 ## Design notes
 

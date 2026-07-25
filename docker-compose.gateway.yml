@@ -14,6 +14,13 @@
 # Override the upstream provider (default is the Ollama service below):
 #   PROVIDER_BASE_URL=https://api.openai.com CENSGATE_PROVIDER_API_KEY=sk-... \
 #     docker compose -f docker-compose.gateway.yml up --build
+#
+# Ollama starts with an empty model store. The first /v1/chat/completions
+# request fails until you pull a model into the ollama service, for example:
+#   docker compose -f docker-compose.gateway.yml exec ollama ollama pull llama3.2
+# Wait for the pull to finish, then confirm readiness:
+#   docker compose -f docker-compose.gateway.yml exec ollama ollama list
+#   curl -s http://localhost:11434/api/tags
 
 services:
   # OpenAI-compatible privacy gateway (redact-gateway binary).
@@ -63,7 +70,8 @@ services:
     # Probe http://localhost:8080/livez and /readyz from your host or orchestrator.
 
   # Local OpenAI-compatible provider (Ollama). Point CENSGATE_PROVIDER_BASE_URL /
-  # PROVIDER_BASE_URL elsewhere to use a hosted provider instead.
+  # PROVIDER_BASE_URL elsewhere to use a different provider instead.
+  # Image starts empty — pull a model before chatting (see header comments).
   ollama:
     image: ollama/ollama:latest
     ports:

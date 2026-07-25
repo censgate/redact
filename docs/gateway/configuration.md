@@ -2,7 +2,7 @@
 
 Configuration reaches the request path as a single [`ResolvedConfig`](../../crates/redact-gateway/src/config/mod.rs). File documents and environment variables are mapped into it by adapters; handlers read an immutable snapshot through `ConfigHandle`, which can be swapped atomically on reload.
 
-Related: [policy](policy.md) · [tokenization](tokenization.md) · [authentication](authentication.md) · [telemetry](telemetry.md) · [audit](audit.md) · [deployment](deployment.md) · [streaming](streaming.md)
+Related: [getting started](getting-started.md) · [policy](policy.md) · [tokenization](tokenization.md) · [authentication](authentication.md) · [telemetry](telemetry.md) · [audit](audit.md) · [deployment](deployment.md) · [streaming](streaming.md)
 
 ## Sources and precedence
 
@@ -53,7 +53,20 @@ cargo run -p redact-gateway -- \
 
 On Unix, the binary listens for `SIGHUP` and reloads configuration from the same source. A failed reload keeps the last known good snapshot so a typo in a policy file does not take a running gateway offline. Handlers call `ConfigHandle::load` once per request and work from that snapshot, so a reload never changes behavior mid-request.
 
-Reload does not rebuild the process sealing key or reconnect every dependency from scratch for in-flight work; treat key rotation and backend address changes as a rolling restart when you need a hard cutover.
+[`ResolvedConfig::restart_required_changes`](../../crates/redact-gateway/src/config/mod.rs) decides which differences a reload can apply. Changed restart-required fields are logged by name; the running process keeps its current values for those fields until you restart.
+
+| Applies on SIGHUP | Requires restart |
+|-------------------|------------------|
+| Policy profiles (`policy` / `policy_file` / `CENSGATE_POLICY_FILE` / `CENSGATE_DEFAULT_PROFILE`) | Bind host and port (`server.host`, `server.port`) |
+| Everything under `redaction` (stream mode, hold-back, session/profile headers, `allow_profile_header`) | HTTP request trace layer (`server.enable_http_trace`) |
+| `server.metrics_endpoint` | Provider client settings (`provider.base_url`, `provider.api_key`, connect/request timeouts, `max_body_bytes`) |
+| `provider.forward_client_authorization` | Pattern packs (`packs.paths`, `packs.disable_builtin`) |
+| `telemetry.operations` | All token map settings (`vault.*`, including the sealing key) |
+| `telemetry.genai_attributes` | All auth settings (`auth.mode`, `auth.api_keys`, `auth.oidc.*`) |
+| `audit.include_entity_types` | Audit sink and queue (`audit.export`, `audit.file_path`, `audit.queue_capacity`) |
+| | Telemetry span filter (`telemetry.filter`) |
+
+Treat sealing-key rotation and token-map address changes as a rolling restart when you need a hard cutover.
 
 ## YAML schema
 
@@ -80,13 +93,13 @@ redaction:
   stream_holdback_bytes: 256
   session_header: x-censgate-session-id
   profile_header: x-censgate-profile
-  allow_profile_header: true
+  allow_profile_header: false      # off by default — see below
 
 packs:
   paths: []                        # files or directories
   disable_builtin: false
 
-vault:
+vault:                             # token map settings (name is historical)
   backend: "off"                   # off | memory | vault_kv2  (quote "off")
   address: null
   token: null
@@ -94,7 +107,7 @@ vault:
   path_prefix: redact-gateway
   namespace: null
   ttl_secs: 3600
-  data_encryption_key: null        # base64 32-byte key
+  data_encryption_key: null        # base64 32-byte key; all-zero refused
 
 auth:
   mode: none                       # none | api_key | oidc
@@ -130,6 +143,8 @@ policy_file: ./policy.yaml         # mutually exclusive with policy
 
 Quote `backend: "off"` and `export: "off"` so YAML does not parse them as booleans.
 
+`redaction.allow_profile_header` defaults to `false`. The `x-censgate-profile` header is ignored unless you enable it. A profile claim in an OIDC token still selects a profile regardless of this flag. Enabling the header while `auth.mode` is `none` lets any caller choose any configured profile (including weaker ones); the gateway logs a warning for that combination.
+
 Example documents:
 
 - [`crates/redact-gateway/examples/minimal.yaml`](../../crates/redact-gateway/examples/minimal.yaml)
@@ -142,9 +157,9 @@ Example documents:
 
 The inference destination is called the **provider** throughout: configuration, documentation, telemetry and audit records all use that one word. It matches how comparable AI gateways name the concept, and it matches the OpenTelemetry GenAI conventions this gateway emits, where the attribute is `gen_ai.provider.name`.
 
-Three neighbouring words mean different things. **Inference** is the operation performed against a provider, reported as `gen_ai.operation.name`, not a name for the destination. **Backend** means the token map storage backend (`vault.backend`) and nothing else. **Upstream** appears only as directional English in prose, never as the name of a setting. [Gateway telemetry](telemetry.md#vocabulary-gen_ai-provider-inference-backend) sets this out in full alongside the conventions it follows.
+Three neighbouring words mean different things. **Inference** is the operation performed against a provider, reported as `gen_ai.operation.name`, not a name for the destination. **Backend** means the token map storage backend (`vault.backend` / `CENSGATE_VAULT_BACKEND`) and nothing else — `memory` and `off` are not HashiCorp Vault; `vault_kv2` is the option that speaks the Vault KV v2 HTTP API. **Upstream** appears only as directional English in prose, never as the name of a setting. [Gateway telemetry](telemetry.md#vocabulary-gen_ai-provider-inference-backend) sets this out in full alongside the conventions it follows.
 
-Each setting has exactly one name. The only unprefixed variables read anywhere are `VAULT_ADDR` / `VAULT_TOKEN` and their OpenBao `BAO_` spellings, because those are the canonical configuration of the token map server rather than gateway settings.
+Each setting has exactly one environment name under the `CENSGATE_` prefix. The only unprefixed variables read anywhere are `VAULT_ADDR` / `VAULT_TOKEN` and their OpenBao `BAO_` spellings, because those are the canonical configuration of the token map server rather than gateway settings. Unprefixed aliases such as `HOST`, `PORT`, or `ENABLE_TRACING` are not read.
 
 ## Environment variables
 
@@ -154,13 +169,13 @@ Each setting has exactly one name. The only unprefixed variables read anywhere a
 | `CENSGATE_CONFIG_FILE` | unset | YAML path |
 | `CENSGATE_POLICY_FILE` | unset | Standalone policy YAML |
 | `CENSGATE_DEFAULT_PROFILE` | `default` | Default profile name |
-| `CENSGATE_HOST` / `HOST` | `0.0.0.0` | Bind address |
-| `CENSGATE_PORT` / `PORT` | `8080` | Bind port |
+| `CENSGATE_HOST` | `0.0.0.0` | Bind address |
+| `CENSGATE_PORT` | `8080` | Bind port |
 | `CENSGATE_PROVIDER_NAME` | `openai` | Provider identity reported as `gen_ai.provider.name` |
 | `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL |
 | `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token |
 | `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
-| `CENSGATE_ENABLE_TRACING` / `ENABLE_TRACING` | `true` | HTTP tracing |
+| `CENSGATE_ENABLE_TRACING` | `true` | HTTP tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
 | `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout |
 | `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout |
@@ -169,10 +184,10 @@ Each setting has exactly one name. The only unprefixed variables read anywhere a
 | `CENSGATE_STREAM_HOLDBACK_BYTES` | `256` | Incremental hold-back |
 | `CENSGATE_SESSION_HEADER` | `x-censgate-session-id` | Session header name |
 | `CENSGATE_PROFILE_HEADER` | `x-censgate-profile` | Profile header name |
-| `CENSGATE_ALLOW_PROFILE_HEADER` | `true` | Honor profile header |
+| `CENSGATE_ALLOW_PROFILE_HEADER` | `false` | Honor profile header |
 | `CENSGATE_PATTERN_PACKS` | unset | Pack paths (`:` / `,` / `;`) |
 | `CENSGATE_DISABLE_BUILTIN_PATTERNS` | `false` | Skip built-in patterns |
-| `CENSGATE_VAULT_BACKEND` | `off` | Token map backend |
+| `CENSGATE_VAULT_BACKEND` | `off` | Token map backend (`off`, `memory`, `vault_kv2`) |
 | `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 address |
 | `CENSGATE_VAULT_TOKEN` / `VAULT_TOKEN` / `BAO_TOKEN` | unset | KV v2 token |
 | `CENSGATE_VAULT_MOUNT` | `secret` | KV v2 mount |
@@ -207,14 +222,20 @@ Telemetry **transport** (exporters, endpoints, protocol, sampling, resource attr
 
 `ResolvedConfig::validate` rejects combinations that would silently weaken protection:
 
-- Upstream URL must be non-empty and start with `http://` or `https://`
-- `auth.mode = api_key` requires at least one key
-- `auth.mode = oidc` requires an issuer
-- `vault.backend = vault_kv2` requires an address
-- `audit.export = file` requires a path
-- `stream_holdback_bytes` must be greater than zero
-
-When any profile uses `tokenize` and the token map backend is `off`, validation succeeds with a warning: fail-closed profiles reject those requests at runtime if tokenization cannot complete.
+| Severity | Rule |
+|----------|------|
+| Refuse | Provider URL must be non-empty and start with `http://` or `https://` |
+| Refuse | `auth.mode = api_key` requires at least one key |
+| Refuse | `auth.mode = oidc` requires an issuer |
+| Refuse | `vault.backend = vault_kv2` requires an address |
+| Refuse | `audit.export = file` requires a path |
+| Refuse | `stream_holdback_bytes` must be greater than zero |
+| Refuse | `provider.forward_client_authorization` together with any auth mode other than `none` (the caller's `Authorization` header carries the gateway credential and would be forwarded to the provider) |
+| Refuse | Sealing key that is not valid base64, or that does not decode to exactly 32 bytes |
+| Refuse | Sealing key of all zero bytes (placeholder detection); generate one with `openssl rand -base64 32` |
+| Warn | Profile header enabled while `auth.mode` is `none` (any caller can choose any profile) |
+| Warn | Any profile uses `tokenize` while the token map backend is `off`: tokens are restored within the request that minted them, but cannot be resumed by a later request, recovered through `/v1/restore`, or shared with another replica |
+| Warn | Tokenize with backend `memory` and no configured sealing key (generated key: tokens do not survive a restart and cannot be restored by another replica) |
 
 ## Pattern packs
 

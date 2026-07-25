@@ -2,7 +2,7 @@
 
 Inbound authentication identifies the caller and can select tenant and policy profile. When mode is `api_key` or `oidc`, requests without valid credentials are rejected (fail closed).
 
-Related: [configuration](configuration.md) · [policy](policy.md) · [deployment](deployment.md)
+Related: [getting started](getting-started.md) · [configuration](configuration.md) · [policy](policy.md) · [tokenization](tokenization.md) · [deployment](deployment.md)
 
 ## Modes
 
@@ -77,7 +77,9 @@ JWKS is cached and refreshed every `jwks_refresh_secs` (default 300). On a `kid`
 | `profile_claim` | String claim → preferred policy profile (wins over the profile header). |
 | `required_scopes` | Every listed scope must appear in `scope` / `scp`. |
 
-Credential-supplied profile wins over `x-censgate-profile` so callers cannot widen their granted policy. Set `allow_profile_header: false` when profiles come only from credentials.
+Credential-supplied profile wins over `x-censgate-profile` so callers cannot widen their granted policy. `allow_profile_header` already defaults to `false`; leave it off when profiles come only from credentials. Enabling the header without inbound authentication lets any caller choose any configured profile — the gateway logs a warning for that combination.
+
+Standalone `POST /v1/restore` requires an authenticated subject and returns **403** when `auth.mode` is `none`. With auth enabled, token-map storage keys are bound to the subject (`SHA-256` of subject plus session id) so one caller cannot restore another's mappings even within the same tenant. With `auth.mode = none`, cross-request session resumption on the chat surface still keys only on the caller-supplied `x-censgate-session-id` — anyone who can reach the port and reuse that header can resume another caller's session. That mode is appropriate only on a trusted network. In-request tokenize-then-restore is unaffected.
 
 ### Keycloak-style example
 

@@ -2,13 +2,13 @@
 
 Chat completions with `"stream": true` return `text/event-stream`. The gateway redacts assistant text before the client sees it. Two modes trade detection completeness against time to first token.
 
-Related: [configuration](configuration.md) · [policy](policy.md) · [telemetry](telemetry.md)
+Related: [getting started](getting-started.md) · [configuration](configuration.md) · [policy](policy.md) · [telemetry](telemetry.md)
 
 ## Modes
 
 | Mode | Config | Behavior |
 |------|--------|----------|
-| Buffered (default) | `stream_mode: buffered` / `CENSGATE_STREAM_MODE=buffered` | Consume the whole upstream SSE body (size-capped by `max_body_bytes`), concatenate content deltas, redact once, then emit a rebuilt OpenAI-compatible stream. |
+| Buffered (default) | `stream_mode: buffered` / `CENSGATE_STREAM_MODE=buffered` | Consume the whole upstream SSE body (size-capped by `max_body_bytes`), transform chunks **in place**, then emit the rewritten stream. |
 | Incremental | `stream_mode: incremental` | Forward redacted text as it arrives while retaining a trailing hold-back window. |
 
 ```bash
@@ -47,20 +47,18 @@ A token placeholder that would be split by the cut is also carried forward, beca
 
 Size the window above the longest entity you must catch in incremental mode (emails and phone numbers typically fit in 256 bytes; long private-key blocks do not).
 
-## What the rebuilt stream preserves
+## Buffered fidelity
 
-Buffered rebuild emits:
+Buffered mode preserves the upstream chunk **sequence** and every JSON field on every chunk. The only values rewritten are:
 
-1. A role chunk (`delta.role = assistant`)
-2. One or more content chunks with redacted (and optionally restored) text
-3. **Passthrough** frames from upstream that carry non-text payloads:
-   - `usage` chunks (including `stream_options.include_usage`)
-   - Tool-call deltas
-   - Choices with `index > 0` when `n > 1`
-4. A terminal chunk with the upstream `finish_reason` (default `stop`)
-5. `data: [DONE]`
+- `choices[i].delta.content`
+- `choices[i].delta.tool_calls[j].function.arguments`
 
-Upstream `created` and model id are preserved when present. Incremental responses add header `x-censgate-stream-mode: incremental`. Compliance headers on incremental streams report request-side counts; response totals complete as the stream drains (telemetry still records outcomes).
+Chunks that do not carry those fields (role announcements, `finish_reason`, `usage`, `system_fingerprint`, `logprobs`, `service_tier`, provider extensions, and any other unknown fields) keep all fields intact. Re-serialization via `serde_json` may reorder object keys; field **presence and values** are what this guarantee covers.
+
+Content and tool-argument fragments are coalesced per stream for detection. The redacted string lands on the **first** chunk that carried text for that stream; later fragments become empty strings. Clients therefore receive fewer content deltas than the provider sent. That is inherent to buffered mode (which already waits for the whole upstream body).
+
+Every choice is redacted, including when `n > 1`. Incremental responses add header `x-censgate-stream-mode: incremental`. Compliance headers on incremental streams report request-side counts; response totals complete as the stream drains (telemetry still records outcomes).
 
 ## Example
 

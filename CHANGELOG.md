@@ -33,13 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/v1/compliance/status`, `/v1/compliance/check`, plus `/health`/`/livez`/
   `/readyz`/`/metrics` outside the auth layer.
 - `redact-gateway`: streaming redaction modes `buffered` (default, full-stream
-  detection) and `incremental` (hold-back window), preserving tool-call,
-  usage, and multi-choice passthrough frames on rebuild.
+  detection with in-place SSE rewrite of content and tool-call argument deltas)
+  and `incremental` (hold-back window).
 - `redact-gateway`: deployment assets — `Dockerfile.gateway`,
   `docker-compose.gateway.yml`, an audit-grade OpenTelemetry Collector config
   and Kubernetes manifests under `deploy/`, and example configurations under
   `crates/redact-gateway/examples/` validated in CI.
-- Docs: operator guide under `docs/gateway/` and rewritten
+- Docs: operator guide under `docs/gateway/` (including
+  `docs/gateway/getting-started.md`) and rewritten
   `crates/redact-gateway/README.md`.
 - `redact-core`: 18 new secret/credential entity types (`PRIVATE_KEY`, `JWT_TOKEN`,
   `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`,
@@ -77,6 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `VAULT_TOKEN` (and the OpenBao `BAO_` spellings) are the only unprefixed
   variables read, since they configure the token map server rather than the
   gateway.
+- `redact-gateway`: `redaction.allow_profile_header` defaults to `false`; the
+  profile header is ignored unless enabled. Startup refuses
+  `forward_client_authorization` with inbound auth, non-32-byte sealing keys,
+  and all-zero sealing keys; warns for tokenize without a durable token map and
+  for profile-header-with-auth-off. `/v1/restore` requires authentication;
+  authenticated token-map keys are subject-bound. KV v2 writes use check-and-set
+  with bounded retries. SIGHUP reload applies a documented subset of settings
+  and logs restart-required field names.
 - `redact-gateway`: `gen_ai.operation.name` is derived from the surface being
   called (`chat`, `embeddings`, `text_completion`), `gen_ai.request.stream`
   marks streamed requests, streamed provider calls now get a client span, and
