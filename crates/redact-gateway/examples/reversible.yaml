@@ -18,14 +18,20 @@ redaction:
   stream_holdback_bytes: 256
   # Session header groups token reuse across turns of a conversation.
   session_header: x-censgate-session-id
-  allow_profile_header: true
+  # Leave profile selection by header off unless callers are trusted: with
+  # inbound authentication disabled, any caller could otherwise choose a
+  # weaker profile than the one configured here.
+  allow_profile_header: false
 
 vault:
   backend: memory
   ttl_secs: 3600
-  # Base64-encoded 32-byte key. Replace before any real deployment.
-  # Generate with: openssl rand -base64 32
-  data_encryption_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  # The sealing key is deliberately absent so this file works as-is: the
+  # gateway generates an ephemeral one and logs that tokens will not survive a
+  # restart. Supply a real key out of band when you need them to:
+  #   CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
+  # A key of all zero bytes is refused at startup, so a copied placeholder
+  # cannot become a production key.
 
 auth:
   mode: none

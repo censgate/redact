@@ -51,8 +51,11 @@ services:
       CENSGATE_VAULT_TOKEN: ${CENSGATE_VAULT_TOKEN:-dev-only-token}
       CENSGATE_VAULT_MOUNT: ${CENSGATE_VAULT_MOUNT:-secret}
       CENSGATE_VAULT_PATH_PREFIX: ${CENSGATE_VAULT_PATH_PREFIX:-redact-gateway/tokens}
-      # Base64-encoded 32-byte sealing key (replace in any non-local deployment)
-      CENSGATE_TOKEN_DEK: ${CENSGATE_TOKEN_DEK:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      # Unset by default: the gateway generates an ephemeral sealing key and
+      # says so at startup. Export a real one to keep tokens across restarts:
+      #   export CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
+      # An all-zero key is refused, so this cannot be left as a placeholder.
+      CENSGATE_TOKEN_DEK: ${CENSGATE_TOKEN_DEK:-}
     depends_on:
       - ollama
       - otel-collector

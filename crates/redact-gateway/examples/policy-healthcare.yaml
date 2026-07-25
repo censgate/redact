@@ -16,7 +16,10 @@ provider:
 redaction:
   stream_mode: buffered
   stream_holdback_bytes: 256
-  allow_profile_header: true
+  # Leave profile selection by header off unless callers are trusted: with
+  # inbound authentication disabled, any caller could otherwise choose a
+  # weaker profile than the one configured here.
+  allow_profile_header: false
 
 auth:
   mode: none
