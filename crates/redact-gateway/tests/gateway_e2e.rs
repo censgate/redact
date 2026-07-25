@@ -129,6 +129,16 @@ fn memory_tokenize_config(upstream: &MockUpstream) -> redact_gateway::config::Re
     config
 }
 
+fn memory_tokenize_api_keys(
+    upstream: &MockUpstream,
+    keys: &[&str],
+) -> redact_gateway::config::ResolvedConfig {
+    let mut config = memory_tokenize_config(upstream);
+    config.auth.mode = AuthMode::ApiKey;
+    config.auth.api_keys = keys.iter().map(|k| (*k).to_string()).collect();
+    config
+}
+
 #[tokio::test]
 async fn the_same_session_reuses_tokens_and_restores_them_on_later_responses() {
     let upstream = mock_json_upstream_sequence(vec![
@@ -176,13 +186,17 @@ async fn the_same_session_reuses_tokens_and_restores_them_on_later_responses() {
 #[tokio::test]
 async fn a_different_session_gets_an_isolated_token_namespace() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(memory_tokenize_config(&upstream)).await;
+    let router = router_for(memory_tokenize_api_keys(&upstream, &["secret-key"])).await;
+    let auth = [("authorization", "Bearer secret-key")];
 
     let s1 = post_json_with_headers(
         router.clone(),
         "/v1/chat/completions",
         chat_request("mail alice@example.com"),
-        &[("x-censgate-session-id", "s1")],
+        &[
+            ("authorization", "Bearer secret-key"),
+            ("x-censgate-session-id", "s1"),
+        ],
     )
     .await;
     assert_eq!(s1.status, StatusCode::OK);
@@ -191,7 +205,10 @@ async fn a_different_session_gets_an_isolated_token_namespace() {
         router.clone(),
         "/v1/chat/completions",
         chat_request("mail bob@example.com"),
-        &[("x-censgate-session-id", "s2")],
+        &[
+            ("authorization", "Bearer secret-key"),
+            ("x-censgate-session-id", "s2"),
+        ],
     )
     .await;
     assert_eq!(s2.status, StatusCode::OK);
@@ -202,19 +219,21 @@ async fn a_different_session_gets_an_isolated_token_namespace() {
         "mail [EMAIL_ADDRESS_1]"
     );
 
-    let restore_s1 = post_json(
+    let restore_s1 = post_json_with_headers(
         router.clone(),
         "/v1/restore",
         json!({"text": "to [EMAIL_ADDRESS_1]", "session_id": "s1"}),
+        &auth,
     )
     .await;
     assert_eq!(restore_s1.status, StatusCode::OK);
     assert_eq!(restore_s1.json()["text"], "to alice@example.com");
 
-    let restore_s2 = post_json(
+    let restore_s2 = post_json_with_headers(
         router,
         "/v1/restore",
         json!({"text": "to [EMAIL_ADDRESS_1]", "session_id": "s2"}),
+        &auth,
     )
     .await;
     assert_eq!(restore_s2.status, StatusCode::OK);
@@ -224,24 +243,29 @@ async fn a_different_session_gets_an_isolated_token_namespace() {
 #[tokio::test]
 async fn restore_endpoint_rewrites_tokens_for_a_session() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(memory_tokenize_config(&upstream)).await;
+    let router = router_for(memory_tokenize_api_keys(&upstream, &["secret-key"])).await;
+    let auth = [("authorization", "Bearer secret-key")];
 
     let minted = post_json_with_headers(
         router.clone(),
         "/v1/chat/completions",
         chat_request("mail alice@example.com"),
-        &[("x-censgate-session-id", "restore-me")],
+        &[
+            ("authorization", "Bearer secret-key"),
+            ("x-censgate-session-id", "restore-me"),
+        ],
     )
     .await;
     assert_eq!(minted.status, StatusCode::OK);
 
-    let restored = post_json(
+    let restored = post_json_with_headers(
         router,
         "/v1/restore",
         json!({
             "text": "please write to [EMAIL_ADDRESS_1] soon",
             "session_id": "restore-me"
         }),
+        &auth,
     )
     .await;
     assert_eq!(restored.status, StatusCode::OK);
@@ -257,17 +281,201 @@ async fn restore_endpoint_is_unavailable_when_the_token_map_is_off() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let mut config = config_for(&upstream);
     config.vault.backend = VaultBackend::Off;
+    config.auth.mode = AuthMode::ApiKey;
+    config.auth.api_keys = vec!["secret-key".to_string()];
     let router = router_for(config).await;
 
-    let response = post_json(
+    let response = post_json_with_headers(
         router,
         "/v1/restore",
         json!({"text": "[EMAIL_ADDRESS_1]", "session_id": "s"}),
+        &[("authorization", "Bearer secret-key")],
     )
     .await;
 
     assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(response.json()["error"]["type"], "dependency_unavailable");
+}
+
+// ---------------------------------------------------------------------------
+// Session restore authorization (I4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn subject_b_cannot_restore_subject_a_session_even_with_the_same_session_id() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let router = router_for(memory_tokenize_api_keys(&upstream, &["key-a", "key-b"])).await;
+
+    let minted = post_json_with_headers(
+        router.clone(),
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com"),
+        &[
+            ("authorization", "Bearer key-a"),
+            ("x-censgate-session-id", "s1"),
+        ],
+    )
+    .await;
+    assert_eq!(minted.status, StatusCode::OK);
+
+    let foreign = post_json_with_headers(
+        router,
+        "/v1/restore",
+        json!({
+            "text": "contact [EMAIL_ADDRESS_1]",
+            "session_id": "s1"
+        }),
+        &[("authorization", "Bearer key-b")],
+    )
+    .await;
+
+    assert_eq!(foreign.status, StatusCode::OK);
+    assert_eq!(
+        foreign.json()["text"],
+        "contact [EMAIL_ADDRESS_1]",
+        "subject B must never see subject A's plaintext"
+    );
+    assert_eq!(foreign.json()["restored"], 0);
+    assert!(
+        !foreign.body.contains("alice@example.com"),
+        "plaintext must not leak in the restore response body"
+    );
+}
+
+#[tokio::test]
+async fn subject_can_restore_its_own_session() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let router = router_for(memory_tokenize_api_keys(&upstream, &["key-a", "key-b"])).await;
+
+    let minted = post_json_with_headers(
+        router.clone(),
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com"),
+        &[
+            ("authorization", "Bearer key-a"),
+            ("x-censgate-session-id", "s1"),
+        ],
+    )
+    .await;
+    assert_eq!(minted.status, StatusCode::OK);
+
+    let own = post_json_with_headers(
+        router,
+        "/v1/restore",
+        json!({
+            "text": "contact [EMAIL_ADDRESS_1]",
+            "session_id": "s1"
+        }),
+        &[("authorization", "Bearer key-a")],
+    )
+    .await;
+
+    assert_eq!(own.status, StatusCode::OK);
+    assert_eq!(own.json()["text"], "contact alice@example.com");
+    assert_eq!(own.json()["restored"], 1);
+    assert_eq!(own.json()["session_id"], "s1");
+}
+
+#[tokio::test]
+async fn restore_is_forbidden_when_auth_mode_is_none() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let router = router_for(memory_tokenize_config(&upstream)).await;
+
+    let _ = post_json_with_headers(
+        router.clone(),
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com"),
+        &[("x-censgate-session-id", "s1")],
+    )
+    .await;
+
+    let response = post_json(
+        router,
+        "/v1/restore",
+        json!({"text": "[EMAIL_ADDRESS_1]", "session_id": "s1"}),
+    )
+    .await;
+
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
+    assert_eq!(response.json()["error"]["type"], "permission_error");
+    let message = response.json()["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        message.contains("authentication")
+            && (message.contains("api_key") || message.contains("oidc")),
+        "403 body should explain that restore needs api_key or oidc; got: {message}"
+    );
+    assert!(
+        !response.body.contains("alice@example.com"),
+        "forbidden restore must not leak plaintext"
+    );
+}
+
+#[tokio::test]
+async fn in_request_tokenize_restore_still_works_when_auth_mode_is_none() {
+    let upstream = mock_json_upstream(chat_response("I will email [EMAIL_ADDRESS_1]")).await;
+    let router = router_for(memory_tokenize_config(&upstream)).await;
+
+    let response = post_json(
+        router,
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com"),
+    )
+    .await;
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(
+        upstream.last_request()["messages"][0]["content"],
+        "mail [EMAIL_ADDRESS_1]"
+    );
+    assert_eq!(
+        response.json()["choices"][0]["message"]["content"],
+        "I will email alice@example.com",
+        "same-request restore must keep working without authentication"
+    );
+    assert_eq!(response.header("x-censgate-tokens-restored"), Some("1"));
+}
+
+#[tokio::test]
+async fn cross_request_session_resumption_works_for_the_same_subject() {
+    let upstream = mock_json_upstream_sequence(vec![
+        chat_response("ack"),
+        chat_response("I still have [EMAIL_ADDRESS_1]"),
+    ])
+    .await;
+    let router = router_for(memory_tokenize_api_keys(&upstream, &["key-a"])).await;
+    let headers = [
+        ("authorization", "Bearer key-a"),
+        ("x-censgate-session-id", "resume-me"),
+    ];
+
+    let first = post_json_with_headers(
+        router.clone(),
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com"),
+        &headers,
+    )
+    .await;
+    assert_eq!(first.status, StatusCode::OK);
+
+    let second = post_json_with_headers(
+        router,
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com again"),
+        &headers,
+    )
+    .await;
+    assert_eq!(second.status, StatusCode::OK);
+    assert_eq!(
+        upstream.last_request()["messages"][0]["content"],
+        "mail [EMAIL_ADDRESS_1] again"
+    );
+    assert_eq!(
+        second.json()["choices"][0]["message"]["content"],
+        "I still have alice@example.com"
+    );
 }
 
 // ---------------------------------------------------------------------------

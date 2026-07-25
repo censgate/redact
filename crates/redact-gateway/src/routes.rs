@@ -32,7 +32,9 @@ use crate::error::GatewayError;
 use crate::policy::Profile;
 use crate::proxy::ProviderClient;
 use crate::redact::json as payload;
-use crate::redact::token::{Dek, RestoreOutcome, TokenMapping, TokenSession};
+use crate::redact::token::{
+    subject_bound_session_key, Dek, RestoreOutcome, TokenMapping, TokenSession,
+};
 use crate::redact::{content_digest, RedactError, RedactionContext, RedactionOutcome};
 use crate::stream::{build_redacted_sse_with_passthrough, extract_sse};
 use crate::telemetry::{semconv, spans, Telemetry};
@@ -243,7 +245,12 @@ struct RequestScope {
     config: Arc<ResolvedConfig>,
     profile: Arc<Profile>,
     session: TokenSession,
+    /// Caller-facing session id (header / generated UUID). Used in audit and
+    /// responses — never rewritten to the subject-bound storage key.
     session_id: String,
+    /// Token-map partition key: subject-bound when authenticated, otherwise the
+    /// caller-facing id (auth.mode = none residual trust model).
+    token_map_session: String,
     tenant: String,
     subject: Option<String>,
     known_mappings: Vec<TokenMapping>,
@@ -278,6 +285,15 @@ impl RequestScope {
             .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let tenant = auth.tenant.clone();
+        // Bind persisted mappings to the authenticated subject so a second
+        // caller in the same tenant cannot resume another subject's session by
+        // replaying the caller-chosen session id. When auth.mode = none there
+        // is no subject; the partition falls back to the caller id alone and
+        // /v1/restore is rejected separately.
+        let token_map_session = match auth.subject.as_deref() {
+            Some(subject) => subject_bound_session_key(&session_id, subject),
+            None => session_id.clone(),
+        };
 
         // Resume prior tokens only when the caller identified a session, so
         // unrelated requests never share a token namespace.
@@ -289,7 +305,7 @@ impl RequestScope {
                 config.vault.address.as_deref(),
                 None,
             );
-            match state.tokens.get(&tenant, &session_id).await {
+            match state.tokens.get(&tenant, &token_map_session).await {
                 Ok(mappings) => {
                     if let Some(span) = &span {
                         spans::finish_tokenmap(span, mappings.len(), None);
@@ -349,6 +365,7 @@ impl RequestScope {
             profile,
             session,
             session_id,
+            token_map_session,
             tenant,
             subject: auth.subject.clone(),
             known_mappings,
@@ -375,7 +392,7 @@ impl RequestScope {
         let started = Instant::now();
         let result = state
             .tokens
-            .put(&self.tenant, &self.session_id, &minted)
+            .put(&self.tenant, &self.token_map_session, &minted)
             .await;
         let elapsed = started.elapsed().as_secs_f64();
 
@@ -1164,6 +1181,10 @@ async fn redact_endpoint(
     let session_id = request
         .session_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let token_map_session = match auth.subject.as_deref() {
+        Some(subject) => subject_bound_session_key(&session_id, subject),
+        None => session_id.clone(),
+    };
     let mut session = TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone());
     let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
     let text = match ctx.redact(&request.text) {
@@ -1174,7 +1195,11 @@ async fn redact_endpoint(
 
     let minted = session.take_new_mappings();
     if !minted.is_empty() && state.tokens.backend_name() != "off" {
-        if let Err(err) = state.tokens.put(&auth.tenant, &session_id, &minted).await {
+        if let Err(err) = state
+            .tokens
+            .put(&auth.tenant, &token_map_session, &minted)
+            .await
+        {
             if profile.fail_closed {
                 return GatewayError::DependencyUnavailable(format!(
                     "token map write failed: {err}"
@@ -1215,6 +1240,16 @@ async fn restore_endpoint(
     Extension(auth): Extension<AuthContext>,
     Json(request): Json<RestoreRequest>,
 ) -> Response {
+    // Standalone restore has no in-request token scope to fall back on, so it
+    // requires an authenticated subject. auth.mode = none has none — reject
+    // rather than letting every caller share the default-tenant partition.
+    let Some(subject) = auth.subject.as_deref().filter(|_| auth.mode != "none") else {
+        return GatewayError::Forbidden(
+            "restore requires authentication; set auth.mode to api_key or oidc".to_string(),
+        )
+        .into_response();
+    };
+
     if state.tokens.backend_name() == "off" {
         return GatewayError::DependencyUnavailable(
             "restore requires a token map backend; configure CENSGATE_VAULT_BACKEND".to_string(),
@@ -1222,7 +1257,11 @@ async fn restore_endpoint(
         .into_response();
     }
 
-    let mappings = match state.tokens.get(&auth.tenant, &request.session_id).await {
+    let token_map_session = subject_bound_session_key(&request.session_id, subject);
+
+    // Missing and foreign-subject sessions both yield an empty mapping list so
+    // callers cannot probe whether a session id exists for another subject.
+    let mappings = match state.tokens.get(&auth.tenant, &token_map_session).await {
         Ok(mappings) => mappings,
         Err(err) => {
             return GatewayError::DependencyUnavailable(format!("token map read failed: {err}"))
@@ -1244,6 +1283,7 @@ async fn restore_endpoint(
     let (text, outcome) = crate::redact::token::restore_text(&request.text, &lookup);
     Json(json!({
         "text": text,
+        // Echo the caller-facing id only — never the subject-bound storage key.
         "session_id": request.session_id,
         "restored": outcome.restored,
         "missing": outcome.missing,

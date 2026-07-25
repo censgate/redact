@@ -17,6 +17,7 @@ use rand::Rng as _;
 use redact_core::anonymizers::encrypt::EncryptAnonymizer;
 use redact_core::EntityType;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Tokenization failures.
 #[derive(Debug, thiserror::Error)]
@@ -277,6 +278,32 @@ pub fn restore_text(text: &str, lookup: &HashMap<String, String>) -> (String, Re
     (result, outcome)
 }
 
+/// Derive the token-map session key that binds a caller-supplied session id to
+/// an authenticated subject.
+///
+/// Callers continue to address sessions with their own id (header or
+/// `/v1/restore` body). Persistence uses
+/// `hex(SHA-256(subject || 0x00 || caller_session_id))` so:
+/// - one subject cannot read another's mappings even inside a shared tenant;
+/// - the raw subject never appears in vault paths (no path-injection risk and
+///   no subject leakage into storage keys);
+/// - unknown sessions and foreign-subject sessions are indistinguishable
+///   (empty mapping list either way — no probing oracle).
+pub fn subject_bound_session_key(caller_session_id: &str, subject: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(subject.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(caller_session_id.as_bytes());
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut out, byte| {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
+}
+
 /// Whether a bracketed string looks like a gateway token, e.g. `[US_SSN_2]`.
 fn is_token_shaped(candidate: &str) -> bool {
     let inner = candidate
@@ -425,5 +452,18 @@ mod tests {
         assert!(!is_token_shaped("[PERSON]"));
         assert!(!is_token_shaped("[person_1]"));
         assert!(!is_token_shaped("[EMAIL_ADDRESS_x]"));
+    }
+
+    #[test]
+    fn subject_bound_keys_isolate_subjects_and_avoid_raw_subject() {
+        let a = subject_bound_session_key("s1", "key:aaaaaaaa");
+        let b = subject_bound_session_key("s1", "key:bbbbbbbb");
+        let a_again = subject_bound_session_key("s1", "key:aaaaaaaa");
+        assert_eq!(a, a_again);
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 64);
+        assert!(!a.contains("key:"));
+        assert!(!a.contains("aaaaaaaa"));
+        assert!(!a.contains("s1"));
     }
 }
