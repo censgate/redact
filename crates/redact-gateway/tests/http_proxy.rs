@@ -123,9 +123,55 @@ async fn tokenized_values_are_restored_in_the_answer() {
 }
 
 #[tokio::test]
-async fn a_profile_can_be_selected_per_request() {
+async fn the_profile_header_is_ignored_by_default() {
+    // An unauthenticated caller must not be able to pick a weaker profile.
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let config = config_for(&upstream);
+    assert!(
+        !config.redaction.allow_profile_header,
+        "must default to off"
+    );
+    let router = router_for(config).await;
+
+    let response = post_json_with_headers(
+        router,
+        "/v1/chat/completions",
+        chat_request("mail alice@example.com"),
+        &[("x-censgate-profile", "permissive")],
+    )
+    .await;
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.header("x-censgate-redactions-applied"), Some("1"));
+    assert_eq!(
+        upstream.last_request()["messages"][0]["content"],
+        "mail [EMAIL_ADDRESS]",
+        "the configured profile applies despite the header"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_profile_header_is_ignored_by_default() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(config_for(&upstream)).await;
+
+    let response = post_json_with_headers(
+        router,
+        "/v1/chat/completions",
+        chat_request("hello"),
+        &[("x-censgate-profile", "does-not-exist")],
+    )
+    .await;
+
+    assert_eq!(response.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_profile_can_be_selected_when_the_header_is_enabled() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let mut config = config_for(&upstream);
+    config.redaction.allow_profile_header = true;
+    let router = router_for(config).await;
 
     let response = post_json_with_headers(
         router,
@@ -147,7 +193,9 @@ async fn a_profile_can_be_selected_per_request() {
 #[tokio::test]
 async fn an_unknown_profile_is_rejected_rather_than_downgraded() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream)).await;
+    let mut config = config_for(&upstream);
+    config.redaction.allow_profile_header = true;
+    let router = router_for(config).await;
 
     let response = post_json_with_headers(
         router,

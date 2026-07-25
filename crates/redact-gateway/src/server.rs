@@ -286,6 +286,14 @@ async fn shutdown_signal() {
 
 /// Reload configuration from its original source and swap the snapshot.
 ///
+/// Only settings the request path reads from the snapshot take effect:
+/// policy profiles, redaction behavior, and telemetry detail. Anything
+/// consumed once at startup to build a listener, the provider client, the
+/// detection engine, the token map, the authenticator or the audit sink keeps
+/// its original value, and the changed field names are logged so an operator
+/// knows a restart is needed. [`ResolvedConfig::restart_required_changes`]
+/// defines that list.
+///
 /// A failed reload keeps the last known good configuration: a typo in a policy
 /// file must not take a running gateway offline.
 pub fn reload_config(handle: &ConfigHandle) -> Result<Arc<ResolvedConfig>> {
@@ -297,6 +305,14 @@ pub fn reload_config(handle: &ConfigHandle) -> Result<Arc<ResolvedConfig>> {
 
     match ResolvedConfig::load() {
         Ok(next) => {
+            let restart_required = current.restart_required_changes(&next);
+            if !restart_required.is_empty() {
+                warn!(
+                    fields = ?restart_required,
+                    "these settings changed but are only read at startup; the running gateway \
+                     keeps its current values until it is restarted"
+                );
+            }
             info!(
                 source = next.source.as_str(),
                 profiles = next.policy.profiles.len(),

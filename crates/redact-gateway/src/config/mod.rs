@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 use crate::policy::{PolicyError, PolicySet};
@@ -381,7 +382,12 @@ pub struct RedactionSettings {
     pub session_header: String,
     /// Header allowing a caller to select a policy profile.
     pub profile_header: String,
-    /// Honor the profile header. Disable when profiles come from credentials.
+    /// Honor the profile header.
+    ///
+    /// Off by default: an unauthenticated caller who can set a header must not
+    /// be able to choose a weaker profile than the operator configured. Enable
+    /// it only when callers are trusted, or when authentication is on and the
+    /// set of reachable profiles is acceptable for every caller.
     pub allow_profile_header: bool,
 }
 
@@ -392,7 +398,7 @@ impl Default for RedactionSettings {
             stream_holdback_bytes: 256,
             session_header: "x-censgate-session-id".to_string(),
             profile_header: "x-censgate-profile".to_string(),
-            allow_profile_header: true,
+            allow_profile_header: false,
         }
     }
 }
@@ -638,6 +644,57 @@ impl ResolvedConfig {
             ));
         }
 
+        // Forwarding the caller's credential upstream would hand the gateway's
+        // own inbound credential to the provider, because that is the same
+        // header the caller authenticated with.
+        if self.provider.forward_client_authorization && self.auth.mode != AuthMode::None {
+            return Err(ConfigError::Invalid(format!(
+                "provider.forward_client_authorization cannot be used with auth mode `{}`: \
+                 the caller's Authorization header carries the gateway credential and would \
+                 be sent to the provider. Configure provider.api_key instead, or run with \
+                 auth mode `none` on a trusted network.",
+                self.auth.mode.as_str()
+            )));
+        }
+
+        if let Some(key) = &self.vault.data_encryption_key {
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(key.trim())
+                .map_err(|e| {
+                    ConfigError::Invalid(format!("token sealing key is not valid base64: {e}"))
+                })?;
+            if decoded.len() != 32 {
+                return Err(ConfigError::Invalid(format!(
+                    "token sealing key must decode to 32 bytes, got {}",
+                    decoded.len()
+                )));
+            }
+            // A key of all zeroes is what deployment templates carry as a
+            // placeholder; treating it as real would silently make every
+            // replica's ciphertext trivially forgeable.
+            if decoded.iter().all(|byte| *byte == 0) {
+                return Err(ConfigError::Invalid(
+                    "token sealing key is all zero bytes, which is a placeholder value; \
+                     generate one with `openssl rand -base64 32`"
+                        .to_string(),
+                ));
+            }
+        }
+
+        self.warn_about_risky_combinations();
+        Ok(())
+    }
+
+    /// Log combinations that are legal but easy to deploy by accident.
+    fn warn_about_risky_combinations(&self) {
+        if self.redaction.allow_profile_header && self.auth.mode == AuthMode::None {
+            tracing::warn!(
+                header = %self.redaction.profile_header,
+                "profile selection by header is enabled without authentication: any caller can \
+                 choose any configured profile, including weaker ones"
+            );
+        }
+
         let tokenizing = self
             .policy
             .profiles
@@ -645,11 +702,102 @@ impl ResolvedConfig {
             .any(|profile| profile.uses_tokenization());
         if tokenizing && self.vault.backend == VaultBackend::Off {
             tracing::warn!(
-                "policy uses the tokenize action but the token map backend is off; \
-                 fail-closed profiles will reject those requests"
+                "policy uses the tokenize action with no token map backend: tokens are restored \
+                 within the request that minted them, but cannot be resumed by a later request, \
+                 recovered through /v1/restore, or shared with another replica"
             );
         }
-        Ok(())
+        if tokenizing
+            && self.vault.backend == VaultBackend::Memory
+            && self.vault.data_encryption_key.is_none()
+        {
+            tracing::warn!(
+                "token map backend is memory with a generated sealing key: tokens do not survive \
+                 a restart and cannot be restored by another replica"
+            );
+        }
+    }
+
+    /// Settings that a reload cannot apply, because they are consumed once at
+    /// startup to build a listener, a client, or a subsystem.
+    ///
+    /// Returns the names of the fields that differ between `self` and `next`
+    /// and would therefore only take effect after a restart.
+    pub fn restart_required_changes(&self, next: &ResolvedConfig) -> Vec<&'static str> {
+        let mut changed = Vec::new();
+
+        if self.server.host != next.server.host {
+            changed.push("server.host");
+        }
+        if self.server.port != next.server.port {
+            changed.push("server.port");
+        }
+        if self.server.enable_http_trace != next.server.enable_http_trace {
+            changed.push("server.enable_http_trace");
+        }
+        if self.provider.base_url != next.provider.base_url {
+            changed.push("provider.base_url");
+        }
+        if self.provider.api_key != next.provider.api_key {
+            changed.push("provider.api_key");
+        }
+        if self.provider.connect_timeout_secs != next.provider.connect_timeout_secs {
+            changed.push("provider.connect_timeout_secs");
+        }
+        if self.provider.request_timeout_secs != next.provider.request_timeout_secs {
+            changed.push("provider.request_timeout_secs");
+        }
+        if self.provider.max_body_bytes != next.provider.max_body_bytes {
+            changed.push("provider.max_body_bytes");
+        }
+        if self.packs.paths != next.packs.paths {
+            changed.push("packs.paths");
+        }
+        if self.packs.disable_builtin != next.packs.disable_builtin {
+            changed.push("packs.disable_builtin");
+        }
+        if self.vault.backend != next.vault.backend {
+            changed.push("vault.backend");
+        }
+        if self.vault.address != next.vault.address
+            || self.vault.token != next.vault.token
+            || self.vault.mount != next.vault.mount
+            || self.vault.path_prefix != next.vault.path_prefix
+            || self.vault.namespace != next.vault.namespace
+            || self.vault.ttl_secs != next.vault.ttl_secs
+        {
+            changed.push("vault.*");
+        }
+        if self.vault.data_encryption_key != next.vault.data_encryption_key {
+            changed.push("vault.data_encryption_key");
+        }
+        if self.auth.mode != next.auth.mode {
+            changed.push("auth.mode");
+        }
+        if self.auth.api_keys != next.auth.api_keys {
+            changed.push("auth.api_keys");
+        }
+        if self.auth.oidc.issuer != next.auth.oidc.issuer
+            || self.auth.oidc.audience != next.auth.oidc.audience
+            || self.auth.oidc.jwks_url != next.auth.oidc.jwks_url
+            || self.auth.oidc.required_scopes != next.auth.oidc.required_scopes
+        {
+            changed.push("auth.oidc.*");
+        }
+        if self.audit.export != next.audit.export {
+            changed.push("audit.export");
+        }
+        if self.audit.file_path != next.audit.file_path {
+            changed.push("audit.file_path");
+        }
+        if self.audit.queue_capacity != next.audit.queue_capacity {
+            changed.push("audit.queue_capacity");
+        }
+        if self.telemetry.filter != next.telemetry.filter {
+            changed.push("telemetry.filter");
+        }
+
+        changed
     }
 
     /// Redacted, human-readable summary suitable for logs and `print-config`.
@@ -781,6 +929,72 @@ mod tests {
         assert!(config.validate().is_err());
         config.vault.address = Some("http://127.0.0.1:8200".to_string());
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn the_profile_header_is_off_by_default() {
+        assert!(!ResolvedConfig::default().redaction.allow_profile_header);
+    }
+
+    #[test]
+    fn forwarding_the_caller_credential_is_refused_when_auth_is_on() {
+        let mut config = ResolvedConfig::default();
+        config.provider.forward_client_authorization = true;
+        config.auth.mode = AuthMode::ApiKey;
+        config.auth.api_keys.push("secret".to_string());
+
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("forward_client_authorization"), "{err}");
+
+        // Forwarding is legitimate when the gateway itself does not authenticate.
+        config.auth.mode = AuthMode::None;
+        config.auth.api_keys.clear();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_placeholder_sealing_key_is_refused() {
+        use base64::Engine as _;
+        let mut config = ResolvedConfig::default();
+        config.vault.data_encryption_key =
+            Some(base64::engine::general_purpose::STANDARD.encode([0u8; 32]));
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("placeholder"), "{err}");
+
+        config.vault.data_encryption_key =
+            Some(base64::engine::general_purpose::STANDARD.encode([7u8; 32]));
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn a_short_sealing_key_is_refused() {
+        use base64::Engine as _;
+        let mut config = ResolvedConfig::default();
+        config.vault.data_encryption_key =
+            Some(base64::engine::general_purpose::STANDARD.encode([7u8; 16]));
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("32 bytes"), "{err}");
+    }
+
+    #[test]
+    fn restart_required_changes_names_startup_only_settings() {
+        let current = ResolvedConfig::default();
+
+        let mut next = ResolvedConfig::default();
+        next.server.port = 9000;
+        next.provider.base_url = "https://api.openai.com".to_string();
+        next.auth.mode = AuthMode::None;
+        assert_eq!(
+            current.restart_required_changes(&next),
+            vec!["server.port", "provider.base_url"]
+        );
+
+        // Settings the request path reads from the snapshot reload cleanly.
+        let mut hot = ResolvedConfig::default();
+        hot.redaction.allow_profile_header = true;
+        hot.telemetry.operations = TraceLevel::Detailed;
+        hot.server.metrics_endpoint = false;
+        assert!(current.restart_required_changes(&hot).is_empty());
     }
 
     #[test]
