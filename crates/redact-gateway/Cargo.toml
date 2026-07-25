@@ -12,8 +12,18 @@ documentation = "https://docs.rs/redact-gateway"
 description = "OpenAI-compatible AI privacy gateway embedding redact-core"
 keywords = ["pii", "redaction", "gateway", "openai", "privacy"]
 categories = ["web-programming", "network-programming"]
-# Not feature-complete for crates.io yet (open-core foundation).
 publish = false
+
+[features]
+default = ["otlp", "vault", "oidc", "prometheus"]
+# OTLP exporters for traces, metrics and logs.
+otlp = ["dep:opentelemetry-otlp"]
+# HashiCorp Vault / OpenBao KV v2 token map backend.
+vault = ["dep:vaultrs"]
+# OIDC resource-server authentication.
+oidc = ["dep:jsonwebtoken"]
+# Pull-based metrics endpoint served from the OpenTelemetry meter provider.
+prometheus = ["dep:opentelemetry-prometheus", "dep:prometheus"]
 
 [dependencies]
 redact-core = { path = "../redact-core", version = "0.8.3" }
@@ -21,7 +31,7 @@ axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -31,12 +41,37 @@ reqwest = { workspace = true, features = ["stream"] }
 futures-util = "0.3"
 clap = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+sha2 = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+arc-swap = "1.7"
+async-trait = "0.1"
+base64 = "0.22"
+bytes = "1"
+serde_norway = "0.9"
+subtle = "2.6"
+
+# OpenTelemetry: API, SDK and bridges are always compiled so the gateway can
+# emit spec-conformant telemetry even without the OTLP exporter feature.
+opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics", "logs", "rt-tokio"] }
+opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
+opentelemetry-appender-tracing = "0.32"
+tracing-opentelemetry = "0.33"
+
+opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "logs", "grpc-tonic", "http-proto", "reqwest-client"], optional = true }
+opentelemetry-prometheus = { version = "0.32", optional = true }
+prometheus = { version = "0.14", optional = true }
+jsonwebtoken = { version = "11", optional = true }
+vaultrs = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 tower = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
 axum = { workspace = true }
+tempfile = "3"
 
 [[bin]]
 name = "redact-gateway"

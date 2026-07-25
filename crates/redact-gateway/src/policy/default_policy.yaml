@@ -1,0 +1,139 @@
+# Default redaction policy shipped with redact-gateway.
+#
+# Profiles are selected per request (see the configuration documentation).
+# Actions: allow | block | mask | replace | hash | tokenize
+#
+# `tokenize` requires a token map backend; when the backend is `off` the
+# gateway falls back to `replace` for those entities and records the downgrade,
+# or rejects the request when the profile is fail-closed.
+
+default_profile: default
+
+profiles:
+  # Balanced defaults: redact personal data, refuse credentials outright.
+  default:
+    description: Replace personal data and block credentials and secrets.
+    default_action: replace
+    min_confidence: 0.5
+    restore_responses: true
+    fail_closed: true
+    entities:
+      # Credentials must never reach a model provider.
+      PRIVATE_KEY: { action: block }
+      AWS_ACCESS_KEY: { action: block }
+      GITHUB_TOKEN: { action: block }
+      GITLAB_TOKEN: { action: block }
+      SLACK_TOKEN: { action: block }
+      SLACK_WEBHOOK: { action: block }
+      STRIPE_API_KEY: { action: block }
+      GOOGLE_API_KEY: { action: block }
+      OPENAI_API_KEY: { action: block }
+      ANTHROPIC_API_KEY: { action: block }
+      NPM_TOKEN: { action: block }
+      PYPI_TOKEN: { action: block }
+      SENDGRID_API_KEY: { action: block }
+      TWILIO_API_KEY: { action: block }
+      TELEGRAM_BOT_TOKEN: { action: block }
+      HASHICORP_VAULT_TOKEN: { action: block }
+      DATABASE_CONNECTION_STRING: { action: block }
+      JWT_TOKEN: { action: block }
+
+      # High-sensitivity identifiers: mask so shape survives, value does not.
+      US_SSN: { action: mask, min_confidence: 0.7 }
+      CREDIT_CARD: { action: mask, min_confidence: 0.7 }
+      US_BANK_NUMBER: { action: mask, min_confidence: 0.7 }
+      IBAN: { action: mask, min_confidence: 0.7 }
+      UK_NHS: { action: mask, min_confidence: 0.7 }
+      UK_NINO: { action: mask, min_confidence: 0.7 }
+      MEDICAL_RECORD_NUMBER: { action: mask, min_confidence: 0.7 }
+
+      # Very common false positives stay untouched unless highly confident.
+      DATE_TIME: { action: allow }
+      AGE: { action: allow }
+      URL: { action: allow }
+      DOMAIN_NAME: { action: allow }
+      SHA256_HASH: { action: allow }
+      SHA1_HASH: { action: allow }
+      MD5_HASH: { action: allow }
+      GUID: { action: allow }
+    mask:
+      mask_char: "*"
+      start_chars: 0
+      end_chars: 0
+      preserve_format: true
+
+  # Reversible profile: personal data round-trips through the token map so
+  # model answers can be restored for the caller.
+  reversible:
+    description: Tokenize personal data so responses can be restored.
+    default_action: tokenize
+    min_confidence: 0.5
+    restore_responses: true
+    fail_closed: true
+    entities:
+      PRIVATE_KEY: { action: block }
+      AWS_ACCESS_KEY: { action: block }
+      GITHUB_TOKEN: { action: block }
+      OPENAI_API_KEY: { action: block }
+      ANTHROPIC_API_KEY: { action: block }
+      DATABASE_CONNECTION_STRING: { action: block }
+      HASHICORP_VAULT_TOKEN: { action: block }
+      JWT_TOKEN: { action: block }
+      DATE_TIME: { action: allow }
+      AGE: { action: allow }
+      URL: { action: allow }
+      DOMAIN_NAME: { action: allow }
+      GUID: { action: allow }
+
+  # Everything sensitive is refused rather than rewritten.
+  strict:
+    description: Block on any detection above the confidence floor.
+    default_action: block
+    min_confidence: 0.6
+    restore_responses: false
+    fail_closed: true
+    entities:
+      DATE_TIME: { action: allow }
+      AGE: { action: allow }
+      URL: { action: allow }
+      DOMAIN_NAME: { action: allow }
+      GUID: { action: allow }
+      SHA256_HASH: { action: allow }
+      SHA1_HASH: { action: allow }
+      MD5_HASH: { action: allow }
+
+  # Credentials only: useful when prompts are already trusted but secrets leak.
+  secrets_only:
+    description: Block credentials and secrets, leave everything else alone.
+    default_action: allow
+    min_confidence: 0.5
+    restore_responses: false
+    fail_closed: true
+    entities:
+      PRIVATE_KEY: { action: block }
+      AWS_ACCESS_KEY: { action: block }
+      GITHUB_TOKEN: { action: block }
+      GITLAB_TOKEN: { action: block }
+      SLACK_TOKEN: { action: block }
+      SLACK_WEBHOOK: { action: block }
+      STRIPE_API_KEY: { action: block }
+      GOOGLE_API_KEY: { action: block }
+      OPENAI_API_KEY: { action: block }
+      ANTHROPIC_API_KEY: { action: block }
+      NPM_TOKEN: { action: block }
+      PYPI_TOKEN: { action: block }
+      SENDGRID_API_KEY: { action: block }
+      TWILIO_API_KEY: { action: block }
+      TELEGRAM_BOT_TOKEN: { action: block }
+      HASHICORP_VAULT_TOKEN: { action: block }
+      DATABASE_CONNECTION_STRING: { action: block }
+      JWT_TOKEN: { action: block }
+
+  # Observe-only: nothing is rewritten, detections are still counted, and
+  # telemetry still reports what would have happened.
+  permissive:
+    description: Detect and report without modifying payloads.
+    default_action: allow
+    min_confidence: 0.5
+    restore_responses: false
+    fail_closed: false

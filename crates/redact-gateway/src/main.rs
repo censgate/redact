@@ -2,91 +2,126 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-use clap::Parser;
-use redact_gateway::config::{parse_strategy, GatewayConfig};
+//! `redact-gateway` binary entry point.
+
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use redact_gateway::config::{env as config_env, ConfigSourceKind, ResolvedConfig};
 use redact_gateway::GatewayServer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
-/// CLI is the single config owner for the binary (flags + env via clap).
+/// OpenAI-compatible privacy gateway.
 #[derive(Debug, Parser)]
-#[command(
-    name = "redact-gateway",
-    about = "Censgate AI privacy gateway (OpenAI-compatible, embeds redact-core)"
-)]
+#[command(name = "redact-gateway", version, about, long_about = None)]
 struct Cli {
-    /// Bind host
-    #[arg(long, env = "HOST", default_value = "0.0.0.0")]
-    host: String,
+    /// Configuration file to load.
+    #[arg(long, env = config_env::CONFIG_FILE, global = true)]
+    config: Option<PathBuf>,
 
-    /// Bind port
-    #[arg(long, env = "PORT", default_value_t = 8080)]
-    port: u16,
+    /// Configuration source: env, file or layered.
+    #[arg(long, env = config_env::CONFIG_SOURCE, global = true)]
+    config_source: Option<ConfigSourceKind>,
 
-    /// Upstream OpenAI-compatible base URL
-    #[arg(long, env = "BACKEND_URL", default_value = "http://127.0.0.1:11434")]
-    backend_url: String,
+    /// Bind address.
+    #[arg(long, env = config_env::HOST)]
+    host: Option<String>,
 
-    /// Upstream API key (falls back to OPENAI_API_KEY)
-    #[arg(long, env = "BACKEND_API_KEY")]
+    /// Bind port.
+    #[arg(long, env = config_env::PORT)]
+    port: Option<u16>,
+
+    /// Upstream OpenAI-compatible base URL.
+    #[arg(long, env = config_env::BACKEND_URL)]
+    backend_url: Option<String>,
+
+    /// Bearer token sent to the upstream provider.
+    #[arg(long, env = config_env::BACKEND_API_KEY, hide_env_values = true)]
     backend_api_key: Option<String>,
 
-    /// Redaction strategy: replace | mask | hash
-    #[arg(long, env = "REDACTION_STRATEGY", default_value = "replace")]
-    redaction_strategy: String,
+    /// Policy profile applied when a request does not select one.
+    #[arg(long, env = config_env::DEFAULT_PROFILE)]
+    profile: Option<String>,
 
-    /// Enable HTTP request tracing
-    #[arg(long, env = "ENABLE_TRACING", default_value_t = true)]
-    enable_tracing: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
 
-    /// Upstream TCP connect timeout (seconds)
-    #[arg(long, env = "CONNECT_TIMEOUT_SECS", default_value_t = 10)]
-    connect_timeout_secs: u64,
-
-    /// Upstream request timeout (seconds); streams may run for minutes
-    #[arg(long, env = "REQUEST_TIMEOUT_SECS", default_value_t = 600)]
-    request_timeout_secs: u64,
-
-    /// Max buffered upstream response body bytes (JSON or SSE)
-    #[arg(long, env = "MAX_UPSTREAM_BODY_BYTES", default_value_t = 33_554_432)]
-    max_upstream_body_bytes: usize,
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Serve traffic. This is the default when no subcommand is given.
+    Serve,
+    /// Load the configuration and report any problems without serving.
+    ValidateConfig,
+    /// Print the resolved configuration with secrets redacted.
+    PrintConfig,
 }
 
 impl Cli {
-    fn into_config(self) -> anyhow::Result<GatewayConfig> {
-        let strategy = parse_strategy(&self.redaction_strategy)?;
-        let backend_api_key = self.backend_api_key.filter(|s| !s.is_empty()).or_else(|| {
-            std::env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|s| !s.is_empty())
-        });
+    fn resolve(&self) -> Result<ResolvedConfig> {
+        // Flags are applied through the same environment overlay the library
+        // uses, so precedence is identical however the gateway is launched.
+        if let Some(path) = &self.config {
+            // SAFETY: configuration resolution happens before any worker
+            // threads are spawned, so no other thread can read the environment.
+            unsafe { std::env::set_var(config_env::CONFIG_FILE, path) };
+        }
+        if let Some(source) = &self.config_source {
+            unsafe { std::env::set_var(config_env::CONFIG_SOURCE, source.as_str()) };
+        }
+        if let Some(host) = &self.host {
+            unsafe { std::env::set_var(config_env::HOST, host) };
+        }
+        if let Some(port) = self.port {
+            unsafe { std::env::set_var(config_env::PORT, port.to_string()) };
+        }
+        if let Some(url) = &self.backend_url {
+            unsafe { std::env::set_var(config_env::BACKEND_URL, url) };
+        }
+        if let Some(key) = &self.backend_api_key {
+            unsafe { std::env::set_var(config_env::BACKEND_API_KEY, key) };
+        }
+        if let Some(profile) = &self.profile {
+            unsafe { std::env::set_var(config_env::DEFAULT_PROFILE, profile) };
+        }
 
-        Ok(GatewayConfig {
-            host: self.host,
-            port: self.port,
-            backend_url: self.backend_url.trim_end_matches('/').to_string(),
-            backend_api_key,
-            anonymizer: redact_core::AnonymizerConfig {
-                strategy,
-                ..Default::default()
-            },
-            enable_tracing: self.enable_tracing,
-            connect_timeout_secs: self.connect_timeout_secs,
-            request_timeout_secs: self.request_timeout_secs,
-            max_upstream_body_bytes: self.max_upstream_body_bytes,
-        })
+        ResolvedConfig::load().context("could not resolve configuration")
     }
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    init_logging();
+
+    let config = cli.resolve()?;
+
+    match cli.command.unwrap_or(Command::Serve) {
+        Command::Serve => GatewayServer::new(config).await?.run().await,
+        Command::ValidateConfig => {
+            config.validate()?;
+            println!(
+                "configuration is valid ({} profiles, default `{}`)",
+                config.policy.profiles.len(),
+                config.policy.default_profile
+            );
+            Ok(())
+        }
+        Command::PrintConfig => {
+            println!("{}", serde_json::to_string_pretty(&config.summary())?);
+            Ok(())
+        }
+    }
+}
+
+fn init_logging() {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("redact_gateway=info,tower_http=info"));
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "redact_gateway=info,tower_http=info".into()),
-        )
+        .with(filter)
         .with(tracing_subscriber::fmt::layer())
         .init();
-
-    let config = Cli::parse().into_config()?;
-    GatewayServer::new(config).run().await
 }
