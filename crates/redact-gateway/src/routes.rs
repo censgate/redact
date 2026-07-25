@@ -36,7 +36,7 @@ use crate::redact::token::{
     subject_bound_session_key, Dek, RestoreOutcome, TokenMapping, TokenSession,
 };
 use crate::redact::{content_digest, RedactError, RedactionContext, RedactionOutcome};
-use crate::stream::{build_redacted_sse_with_passthrough, extract_sse};
+use crate::stream::transform_buffered_sse;
 use crate::telemetry::{semconv, spans, Telemetry};
 use crate::vault::TokenMapStore;
 
@@ -863,22 +863,26 @@ async fn stream_chat(
             .into_response());
     }
 
-    let extracted = extract_sse(&response.body);
-    let (redacted, response_outcome) = {
-        let mut ctx = RedactionContext::for_response(&state.engine, &scope.profile);
-        let redacted = ctx.redact(&extracted.content).map_err(redaction_error)?;
-        (redacted, ctx.finish())
-    };
+    let mut ctx = RedactionContext::for_response(&state.engine, &scope.profile);
+    let mut restore = RestoreOutcome::default();
+    let transformed = transform_buffered_sse(&response.body, |text| {
+        let redacted = ctx.redact(text)?;
+        let (restored, outcome) = crate::redact::token::restore_text(&redacted, lookup);
+        restore.restored += outcome.restored;
+        restore.missing += outcome.missing;
+        Ok(restored)
+    })
+    .map_err(redaction_error)?;
+    let response_outcome = ctx.finish();
     state
         .telemetry
         .metrics()
         .record_redaction_outcome(&response_outcome, &scope.profile.name);
 
-    let (restored, restore) = crate::redact::token::restore_text(&redacted, lookup);
     if let Some(span) = &span {
         spans::finish_stream_redact(
             span,
-            extracted.chunks,
+            transformed.chunks,
             scope.config.telemetry.operations,
             None,
         );
@@ -893,20 +897,7 @@ async fn stream_chat(
         },
     ));
 
-    let id = format!("chatcmpl-{}", Uuid::new_v4());
-    let model = extracted
-        .model
-        .as_deref()
-        .or_else(|| body.get("model").and_then(Value::as_str))
-        .unwrap_or("unknown");
-    let sse = build_redacted_sse_with_passthrough(
-        &id,
-        model,
-        &restored,
-        extracted.finish_reason.as_deref(),
-        extracted.created,
-        &extracted.passthrough,
-    );
+    let sse = transformed.sse;
 
     let mut headers = compliance_headers(request_outcome, &response_outcome, &restore);
     headers.insert(

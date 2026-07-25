@@ -36,13 +36,41 @@ fn sse_chunks(body: &str) -> Vec<Value> {
 }
 
 fn streamed_content(body: &str) -> String {
+    streamed_content_for_choice(body, 0)
+}
+
+fn streamed_content_for_choice(body: &str, choice_index: u64) -> String {
     sse_chunks(body)
         .iter()
         .filter_map(|chunk| {
             chunk
-                .pointer("/choices/0/delta/content")
+                .get("choices")?
+                .as_array()?
+                .iter()
+                .find(|choice| {
+                    choice.get("index").and_then(Value::as_u64).unwrap_or(0) == choice_index
+                })?
+                .pointer("/delta/content")
                 .and_then(Value::as_str)
                 .map(str::to_string)
+        })
+        .collect()
+}
+
+fn streamed_tool_arguments(body: &str) -> String {
+    sse_chunks(body)
+        .iter()
+        .flat_map(|chunk| {
+            chunk
+                .pointer("/choices/0/delta/tool_calls")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|call| {
+                    call.pointer("/function/arguments")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
         })
         .collect()
 }
@@ -81,7 +109,7 @@ async fn prompts_are_redacted_on_the_streaming_path_too() {
 }
 
 #[tokio::test]
-async fn upstream_metadata_is_preserved_on_the_rebuilt_stream() {
+async fn upstream_metadata_is_preserved_on_the_buffered_stream() {
     let upstream = mock_sse_upstream(split_email_sse()).await;
     let router = router_for(config_for(&upstream)).await;
 
@@ -151,4 +179,125 @@ async fn a_blocked_prompt_never_opens_a_stream() {
 
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(upstream.captured.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn n_greater_than_one_choice_content_is_redacted() {
+    // Regression: the old rebuild path replayed choices[index > 0] verbatim,
+    // so n>1 streaming leaked unredacted assistant text on the response path.
+    let sse = [
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"first choice"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":1,"delta":{"role":"assistant"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":1,"delta":{"content":"email leak@example.com please"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":1,"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ]
+    .join("\n\n")
+        + "\n\n";
+
+    let upstream = mock_sse_upstream(sse).await;
+    let router = router_for(config_for(&upstream)).await;
+
+    let mut request = chat_request("two answers");
+    request["stream"] = json!(true);
+    request["n"] = json!(2);
+    let response = post_json(router, "/v1/chat/completions", request).await;
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert!(
+        !response.body.contains("leak@example.com"),
+        "raw email must never reach the client: {}",
+        response.body
+    );
+    assert_eq!(
+        streamed_content_for_choice(&response.body, 1),
+        "email [EMAIL_ADDRESS] please"
+    );
+}
+
+#[tokio::test]
+async fn streamed_tool_call_arguments_are_redacted_as_a_whole() {
+    let sse = [
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"send","arguments":"{\"to\":\""}}]},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"leak@exa"}}]},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"mple.com\"}"}}]},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ]
+    .join("\n\n")
+        + "\n\n";
+
+    let upstream = mock_sse_upstream(sse).await;
+    let router = router_for(config_for(&upstream)).await;
+
+    let mut request = chat_request("call the tool");
+    request["stream"] = json!(true);
+    let response = post_json(router, "/v1/chat/completions", request).await;
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert!(
+        !response.body.contains("leak@example.com"),
+        "raw email must never reach the client: {}",
+        response.body
+    );
+    let arguments = streamed_tool_arguments(&response.body);
+    assert_eq!(arguments, r#"{"to":"[EMAIL_ADDRESS]"}"#);
+    let parsed: Value = serde_json::from_str(&arguments).expect("arguments must remain JSON");
+    assert_eq!(parsed["to"], "[EMAIL_ADDRESS]");
+}
+
+#[tokio::test]
+async fn buffered_stream_preserves_provider_extension_fields() {
+    let sse = concat!(
+        r#"data: {"id":"c","object":"chat.completion.chunk","created":42,"model":"m","system_fingerprint":"fp_abc","service_tier":"default","provider_ext":{"foo":1},"choices":[{"index":0,"delta":{"content":"hi"},"logprobs":{"content":[{"token":"hi","logprob":-0.1}]},"finish_reason":null}]}"#,
+        "\n\n",
+        r#"data: {"id":"c","object":"chat.completion.chunk","created":42,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        "\n\n",
+        "data: [DONE]\n\n",
+    );
+
+    let upstream = mock_sse_upstream(sse).await;
+    let router = router_for(config_for(&upstream)).await;
+
+    let mut request = chat_request("hi");
+    request["stream"] = json!(true);
+    let response = post_json(router, "/v1/chat/completions", request).await;
+
+    let first = &sse_chunks(&response.body)[0];
+    assert_eq!(first["system_fingerprint"], "fp_abc");
+    assert_eq!(first["service_tier"], "default");
+    assert_eq!(first["provider_ext"]["foo"], 1);
+    assert_eq!(first["choices"][0]["logprobs"]["content"][0]["token"], "hi");
+}
+
+#[tokio::test]
+async fn usage_chunk_from_include_usage_arrives_intact() {
+    let sse = [
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}"#,
+        "data: [DONE]",
+    ]
+    .join("\n\n")
+        + "\n\n";
+
+    let upstream = mock_sse_upstream(sse).await;
+    let router = router_for(config_for(&upstream)).await;
+
+    let mut request = chat_request("hi");
+    request["stream"] = json!(true);
+    request["stream_options"] = json!({"include_usage": true});
+    let response = post_json(router, "/v1/chat/completions", request).await;
+
+    let usage = sse_chunks(&response.body)
+        .into_iter()
+        .find(|chunk| chunk.get("usage").is_some())
+        .expect("usage chunk");
+    assert_eq!(usage["usage"]["prompt_tokens"], 3);
+    assert_eq!(usage["usage"]["completion_tokens"], 1);
+    assert_eq!(usage["usage"]["total_tokens"], 4);
+    assert!(response.body.ends_with("data: [DONE]\n\n"));
 }

@@ -8,13 +8,220 @@
 //!
 //! * `buffered` (default) consumes the whole upstream stream before emitting.
 //!   Detection sees complete context, so no entity can hide in a token split,
-//!   at the cost of time to first token.
+//!   at the cost of time to first token. Chunks are rewritten in place so
+//!   provider fields survive; see [`transform_buffered_sse`].
 //! * `incremental` forwards redacted text as it arrives while retaining a
 //!   trailing window. It never emits inside a detected entity, so detection is
 //!   reliable for entities shorter than that window.
 
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Result of rewriting a buffered upstream SSE body in place.
+#[derive(Debug, Clone)]
+pub struct BufferedSseTransform {
+    /// Rewritten SSE body, including the trailing `[DONE]` terminator when present.
+    pub sse: String,
+    /// Number of JSON data frames consumed, excluding `[DONE]`.
+    pub chunks: usize,
+}
+
+/// Rewrite redacted text into an upstream SSE body without rebuilding it.
+///
+/// # Fidelity guarantee
+///
+/// Buffered mode preserves the upstream chunk **sequence** and every JSON field
+/// on every chunk. The only values rewritten are:
+///
+/// - `choices[i].delta.content`
+/// - `choices[i].delta.tool_calls[j].function.arguments`
+///
+/// Chunks that do not carry those fields (role announcements, `finish_reason`,
+/// `usage`, `system_fingerprint`, `logprobs`, `service_tier`, provider
+/// extensions, and any other unknown fields) are emitted with all fields
+/// intact. Re-serialization via `serde_json` may reorder object keys; field
+/// **presence and values** are what this guarantee covers.
+///
+/// # Coalescing trade-off
+///
+/// Detection must see complete values, so content and tool-call argument
+/// fragments are concatenated per stream before redaction. The redacted string
+/// is placed on the **first** chunk that carried text for that stream; later
+/// fragments become empty strings. Clients therefore receive fewer content
+/// deltas than the provider sent. That is inherent to buffered mode (which
+/// already waits for the whole upstream body) and is strictly preferable to
+/// discarding unknown fields by rebuilding the stream from scratch.
+pub fn transform_buffered_sse<E>(
+    sse: &str,
+    mut redact: impl FnMut(&str) -> Result<String, E>,
+) -> Result<BufferedSseTransform, E> {
+    let mut chunks: Vec<Value> = Vec::new();
+    let mut saw_done = false;
+
+    for data in iter_sse_data_payloads(sse) {
+        if data == "[DONE]" {
+            saw_done = true;
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&data) else {
+            continue;
+        };
+        chunks.push(value);
+    }
+
+    let mut content: BTreeMap<u64, String> = BTreeMap::new();
+    let mut content_first: BTreeMap<u64, (usize, usize)> = BTreeMap::new();
+    let mut arguments: BTreeMap<(u64, u64), String> = BTreeMap::new();
+    let mut arguments_first: BTreeMap<(u64, u64), (usize, usize, usize)> = BTreeMap::new();
+
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let Some(choices) = chunk.get("choices").and_then(Value::as_array) else {
+            continue;
+        };
+        for (choice_arr_idx, choice) in choices.iter().enumerate() {
+            let choice_index = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+            if let Some(piece) = choice.pointer("/delta/content").and_then(Value::as_str) {
+                if !piece.is_empty() {
+                    content_first
+                        .entry(choice_index)
+                        .or_insert((chunk_idx, choice_arr_idx));
+                    content.entry(choice_index).or_default().push_str(piece);
+                }
+            }
+            let Some(tool_calls) = choice
+                .pointer("/delta/tool_calls")
+                .and_then(Value::as_array)
+            else {
+                continue;
+            };
+            for (tool_arr_idx, call) in tool_calls.iter().enumerate() {
+                let tool_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
+                let Some(piece) = call.pointer("/function/arguments").and_then(Value::as_str)
+                else {
+                    continue;
+                };
+                if piece.is_empty() {
+                    continue;
+                }
+                let key = (choice_index, tool_index);
+                arguments_first
+                    .entry(key)
+                    .or_insert((chunk_idx, choice_arr_idx, tool_arr_idx));
+                arguments.entry(key).or_default().push_str(piece);
+            }
+        }
+    }
+
+    let mut redacted_content = BTreeMap::new();
+    for (choice_index, text) in content {
+        redacted_content.insert(choice_index, redact(&text)?);
+    }
+    let mut redacted_arguments = BTreeMap::new();
+    for (key, text) in arguments {
+        redacted_arguments.insert(key, redact(&text)?);
+    }
+
+    apply_coalesced_content(&mut chunks, &content_first, &redacted_content);
+    apply_coalesced_arguments(&mut chunks, &arguments_first, &redacted_arguments);
+
+    let mut out = String::new();
+    for chunk in &chunks {
+        push_sse_data(&mut out, &chunk.to_string());
+    }
+    if saw_done {
+        push_sse_data(&mut out, "[DONE]");
+    }
+
+    Ok(BufferedSseTransform {
+        sse: out,
+        chunks: chunks.len(),
+    })
+}
+
+fn apply_coalesced_content(
+    chunks: &mut [Value],
+    first: &BTreeMap<u64, (usize, usize)>,
+    redacted: &BTreeMap<u64, String>,
+) {
+    for (choice_index, text) in redacted {
+        let Some(&(first_chunk, first_choice_arr)) = first.get(choice_index) else {
+            continue;
+        };
+        for (chunk_idx, chunk) in chunks.iter_mut().enumerate() {
+            let Some(choices) = chunk.get_mut("choices").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            for (choice_arr_idx, choice) in choices.iter_mut().enumerate() {
+                let idx = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+                if idx != *choice_index {
+                    continue;
+                }
+                let Some(content) = choice.pointer_mut("/delta/content") else {
+                    continue;
+                };
+                if !content.is_string() {
+                    continue;
+                }
+                if chunk_idx == first_chunk && choice_arr_idx == first_choice_arr {
+                    *content = Value::String(text.clone());
+                } else if content.as_str().is_some_and(|s| !s.is_empty()) {
+                    *content = Value::String(String::new());
+                }
+            }
+        }
+    }
+}
+
+fn apply_coalesced_arguments(
+    chunks: &mut [Value],
+    first: &BTreeMap<(u64, u64), (usize, usize, usize)>,
+    redacted: &BTreeMap<(u64, u64), String>,
+) {
+    for (key, text) in redacted {
+        let Some(&(first_chunk, first_choice_arr, first_tool_arr)) = first.get(key) else {
+            continue;
+        };
+        let (choice_index, tool_index) = *key;
+        for (chunk_idx, chunk) in chunks.iter_mut().enumerate() {
+            let Some(choices) = chunk.get_mut("choices").and_then(Value::as_array_mut) else {
+                continue;
+            };
+            for (choice_arr_idx, choice) in choices.iter_mut().enumerate() {
+                let idx = choice.get("index").and_then(Value::as_u64).unwrap_or(0);
+                if idx != choice_index {
+                    continue;
+                }
+                let Some(tool_calls) = choice
+                    .pointer_mut("/delta/tool_calls")
+                    .and_then(Value::as_array_mut)
+                else {
+                    continue;
+                };
+                for (tool_arr_idx, call) in tool_calls.iter_mut().enumerate() {
+                    let tc_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
+                    if tc_index != tool_index {
+                        continue;
+                    }
+                    let Some(arguments) = call.pointer_mut("/function/arguments") else {
+                        continue;
+                    };
+                    if !arguments.is_string() {
+                        continue;
+                    }
+                    if chunk_idx == first_chunk
+                        && choice_arr_idx == first_choice_arr
+                        && tool_arr_idx == first_tool_arr
+                    {
+                        *arguments = Value::String(text.clone());
+                    } else if arguments.as_str().is_some_and(|s| !s.is_empty()) {
+                        *arguments = Value::String(String::new());
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// Fields extracted from an upstream chat-completion SSE body.
 #[derive(Debug, Clone, Default)]
@@ -630,6 +837,55 @@ mod tests {
         );
         assert!(sse.contains("\"total_tokens\":7"));
         assert!(sse.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn buffered_transform_redacts_every_choice_and_preserves_fields() {
+        let sse = concat!(
+            r#"data: {"id":"c","system_fingerprint":"fp","choices":[{"index":0,"delta":{"content":"a@"}},{"index":1,"delta":{"content":"b@"}}]}"#,
+            "\n\n",
+            r#"data: {"id":"c","choices":[{"index":0,"delta":{"content":"x.com"}},{"index":1,"delta":{"content":"y.com"}}]}"#,
+            "\n\n",
+            "data: [DONE]\n\n",
+        );
+        let transformed =
+            transform_buffered_sse(sse, |text| Ok::<_, ()>(text.replace('@', "[at]"))).unwrap();
+        assert!(transformed.sse.contains("\"system_fingerprint\":\"fp\""));
+        assert!(transformed.sse.contains("a[at]x.com"));
+        assert!(transformed.sse.contains("b[at]y.com"));
+        assert!(!transformed.sse.contains("a@x.com"));
+        assert!(transformed.sse.ends_with("data: [DONE]\n\n"));
+    }
+
+    #[test]
+    fn buffered_transform_coalesces_tool_arguments_onto_first_fragment() {
+        let sse = concat!(
+            r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"e\":\""}}]}}]}"#,
+            "\n\n",
+            r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"a@b.com\"}"}}]}}]}"#,
+            "\n\n",
+            "data: [DONE]\n\n",
+        );
+        let transformed =
+            transform_buffered_sse(sse, |text| Ok::<_, ()>(text.replace("a@b.com", "REDACTED")))
+                .unwrap();
+        let chunks: Vec<Value> = iter_sse_data_payloads(&transformed.sse)
+            .into_iter()
+            .filter(|p| p != "[DONE]")
+            .map(|p| serde_json::from_str(&p).unwrap())
+            .collect();
+        assert_eq!(
+            chunks[0]
+                .pointer("/choices/0/delta/tool_calls/0/function/arguments")
+                .and_then(Value::as_str),
+            Some(r#"{"e":"REDACTED"}"#)
+        );
+        assert_eq!(
+            chunks[1]
+                .pointer("/choices/0/delta/tool_calls/0/function/arguments")
+                .and_then(Value::as_str),
+            Some("")
+        );
     }
 
     #[test]
