@@ -231,7 +231,8 @@ async fn metrics(State(state): State<AppState>) -> Response {
             .into_response(),
         None => (
             StatusCode::NOT_FOUND,
-            "this build has no pull-based metrics exporter; export metrics over OTLP instead",
+            "no pull-based metrics exporter is active; either the OpenTelemetry SDK is \
+             disabled or this build was compiled without the `prometheus` feature",
         )
             .into_response(),
     }
@@ -522,7 +523,7 @@ fn redact_response_payload(
     scope: &RequestScope,
     body: &mut Value,
 ) -> Result<RedactionOutcome, GatewayError> {
-    let mut ctx = RedactionContext::new(&state.engine, &scope.profile);
+    let mut ctx = RedactionContext::for_response(&state.engine, &scope.profile);
     let result = payload::redact_chat_response(&mut ctx, body);
     let outcome = ctx.finish();
     state
@@ -778,7 +779,7 @@ async fn stream_chat(
 
     let extracted = extract_sse(&upstream.body);
     let (redacted, response_outcome) = {
-        let mut ctx = RedactionContext::new(&state.engine, &scope.profile);
+        let mut ctx = RedactionContext::for_response(&state.engine, &scope.profile);
         let redacted = ctx.redact(&extracted.content).map_err(redaction_error)?;
         (redacted, ctx.finish())
     };

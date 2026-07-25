@@ -147,25 +147,17 @@ impl Metrics {
 
     /// Record counters derived from a [`RedactionOutcome`].
     ///
-    /// Entity-type series use the primary rewriting action present in
-    /// `action_counts` (falling back to `replace`). Callers that need a
-    /// precise per-span action should use [`Self::record_redaction`].
+    /// Each entity type is attributed to the action actually applied to it, so
+    /// a payload that masks a card number and tokenizes a name produces two
+    /// correctly labelled series. The policy decision for the request as a
+    /// whole is recorded separately by the caller.
     pub fn record_redaction_outcome(&self, outcome: &RedactionOutcome, profile: &str) {
-        let action = outcome
-            .action_counts
-            .keys()
-            .find(|a| a.as_str() != "allow" && a.as_str() != "block")
-            .map(|s| s.as_str())
-            .unwrap_or("replace");
-        for (entity_type, count) in &outcome.entity_counts {
-            self.record_redaction(entity_type, action, *count as u64);
+        let _ = profile;
+        for (entity_type, actions) in &outcome.entity_action_counts {
+            for (action, count) in actions {
+                self.record_redaction(entity_type, action, *count as u64);
+            }
         }
-        let decision = if outcome.is_blocked() {
-            "block"
-        } else {
-            "allow"
-        };
-        self.record_policy_decision(profile, decision);
     }
 
     /// Record a single redaction with explicit entity type and action.

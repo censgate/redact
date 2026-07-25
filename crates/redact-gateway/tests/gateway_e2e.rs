@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use redact_gateway::config::{AuditExport, AuthMode, StreamMode, VaultBackend};
+#[cfg(feature = "vault")]
 use redact_gateway::policy::{EntityAction, Profile};
 use serde_json::{json, Value};
 use support::*;
@@ -273,6 +274,7 @@ async fn restore_endpoint_is_unavailable_when_the_token_map_is_off() {
 // Fail-closed behavior
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "vault")]
 fn unreachable_vault_config(
     upstream: &MockUpstream,
     fail_closed: bool,
@@ -286,6 +288,7 @@ fn unreachable_vault_config(
 }
 
 #[tokio::test]
+#[cfg(feature = "vault")]
 async fn fail_closed_refuses_when_the_token_map_cannot_persist() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(unreachable_vault_config(&upstream, true)).await;
@@ -306,6 +309,7 @@ async fn fail_closed_refuses_when_the_token_map_cannot_persist() {
 }
 
 #[tokio::test]
+#[cfg(feature = "vault")]
 async fn a_non_fail_closed_profile_still_serves_when_the_token_map_is_down() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(unreachable_vault_config(&upstream, false)).await;
@@ -428,8 +432,6 @@ async fn incremental_mode_restores_tokens_in_the_emitted_stream() {
     let upstream = mock_sse_upstream(sse).await;
     let mut config = config_for(&upstream);
     config.redaction.stream_mode = StreamMode::Incremental;
-    // Keep the whole completion inside the holdback window so the token is
-    // restored in one emit (tokens split by the holdback are a separate bug).
     config.redaction.stream_holdback_bytes = 256;
     config.vault.backend = VaultBackend::Memory;
     config.policy = Arc::new(policy_with(tokenize_profile(true)));
@@ -445,6 +447,40 @@ async fn incremental_mode_restores_tokens_in_the_emitted_stream() {
         "sent to alice@example.com"
     );
     assert!(!response.body.contains("[EMAIL_ADDRESS_1]"));
+}
+
+#[tokio::test]
+async fn a_token_straddling_the_holdback_window_is_still_restored() {
+    // The placeholder is longer than the hold-back window, so a naive
+    // implementation would release "sent to [" and never restore the token.
+    let sse = [
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"sent to [EMAIL_"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ADDRESS_1] as asked"},"finish_reason":null}]}"#,
+        r#"data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+    ]
+    .join("\n\n")
+        + "\n\n";
+
+    let upstream = mock_sse_upstream(sse).await;
+    let mut config = config_for(&upstream);
+    config.redaction.stream_mode = StreamMode::Incremental;
+    config.redaction.stream_holdback_bytes = 8;
+    config.vault.backend = VaultBackend::Memory;
+    config.policy = Arc::new(policy_with(tokenize_profile(true)));
+    let router = router_for(config).await;
+
+    let mut request = chat_request("mail alice@example.com");
+    request["stream"] = json!(true);
+    let response = post_json(router, "/v1/chat/completions", request).await;
+
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(
+        streamed_content(&response.body),
+        "sent to alice@example.com as asked"
+    );
+    assert!(!response.body.contains("EMAIL_ADDRESS_1"));
 }
 
 #[tokio::test]
@@ -585,6 +621,7 @@ async fn an_auth_denial_writes_an_audit_denial_record() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+#[cfg(feature = "prometheus")]
 async fn metrics_exposes_gateway_instruments_after_traffic() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(config_for(&upstream)).await;
@@ -644,6 +681,7 @@ async fn compliance_status_reports_profiles_token_map_auth_and_audit() {
 }
 
 #[tokio::test]
+#[cfg(feature = "vault")]
 async fn readyz_degrades_when_the_token_map_backend_is_unhealthy() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let mut config = config_for(&upstream);

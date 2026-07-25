@@ -47,6 +47,9 @@ pub struct RedactionOutcome {
     pub entity_counts: BTreeMap<String, usize>,
     /// Rewrites per action.
     pub action_counts: BTreeMap<String, usize>,
+    /// Rewrites per entity type and action, so a payload that masks one value
+    /// and tokenizes another is attributed exactly.
+    pub entity_action_counts: BTreeMap<String, BTreeMap<String, usize>>,
     /// Entity types that triggered a block.
     pub blocked_entities: Vec<String>,
     /// Reversible tokens minted.
@@ -76,6 +79,12 @@ impl RedactionOutcome {
         }
         for (key, count) in &other.action_counts {
             *self.action_counts.entry(key.clone()).or_insert(0) += count;
+        }
+        for (entity, actions) in &other.entity_action_counts {
+            let target = self.entity_action_counts.entry(entity.clone()).or_default();
+            for (action, count) in actions {
+                *target.entry(action.clone()).or_insert(0) += count;
+            }
         }
         for entity in &other.blocked_entities {
             if !self.blocked_entities.contains(entity) {
@@ -107,6 +116,12 @@ impl RedactionOutcome {
                     .action_counts
                     .entry(action.as_str().to_string())
                     .or_insert(0) += 1;
+                *self
+                    .entity_action_counts
+                    .entry(entity_type.as_str().to_string())
+                    .or_default()
+                    .entry(action.as_str().to_string())
+                    .or_insert(0) += 1;
                 if action == EntityAction::Tokenize {
                     self.tokens_issued += 1;
                 }
@@ -121,17 +136,39 @@ pub struct RedactionContext<'a> {
     engine: &'a AnalyzerEngine,
     profile: &'a Profile,
     session: Option<&'a mut TokenSession>,
+    tokenize_as_replace: bool,
     /// Accumulated result across every field touched by this context.
     pub outcome: RedactionOutcome,
 }
 
 impl<'a> RedactionContext<'a> {
     /// Create a context without tokenization support.
+    ///
+    /// A profile that asks to tokenize will fail here rather than quietly
+    /// forwarding the value. Use [`RedactionContext::with_session`] to mint
+    /// tokens or [`RedactionContext::for_response`] on the way back.
     pub fn new(engine: &'a AnalyzerEngine, profile: &'a Profile) -> Self {
         Self {
             engine,
             profile,
             session: None,
+            tokenize_as_replace: false,
+            outcome: RedactionOutcome::default(),
+        }
+    }
+
+    /// Create a context for redacting a model answer.
+    ///
+    /// A reversible token has no meaning on the response path: nothing
+    /// downstream can restore it, so the caller would receive a placeholder
+    /// for a value the model produced. Tokenize rules therefore act as
+    /// replace here, which removes the value just the same.
+    pub fn for_response(engine: &'a AnalyzerEngine, profile: &'a Profile) -> Self {
+        Self {
+            engine,
+            profile,
+            session: None,
+            tokenize_as_replace: true,
             outcome: RedactionOutcome::default(),
         }
     }
@@ -146,6 +183,7 @@ impl<'a> RedactionContext<'a> {
             engine,
             profile,
             session: Some(session),
+            tokenize_as_replace: false,
             outcome: RedactionOutcome::default(),
         }
     }
@@ -179,7 +217,10 @@ impl<'a> RedactionContext<'a> {
         let mut decisions: Vec<(RecognizerResult, EntityAction, Option<String>)> =
             Vec::with_capacity(analysis.detected_entities.len());
         for entity in analysis.detected_entities {
-            let action = self.profile.decide(&entity.entity_type, entity.score);
+            let mut action = self.profile.decide(&entity.entity_type, entity.score);
+            if action == EntityAction::Tokenize && self.tokenize_as_replace {
+                action = EntityAction::Replace;
+            }
             self.outcome.record(&entity.entity_type, action);
 
             let replacement = match action {
@@ -452,6 +493,18 @@ mod tests {
             dek.open(&mapping.sealed_value).unwrap(),
             "alice@example.com"
         );
+    }
+
+    #[test]
+    fn response_mode_replaces_instead_of_tokenizing() {
+        let engine = engine();
+        let profile = profile_with(EntityAction::Tokenize);
+        let mut ctx = RedactionContext::for_response(&engine, &profile);
+        let out = ctx.redact("model wrote alice@example.com").unwrap();
+        assert_eq!(out, "model wrote [EMAIL_ADDRESS]");
+        let outcome = ctx.finish();
+        assert_eq!(outcome.tokens_issued, 0);
+        assert_eq!(outcome.action_counts["replace"], 1);
     }
 
     #[test]

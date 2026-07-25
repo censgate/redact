@@ -382,12 +382,15 @@ impl IncrementalState {
             return;
         }
         let pending = self.holdback.take();
-        let mut ctx = crate::redact::RedactionContext::new(&self.engine, &self.profile);
+        let mut ctx = crate::redact::RedactionContext::for_response(&self.engine, &self.profile);
         match ctx.redact_prefix(&pending, self.holdback.holdback()) {
             Ok((head, tail)) => {
-                self.holdback.set_pending(tail);
+                // A token placeholder split across two releases could never be
+                // restored, so an unclosed bracket goes back into the buffer.
+                let (head, carried) = split_trailing_open_bracket(&head, self.holdback.holdback());
+                self.holdback.set_pending(format!("{carried}{tail}"));
                 self.record(ctx.finish());
-                self.emit_text(&head);
+                self.emit_text(head);
             }
             Err(_) => {
                 // Detection failed for this window: keep the text buffered so
@@ -403,7 +406,7 @@ impl IncrementalState {
         if pending.is_empty() {
             return;
         }
-        let mut ctx = crate::redact::RedactionContext::new(&self.engine, &self.profile);
+        let mut ctx = crate::redact::RedactionContext::for_response(&self.engine, &self.profile);
         match ctx.redact(&pending) {
             Ok(text) => {
                 self.record(ctx.finish());
@@ -450,6 +453,24 @@ impl IncrementalState {
         self.ready.push_back(sse_frame("[DONE]"));
         self.completed = true;
     }
+}
+
+/// Split off a trailing unclosed bracket group so it can be re-buffered.
+///
+/// Returns the text that is safe to emit and the fragment to carry forward.
+/// A fragment longer than `limit` is emitted anyway: a stray `[` in prose must
+/// not stall the stream indefinitely.
+fn split_trailing_open_bracket(text: &str, limit: usize) -> (&str, &str) {
+    let Some(open) = text.rfind('[') else {
+        return (text, "");
+    };
+    if text[open..].contains(']') {
+        return (text, "");
+    }
+    if text.len() - open > limit {
+        return (text, "");
+    }
+    text.split_at(open)
 }
 
 /// Redact an upstream byte stream as it arrives.
@@ -642,6 +663,27 @@ mod tests {
         assert!(parser.push("data: {\"a\":1}").is_empty());
         assert_eq!(parser.flush(), Some("{\"a\":1}".to_string()));
         assert_eq!(parser.flush(), None);
+    }
+
+    #[test]
+    fn a_partial_token_is_carried_forward_instead_of_emitted() {
+        let (head, carried) = split_trailing_open_bracket("sent to [EMAIL_ADD", 64);
+        assert_eq!(head, "sent to ");
+        assert_eq!(carried, "[EMAIL_ADD");
+    }
+
+    #[test]
+    fn a_closed_bracket_is_emitted_whole() {
+        let (head, carried) = split_trailing_open_bracket("sent to [EMAIL_ADDRESS_1]", 64);
+        assert_eq!(head, "sent to [EMAIL_ADDRESS_1]");
+        assert_eq!(carried, "");
+    }
+
+    #[test]
+    fn a_stray_bracket_does_not_stall_the_stream() {
+        let (head, carried) = split_trailing_open_bracket("a [ very long tail", 4);
+        assert_eq!(head, "a [ very long tail");
+        assert_eq!(carried, "");
     }
 
     #[test]

@@ -3,9 +3,9 @@
 # Profiles are selected per request (see the configuration documentation).
 # Actions: allow | block | mask | replace | hash | tokenize
 #
-# `tokenize` requires a token map backend; when the backend is `off` the
-# gateway falls back to `replace` for those entities and records the downgrade,
-# or rejects the request when the profile is fail-closed.
+# `tokenize` issues placeholders that are restored in the response. With the
+# token map backend `off` the placeholders live for one request only; a backend
+# is required for tokens to survive across requests or reach another replica.
 
 default_profile: default
 
