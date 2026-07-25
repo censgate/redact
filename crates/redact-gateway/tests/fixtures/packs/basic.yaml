@@ -1,0 +1,23 @@
+# Minimal pack used by gateway integration tests.
+version: "1.0"
+framework: "Fixture-Basic"
+jurisdiction: "Test"
+description: "Tiny pack with an email pattern"
+last_updated: "2026-07-25"
+patterns:
+  - id: "global_email"
+    name: "Email Address"
+    category: "contact"
+    regex: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    confidence: 0.95
+    description: "Detects email addresses"
+    examples:
+      - "user@example.com"
+    replacement: "[EMAIL_REDACTED]"
+    enabled: true
+  - id: "disabled_secret"
+    name: "Disabled"
+    category: "security"
+    regex: 'SHOULD_NOT_MATCH'
+    confidence: 0.99
+    enabled: false
