@@ -681,6 +681,8 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 #### Unreleased
 
 - [x] 18 secret/credential entity types (54 pattern-based total) — Phase 1 of #101
+- [x] `redact-gateway`: policy profiles, reversible tokenization, OIDC and API key auth,
+      OpenTelemetry traces/metrics/logs, runtime pattern packs, container and Kubernetes assets
 
 #### v0.9.0 (Planned)
 
