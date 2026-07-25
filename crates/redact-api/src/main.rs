@@ -16,7 +16,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 fn build_engine() -> AnalyzerEngine {
     let mut registry = RecognizerRegistry::new();
 
-    // Always add pattern-based recognizer (36+ entity types)
+    // Always add pattern-based recognizer (54 entity types)
     registry.add_recognizer(Arc::new(PatternRecognizer::new()));
 
     // Add NER recognizer when ONNX model path is set

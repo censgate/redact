@@ -9,6 +9,127 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 
+/// A built-in detection pattern expressed as data.
+///
+/// Secrets are kept in a flat table rather than as imperative registration
+/// calls so the full set can be reviewed at a glance and mirrored by an
+/// external pattern pack without touching detection logic.
+struct SecretPattern {
+    entity_type: EntityType,
+    regex: &'static str,
+    score: f32,
+}
+
+/// Built-in secret/credential detection patterns.
+///
+/// These are anchored/prefixed patterns only (e.g. `AKIA...`, `ghp_...`,
+/// `sk-ant-...`) chosen for high precision. Generic catch-alls like
+/// `api_key=...` or `password=...` are deliberately excluded here because
+/// they need entropy scoring to avoid false positives; that is future work.
+const SECRET_PATTERNS: &[SecretPattern] = &[
+    SecretPattern {
+        entity_type: EntityType::PrivateKey,
+        regex: r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:[A-Z]+ )*PRIVATE KEY(?: BLOCK)?-----",
+        score: 0.98,
+    },
+    SecretPattern {
+        entity_type: EntityType::JwtToken,
+        regex: r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*",
+        score: 0.90,
+    },
+    SecretPattern {
+        entity_type: EntityType::AwsAccessKey,
+        regex: r"\b(?:AKIA|ASIA|ABIA|ACCA|A3T[A-Z0-9])[0-9A-Z]{16}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GithubToken,
+        regex: r"\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59})\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bglpat-[A-Za-z0-9_-]{20}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::SlackToken,
+        regex: r"\bxox[baprs]-[A-Za-z0-9-]{10,72}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::SlackWebhook,
+        regex: r"https://hooks\.slack\.com/services/T[A-Za-z0-9_]+/B[A-Za-z0-9_]+/[A-Za-z0-9_]{20,}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::StripeApiKey,
+        // Secret (`sk_`) and restricted (`rk_`) keys only. Publishable `pk_`
+        // keys are designed to be embedded in client-side code and are not
+        // secret, so redacting them is noise rather than protection.
+        regex: r"\b(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,99}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GoogleApiKey,
+        regex: r"\bAIza[0-9A-Za-z_-]{35}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::OpenAiApiKey,
+        // Two shapes, kept separate so neither has to be loose. Classic keys
+        // are pure alphanumeric, so requiring that rules out ordinary
+        // hyphenated identifiers (`sk-feature-branch-name`) that a combined
+        // `[A-Za-z0-9_-]{20,}` would otherwise match. Project keys do contain
+        // `-`/`_`, so they carry a longer minimum length instead.
+        regex: r"\bsk-(?:proj-[A-Za-z0-9_-]{40,}|[A-Za-z0-9]{32,})",
+        score: 0.90,
+    },
+    SecretPattern {
+        entity_type: EntityType::AnthropicApiKey,
+        regex: r"\bsk-ant-(?:api03-)?[A-Za-z0-9_-]{24,}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::NpmToken,
+        regex: r"\bnpm_[A-Za-z0-9]{36}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::PyPiToken,
+        regex: r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::SendGridApiKey,
+        regex: r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::TwilioApiKey,
+        regex: r"\bSK[0-9a-fA-F]{32}\b",
+        score: 0.85,
+    },
+    SecretPattern {
+        entity_type: EntityType::TelegramBotToken,
+        regex: r"\b\d{8,10}:AA[A-Za-z0-9_-]{33}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::HashicorpVaultToken,
+        regex: r"\bhv[sbr]\.[A-Za-z0-9_-]{24,}",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::DatabaseConnectionString,
+        // The trailing path/query are part of the connection string, so they
+        // are captured too. Without them a redaction leaves `/dbname` and any
+        // query parameters dangling after the placeholder.
+        regex: r"\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|amqp|mssql)://[^:@/\s]+:[^@/\s]+@[^\s/]+(?:/[^\s?#]*)?(?:\?[^\s#]*)?",
+        score: 0.90,
+    },
+];
+
 /// Pattern-based recognizer using regex
 #[derive(Debug, Clone)]
 pub struct PatternRecognizer {
@@ -387,6 +508,11 @@ impl PatternRecognizer {
                 "coin".to_string(),
             ],
         );
+
+        // Secrets and credentials - loaded from the flat data table above.
+        for p in SECRET_PATTERNS {
+            let _ = self.add_pattern(p.entity_type.clone(), p.regex, p.score);
+        }
     }
 
     /// Check context words around a match to boost confidence
@@ -469,6 +595,25 @@ impl Recognizer for PatternRecognizer {
                 EntityType::Md5Hash,
                 EntityType::Sha1Hash,
                 EntityType::Sha256Hash,
+                // Secrets and credentials
+                EntityType::PrivateKey,
+                EntityType::JwtToken,
+                EntityType::AwsAccessKey,
+                EntityType::GithubToken,
+                EntityType::GitlabToken,
+                EntityType::SlackToken,
+                EntityType::SlackWebhook,
+                EntityType::StripeApiKey,
+                EntityType::GoogleApiKey,
+                EntityType::OpenAiApiKey,
+                EntityType::AnthropicApiKey,
+                EntityType::NpmToken,
+                EntityType::PyPiToken,
+                EntityType::SendGridApiKey,
+                EntityType::TwilioApiKey,
+                EntityType::TelegramBotToken,
+                EntityType::HashicorpVaultToken,
+                EntityType::DatabaseConnectionString,
             ];
         }
         &SUPPORTED
@@ -718,11 +863,11 @@ mod tests {
     fn test_supported_entities_count() {
         let recognizer = PatternRecognizer::new();
         let supported = recognizer.supported_entities();
-        // Should have 36 pattern-based entity types
+        // Should have 54 pattern-based entity types (36 original + 18 secrets)
         assert_eq!(
             supported.len(),
-            36,
-            "Should support 36 pattern-based entity types, got {}",
+            54,
+            "Should support 54 pattern-based entity types, got {}",
             supported.len()
         );
     }

@@ -7,8 +7,9 @@
 //! ## Scope
 //!
 //! These bindings expose the **pattern-based** detection and anonymization from
-//! [`redact_core`]: the 36 regex entity types (email, phone, SSN, credit cards,
-//! IBAN, UK identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates, ...).
+//! [`redact_core`]: the 54 regex entity types (email, phone, SSN, credit cards,
+//! IBAN, UK identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates,
+//! secrets and credentials, ...).
 //! No ML model is loaded, so the module stays small (~1-3 MB) and fits browser
 //! and Cloudflare Workers limits.
 //!
@@ -46,7 +47,7 @@ use redact_core::{
 };
 use wasm_bindgen::prelude::*;
 
-/// PII detection and anonymization engine (pattern-based, 36 entity types).
+/// PII detection and anonymization engine (pattern-based, 54 entity types).
 #[wasm_bindgen]
 pub struct RedactEngine {
     engine: AnalyzerEngine,

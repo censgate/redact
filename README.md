@@ -20,7 +20,7 @@ A production-ready, Rust-based solution designed as a drop-in replacement for Mi
 
 - **High Performance** — 10-100x faster than Python-based solutions with sub-millisecond inference
 - **Memory Safe** — Rust's borrow checker eliminates entire classes of security vulnerabilities
-- **Production Ready** — 36 pattern-based entity types with validation, plus transformer-based NER
+- **Production Ready** — 54 pattern-based entity types with validation, plus transformer-based NER
 - **Multi-Platform** — Native server, CLI, and WebAssembly (pattern-only) support
 - **ML-Powered** — Full ONNX Runtime integration for transformer models (BERT, RoBERTa, DistilBERT)
 - **Lightweight** — ~20-50MB memory footprint vs ~300MB for Presidio
@@ -151,10 +151,10 @@ engine.anonymize_with_hash("SSN 123-45-6789", "app-secret-salt");
 
 ### What is available
 
-All **36 pattern-based entity types** (email, phone, SSN, credit cards, IBAN, UK
-identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates, ...) and the
-replace/mask anonymization strategies, plus salted hash via
-`anonymize_with_hash`. Typical bundle size is ~1-3 MB.
+All **54 pattern-based entity types** (email, phone, SSN, credit cards, IBAN, UK
+identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates, secrets and
+credentials, ...) and the replace/mask anonymization strategies, plus salted
+hash via `anonymize_with_hash`. Typical bundle size is ~1-3 MB.
 
 ### What is NOT available in WASM
 
@@ -429,7 +429,7 @@ curl -X POST http://localhost:8080/api/v1/anonymize \
 
 ## Supported Entity Types
 
-### Pattern-Based (36 types)
+### Pattern-Based (54 types)
 
 | Category | Entity Types |
 |----------|--------------|
@@ -441,8 +441,15 @@ curl -X POST http://localhost:8080/api/v1/anonymize \
 | **Crypto** | `CRYPTO_WALLET`, `BTC_ADDRESS`, `ETH_ADDRESS` |
 | **Technical** | `GUID`, `MAC_ADDRESS`, `MD5_HASH`, `SHA1_HASH`, `SHA256_HASH` |
 | **Generic** | `PASSPORT_NUMBER`, `AGE`, `ISBN`, `PO_BOX`, `DATE_TIME` |
+| **Secrets and credentials** | `PRIVATE_KEY`, `JWT_TOKEN`, `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`, `STRIPE_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `NPM_TOKEN`, `PYPI_TOKEN`, `SENDGRID_API_KEY`, `TWILIO_API_KEY`, `TELEGRAM_BOT_TOKEN`, `HASHICORP_VAULT_TOKEN`, `DATABASE_CONNECTION_STRING` |
 
 Pattern-based detection includes validation (Luhn for credit cards, mod-11 for NHS, IBAN checksums) to reduce false positives.
+
+Secrets and credentials use anchored, high-precision prefixes (e.g. `AKIA...`
+for AWS keys, `ghp_...` for GitHub tokens, `sk-ant-...` for Anthropic keys,
+`-----BEGIN ... PRIVATE KEY-----` blocks) rather than generic `key=...` /
+`password=...` catch-alls, which need entropy scoring to avoid false
+positives — that's future work.
 
 ### NER-Based (ML-Powered)
 
@@ -631,7 +638,7 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 
 ### Pre-1.0.0
 
-#### v0.8.2 (Current)
+#### v0.8.2
 
 - [x] Complete Rust rewrite (replacing Go v0.1.0-v0.4.1)
 - [x] 36 pattern-based entity types with checksum validation
@@ -643,6 +650,10 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [x] Full Docker image with embedded NER model (`ghcr.io/censgate/redact:full`)
 - [x] Comprehensive test suite (~75% coverage)
 - [x] Entity overlap resolution with specificity scoring
+
+#### Unreleased
+
+- [x] 18 secret/credential entity types (54 pattern-based total) — Phase 1 of #101
 
 #### v0.9.0 (Planned)
 
