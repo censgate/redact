@@ -164,14 +164,14 @@ Every gateway knob uses the `CENSGATE_` prefix. Legacy unprefixed names remain a
 | `CENSGATE_HOST` / `HOST` | `0.0.0.0` | Bind address |
 | `CENSGATE_PORT` / `PORT` | `8080` | Bind port |
 | `CENSGATE_PROVIDER_NAME` | `openai` | Provider identity reported as `gen_ai.provider.name` |
-| `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL (aliases: `CENSGATE_BACKEND_URL`, `BACKEND_URL`) |
-| `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token (aliases: `CENSGATE_BACKEND_API_KEY`, `BACKEND_API_KEY`, `OPENAI_API_KEY`) |
+| `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL |
+| `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token |
 | `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
 | `CENSGATE_ENABLE_TRACING` / `ENABLE_TRACING` | `true` | HTTP request tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
-| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout (aliases: `CENSGATE_CONNECT_TIMEOUT_SECS`, `CONNECT_TIMEOUT_SECS`) |
-| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout (aliases: `CENSGATE_REQUEST_TIMEOUT_SECS`, `REQUEST_TIMEOUT_SECS`) |
-| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Cap on buffered provider response bodies (aliases: `CENSGATE_MAX_UPSTREAM_BODY_BYTES`, `MAX_UPSTREAM_BODY_BYTES`) |
+| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout |
+| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout |
+| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Cap on buffered provider response bodies |
 | `CENSGATE_STREAM_MODE` | `buffered` | `buffered` or `incremental` |
 | `CENSGATE_STREAM_HOLDBACK_BYTES` | `256` | Hold-back window in incremental mode |
 | `CENSGATE_SESSION_HEADER` | `x-censgate-session-id` | Session id header |
@@ -205,7 +205,6 @@ Every gateway knob uses the `CENSGATE_` prefix. Legacy unprefixed names remain a
 | `CENSGATE_TRACE_FILTER` | unset | Span target filter directive |
 | `CENSGATE_GENAI_ATTRIBUTES` | `false` | Emit development-stage `gen_ai.*` attributes |
 | `OTEL_SEMCONV_STABILITY_OPT_IN` | unset | Also enables `gen_ai.*` when it contains `gen_ai_latest_experimental` |
-| `REDACTION_STRATEGY` | unset | Legacy: rewrites default profile action to `replace`, `mask`, or `hash` |
 
 ### YAML schema (overview)
 

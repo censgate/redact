@@ -4,13 +4,15 @@
 
 //! Environment variable names and the overlay that applies them.
 //!
-//! Every gateway knob uses the `CENSGATE_` prefix. Earlier names
-//! (`HOST`, `PORT`, `BACKEND_URL`, …) remain accepted so existing deployments
-//! keep working; where a variable was renamed, the older spelling is listed as
-//! an alias beside it. Telemetry transport is deliberately absent here:
-//! exporters, endpoints, protocol, sampling and resource attributes are
-//! configured with the standard `OTEL_*` variables defined by the
-//! OpenTelemetry specification.
+//! Every gateway knob uses the `CENSGATE_` prefix, one name per setting. The
+//! only unprefixed variables read here are the ones another system already
+//! owns: `VAULT_ADDR` / `VAULT_TOKEN` (and their OpenBao `BAO_` spellings) are
+//! the canonical configuration of the token map server, so an operator who has
+//! already exported them does not have to restate them.
+//!
+//! Telemetry transport is deliberately absent: exporters, endpoints, protocol,
+//! sampling and resource attributes are configured with the standard `OTEL_*`
+//! variables defined by the OpenTelemetry specification.
 //!
 //! The inference destination is called the *provider* throughout, matching the
 //! vocabulary of the OpenTelemetry GenAI conventions this gateway emits
@@ -25,7 +27,7 @@ use super::{
     AuditExport, AuthMode, ConfigError, ConfigSourceKind, ResolvedConfig, StreamMode, TraceLevel,
     VaultBackend,
 };
-use crate::policy::{EntityAction, PolicySet};
+use crate::policy::PolicySet;
 
 /// Selects the configuration source: `env`, `file` or `layered`.
 pub const CONFIG_SOURCE: &str = "CENSGATE_CONFIG_SOURCE";
@@ -121,8 +123,6 @@ pub const TRACE_OPERATIONS: &str = "CENSGATE_TRACE_OPERATIONS";
 pub const TRACE_FILTER: &str = "CENSGATE_TRACE_FILTER";
 /// Emit development-stage `gen_ai.*` attributes.
 pub const GENAI_ATTRIBUTES: &str = "CENSGATE_GENAI_ATTRIBUTES";
-/// Legacy single-strategy switch mapped onto the default profile action.
-pub const REDACTION_STRATEGY: &str = "REDACTION_STRATEGY";
 /// Standard OpenTelemetry semantic convention opt-in.
 pub const OTEL_SEMCONV_STABILITY_OPT_IN: &str = "OTEL_SEMCONV_STABILITY_OPT_IN";
 
@@ -219,13 +219,13 @@ pub fn load_from(
 
 /// Apply environment overrides onto an existing configuration.
 pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
-    if let Some(value) = first(&[HOST, "HOST"]) {
+    if let Some(value) = first(&[HOST]) {
         config.server.host = value;
     }
-    if let Some(value) = first(&[PORT, "PORT"]) {
+    if let Some(value) = first(&[PORT]) {
         config.server.port = parse(PORT, &value)?;
     }
-    if let Some(value) = first(&[ENABLE_TRACING, "ENABLE_TRACING"]) {
+    if let Some(value) = first(&[ENABLE_TRACING]) {
         config.server.enable_http_trace = parse_bool(ENABLE_TRACING, &value)?;
     }
     if let Some(value) = first(&[METRICS_ENDPOINT]) {
@@ -235,39 +235,22 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     if let Some(value) = first(&[PROVIDER_NAME]) {
         config.provider.name = value;
     }
-    if let Some(value) = first(&[PROVIDER_BASE_URL, "CENSGATE_BACKEND_URL", "BACKEND_URL"]) {
+    if let Some(value) = first(&[PROVIDER_BASE_URL]) {
         config.provider.base_url = value;
     }
-    if let Some(value) = first(&[
-        PROVIDER_API_KEY,
-        "CENSGATE_BACKEND_API_KEY",
-        "BACKEND_API_KEY",
-        "OPENAI_API_KEY",
-    ]) {
+    if let Some(value) = first(&[PROVIDER_API_KEY]) {
         config.provider.api_key = Some(value);
     }
-    if let Some(value) = first(&[FORWARD_CLIENT_AUTH, "CENSGATE_FORWARD_CLIENT_AUTHORIZATION"]) {
+    if let Some(value) = first(&[FORWARD_CLIENT_AUTH]) {
         config.provider.forward_client_authorization = parse_bool(FORWARD_CLIENT_AUTH, &value)?;
     }
-    if let Some(value) = first(&[
-        CONNECT_TIMEOUT_SECS,
-        "CENSGATE_CONNECT_TIMEOUT_SECS",
-        "CONNECT_TIMEOUT_SECS",
-    ]) {
+    if let Some(value) = first(&[CONNECT_TIMEOUT_SECS]) {
         config.provider.connect_timeout_secs = parse(CONNECT_TIMEOUT_SECS, &value)?;
     }
-    if let Some(value) = first(&[
-        REQUEST_TIMEOUT_SECS,
-        "CENSGATE_REQUEST_TIMEOUT_SECS",
-        "REQUEST_TIMEOUT_SECS",
-    ]) {
+    if let Some(value) = first(&[REQUEST_TIMEOUT_SECS]) {
         config.provider.request_timeout_secs = parse(REQUEST_TIMEOUT_SECS, &value)?;
     }
-    if let Some(value) = first(&[
-        MAX_BODY_BYTES,
-        "CENSGATE_MAX_UPSTREAM_BODY_BYTES",
-        "MAX_UPSTREAM_BODY_BYTES",
-    ]) {
+    if let Some(value) = first(&[MAX_BODY_BYTES]) {
         config.provider.max_body_bytes = parse(MAX_BODY_BYTES, &value)?;
     }
 
@@ -389,10 +372,6 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
         config.policy_path = Some(path);
     }
 
-    if let Some(value) = first(&[REDACTION_STRATEGY]) {
-        apply_legacy_strategy(config, &value)?;
-    }
-
     if let Some(value) = first(&[DEFAULT_PROFILE]) {
         let mut policy = (*config.policy).clone();
         if !policy.profiles.contains_key(&value) {
@@ -408,38 +387,6 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
         config.policy = std::sync::Arc::new(policy);
     }
 
-    Ok(())
-}
-
-/// Map the legacy single-strategy switch onto the default profile.
-///
-/// `REDACTION_STRATEGY` predates per-entity policy. It now rewrites the default
-/// action of the default profile, leaving explicit per-entity rules in place.
-fn apply_legacy_strategy(config: &mut ResolvedConfig, raw: &str) -> Result<(), ConfigError> {
-    let action = EntityAction::from_str(raw).map_err(|_| ConfigError::InvalidValue {
-        key: REDACTION_STRATEGY.to_string(),
-        message: format!("expected replace, mask or hash, got `{raw}`"),
-    })?;
-    if !matches!(
-        action,
-        EntityAction::Replace | EntityAction::Mask | EntityAction::Hash
-    ) {
-        return Err(ConfigError::InvalidValue {
-            key: REDACTION_STRATEGY.to_string(),
-            message: format!("expected replace, mask or hash, got `{raw}`"),
-        });
-    }
-
-    let mut policy = (*config.policy).clone();
-    let default_name = policy.default_profile.clone();
-    if let Some(profile) = policy.profiles.get(&default_name) {
-        let mut updated = (**profile).clone();
-        updated.default_action = action;
-        policy
-            .profiles
-            .insert(default_name, std::sync::Arc::new(updated));
-    }
-    config.policy = std::sync::Arc::new(policy);
     Ok(())
 }
 
@@ -466,25 +413,5 @@ mod tests {
         assert!(parse_bool("K", "TRUE").unwrap());
         assert!(!parse_bool("K", "off").unwrap());
         assert!(parse_bool("K", "maybe").is_err());
-    }
-
-    #[test]
-    fn legacy_strategy_rewrites_the_default_profile_action() {
-        let mut config = ResolvedConfig::default();
-        apply_legacy_strategy(&mut config, "mask").unwrap();
-        let profile = config.policy.default_profile();
-        assert_eq!(profile.default_action, EntityAction::Mask);
-        // Explicit per-entity rules survive the legacy override.
-        assert_eq!(
-            profile.decide(&redact_core::EntityType::AwsAccessKey, 0.9),
-            EntityAction::Block
-        );
-    }
-
-    #[test]
-    fn legacy_strategy_rejects_actions_it_never_supported() {
-        let mut config = ResolvedConfig::default();
-        assert!(apply_legacy_strategy(&mut config, "tokenize").is_err());
-        assert!(apply_legacy_strategy(&mut config, "nonsense").is_err());
     }
 }

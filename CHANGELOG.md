@@ -68,15 +68,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `redact-gateway`: standardized on **provider** for the inference destination,
-  matching the OpenTelemetry GenAI conventions the gateway emits
-  (`gen_ai.provider.name`). `backend` now refers only to token map storage and
-  `upstream` only to direction. Renames: `CENSGATE_PROVIDER_BASE_URL`,
-  `CENSGATE_PROVIDER_API_KEY`, `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS`,
-  `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS`, `CENSGATE_PROVIDER_MAX_BODY_BYTES`,
-  `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION`, YAML `provider:`, and
-  `--provider-base-url` / `--provider-api-key`. Every earlier name still works
-  as an alias.
+- `redact-gateway`: the inference destination is called a **provider**
+  throughout, matching the OpenTelemetry GenAI conventions the gateway emits
+  (`gen_ai.provider.name`). `backend` refers only to token map storage and
+  `upstream` only to direction. Settings are `CENSGATE_PROVIDER_*`, the YAML
+  section is `provider:`, and the flags are `--provider-base-url` /
+  `--provider-api-key`. Each setting has exactly one name; `VAULT_ADDR` /
+  `VAULT_TOKEN` (and the OpenBao `BAO_` spellings) are the only unprefixed
+  variables read, since they configure the token map server rather than the
+  gateway.
 - `redact-gateway`: `gen_ai.operation.name` is derived from the surface being
   called (`chat`, `embeddings`, `text_completion`), `gen_ai.request.stream`
   marks streamed requests, streamed provider calls now get a client span, and

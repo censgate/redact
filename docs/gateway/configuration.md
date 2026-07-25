@@ -144,19 +144,7 @@ The inference destination is called the **provider** throughout: configuration, 
 
 Three neighbouring words mean different things. **Inference** is the operation performed against a provider, reported as `gen_ai.operation.name`, not a name for the destination. **Backend** means the token map storage backend (`vault.backend`) and nothing else. **Upstream** appears only as directional English in prose, never as the name of a setting. [Gateway telemetry](telemetry.md#vocabulary-gen_ai-provider-inference-backend) sets this out in full alongside the conventions it follows.
 
-Settings that used to say `backend` or `upstream` were renamed accordingly. Every earlier spelling still works as an alias, so existing deployments and configuration files keep loading unchanged:
-
-| Preferred | Still accepted |
-|-----------|----------------|
-| `CENSGATE_PROVIDER_BASE_URL` | `CENSGATE_BACKEND_URL`, `BACKEND_URL` |
-| `CENSGATE_PROVIDER_API_KEY` | `CENSGATE_BACKEND_API_KEY`, `BACKEND_API_KEY`, `OPENAI_API_KEY` |
-| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `CENSGATE_CONNECT_TIMEOUT_SECS`, `CONNECT_TIMEOUT_SECS` |
-| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `CENSGATE_REQUEST_TIMEOUT_SECS`, `REQUEST_TIMEOUT_SECS` |
-| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `CENSGATE_MAX_UPSTREAM_BODY_BYTES`, `MAX_UPSTREAM_BODY_BYTES` |
-| `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `CENSGATE_FORWARD_CLIENT_AUTHORIZATION` |
-| YAML `provider:` | YAML `upstream:` |
-| `--provider-base-url` | `--backend-url` |
-| `--provider-api-key` | `--backend-api-key` |
+Each setting has exactly one name. The only unprefixed variables read anywhere are `VAULT_ADDR` / `VAULT_TOKEN` and their OpenBao `BAO_` spellings, because those are the canonical configuration of the token map server rather than gateway settings.
 
 ## Environment variables
 
@@ -169,14 +157,14 @@ Settings that used to say `backend` or `upstream` were renamed accordingly. Ever
 | `CENSGATE_HOST` / `HOST` | `0.0.0.0` | Bind address |
 | `CENSGATE_PORT` / `PORT` | `8080` | Bind port |
 | `CENSGATE_PROVIDER_NAME` | `openai` | Provider identity reported as `gen_ai.provider.name` |
-| `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL (aliases: `CENSGATE_BACKEND_URL`, `BACKEND_URL`) |
-| `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token (aliases: `CENSGATE_BACKEND_API_KEY`, `BACKEND_API_KEY`, `OPENAI_API_KEY`) |
-| `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider (alias: `CENSGATE_FORWARD_CLIENT_AUTHORIZATION`) |
+| `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL |
+| `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token |
+| `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
 | `CENSGATE_ENABLE_TRACING` / `ENABLE_TRACING` | `true` | HTTP tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
-| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout (aliases: `CENSGATE_CONNECT_TIMEOUT_SECS`, `CONNECT_TIMEOUT_SECS`) |
-| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout (aliases: `CENSGATE_REQUEST_TIMEOUT_SECS`, `REQUEST_TIMEOUT_SECS`) |
-| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Buffered body cap (aliases: `CENSGATE_MAX_UPSTREAM_BODY_BYTES`, `MAX_UPSTREAM_BODY_BYTES`) |
+| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout |
+| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout |
+| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Buffered body cap |
 | `CENSGATE_STREAM_MODE` | `buffered` | Streaming mode |
 | `CENSGATE_STREAM_HOLDBACK_BYTES` | `256` | Incremental hold-back |
 | `CENSGATE_SESSION_HEADER` | `x-censgate-session-id` | Session header name |
@@ -210,7 +198,6 @@ Settings that used to say `backend` or `upstream` were renamed accordingly. Ever
 | `CENSGATE_TRACE_FILTER` | unset | Span filter directive |
 | `CENSGATE_GENAI_ATTRIBUTES` | `false` | Opt-in `gen_ai.*` |
 | `OTEL_SEMCONV_STABILITY_OPT_IN` | unset | Enables `gen_ai.*` when it contains `gen_ai_latest_experimental` |
-| `REDACTION_STRATEGY` | unset | Legacy default-profile action (`replace` / `mask` / `hash`) |
 
 Boolean env values accept `1` / `true` / `yes` / `on` / `enabled` and `0` / `false` / `no` / `off` / `disabled`.
 

@@ -39,16 +39,11 @@ struct Cli {
     port: Option<u16>,
 
     /// Base URL of the OpenAI-compatible inference provider.
-    #[arg(long, alias = "backend-url", env = config_env::PROVIDER_BASE_URL)]
+    #[arg(long, env = config_env::PROVIDER_BASE_URL)]
     provider_base_url: Option<String>,
 
     /// Bearer token sent to the provider.
-    #[arg(
-        long,
-        alias = "backend-api-key",
-        env = config_env::PROVIDER_API_KEY,
-        hide_env_values = true
-    )]
+    #[arg(long, env = config_env::PROVIDER_API_KEY, hide_env_values = true)]
     provider_api_key: Option<String>,
 
     /// Policy profile applied when a request does not select one.

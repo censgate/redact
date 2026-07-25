@@ -21,7 +21,7 @@ data:
       port: 8080
       metrics_endpoint: true
       enable_http_trace: true
-    upstream:
+    provider:
       # Override via Secret / env in real deployments (CENSGATE_PROVIDER_BASE_URL).
       base_url: http://ollama.default.svc.cluster.local:11434
     redaction:

@@ -39,7 +39,7 @@ CENSGATE_VAULT_BACKEND=vault_kv2 \
   docker compose -f docker-compose.gateway.yml --profile vault up --build
 
 # Point at a hosted OpenAI-compatible provider
-BACKEND_URL=https://api.openai.com \
+PROVIDER_BASE_URL=https://api.openai.com \
 CENSGATE_PROVIDER_API_KEY=sk-… \
   docker compose -f docker-compose.gateway.yml up --build
 ```

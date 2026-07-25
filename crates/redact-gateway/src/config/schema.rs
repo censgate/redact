@@ -25,9 +25,7 @@ pub struct GatewayDocument {
     #[serde(default)]
     pub server: Option<ServerDocument>,
     /// Inference provider settings.
-    ///
-    /// Accepts the earlier `upstream:` key so existing files keep loading.
-    #[serde(default, alias = "upstream")]
+    #[serde(default)]
     pub provider: Option<ProviderDocument>,
     /// Redaction behavior outside of policy profiles.
     #[serde(default)]
@@ -454,16 +452,6 @@ telemetry:
         assert_eq!(config.audit.export, AuditExport::Stdout);
         assert_eq!(config.telemetry.operations, TraceLevel::Detailed);
         assert!(config.telemetry.genai_attributes);
-    }
-
-    #[test]
-    fn the_legacy_upstream_key_still_loads() {
-        let doc =
-            GatewayDocument::from_yaml("upstream:\n  base_url: https://example.com\n", "test")
-                .unwrap();
-        let mut config = ResolvedConfig::default();
-        doc.apply(&mut config, None).unwrap();
-        assert_eq!(config.provider.base_url, "https://example.com");
     }
 
     #[test]
