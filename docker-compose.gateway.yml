@@ -1,5 +1,10 @@
 # Local stack for redact-gateway.
 #
+# This stack runs with inbound authentication OFF and binds only to localhost.
+# It is a development environment, not a deployment template: enable
+# CENSGATE_AUTH_MODE=api_key (or oidc) before anything you do not control can
+# reach port 8080. See docs/gateway/authentication.md.
+#
 # Base services (default):
 #   docker compose -f docker-compose.gateway.yml up --build
 #
@@ -17,8 +22,11 @@ services:
       context: .
       dockerfile: Dockerfile.gateway
     ports:
-      - "8080:8080"
+      # Bound to loopback: the stack ships without inbound authentication.
+      - "127.0.0.1:8080:8080"
     environment:
+      # LOCAL ONLY. Any caller reaching this port is accepted.
+      CENSGATE_AUTH_MODE: "${CENSGATE_AUTH_MODE:-none}"
       CENSGATE_PROVIDER_BASE_URL: ${PROVIDER_BASE_URL:-http://ollama:11434}
       CENSGATE_PROVIDER_API_KEY: ${CENSGATE_PROVIDER_API_KEY:-}
       CENSGATE_HOST: "0.0.0.0"

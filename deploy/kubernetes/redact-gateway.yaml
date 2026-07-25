@@ -1,6 +1,20 @@
-# Minimal Kubernetes manifests for redact-gateway.
+# Kubernetes manifests for redact-gateway.
 #
-# Apply (after filling secrets):
+# This sample is deliberately single-replica and authenticated-by-default-off,
+# because those two choices interact. Read the checklist before exposing it
+# beyond a trusted network:
+#
+#   1. auth.mode below is `none`, which accepts any caller that can reach the
+#      Service. Set it to `api_key` or `oidc` before the gateway is reachable
+#      by anything you do not control. See docs/gateway/authentication.md.
+#   2. replicas is 1. Token mappings live in the gateway process unless
+#      vault.backend is vault_kv2, so a second replica cannot restore a token
+#      the first one minted. Scale out only after configuring a shared token
+#      map, and give every replica the same CENSGATE_TOKEN_DEK.
+#   3. The Secret below contains placeholders that the gateway REFUSES to
+#      start with. Create the real Secret yourself; do not apply the template.
+#
+# Apply (after creating secrets):
 #   kubectl apply -f deploy/kubernetes/
 #
 # Image naming matches release.yml: ghcr.io/<org>/redact-gateway:<tag>
@@ -31,8 +45,13 @@ data:
       paths:
         - /app/patterns
     vault:
+      # "off" keeps token mappings inside the request that minted them. Use
+      # vault_kv2 (with vault.address) for tokens that survive a restart or
+      # need to be restored by another replica.
       backend: "off"
     auth:
+      # LOCAL / TRUSTED-NETWORK ONLY. Change to api_key or oidc before this
+      # Service is reachable by callers you do not control.
       mode: none
     audit:
       export: otlp
@@ -43,11 +62,15 @@ data:
       genai_attributes: false
 
 ---
-# Template for secrets. DO NOT commit real values.
-# Create with:
+# Secret TEMPLATE — the values below are placeholders and will NOT start the
+# gateway. Create the real Secret out of band instead of applying this:
+#
 #   kubectl create secret generic redact-gateway-secrets \
-#     --from-literal=CENSGATE_PROVIDER_API_KEY='...' \
+#     --from-literal=CENSGATE_PROVIDER_API_KEY='sk-...' \
 #     --from-literal=CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
+#
+# A sealing key of all zero bytes is rejected at startup precisely so a
+# copied template cannot become a production key.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -56,11 +79,13 @@ metadata:
     app.kubernetes.io/name: redact-gateway
 type: Opaque
 stringData:
-  # Bearer token sent to the upstream OpenAI-compatible provider.
-  CENSGATE_PROVIDER_API_KEY: "replace-me"
-  # Base64-encoded 32-byte key used to seal reversible token mappings.
-  # Required when vault.backend is memory or vault_kv2 and profiles tokenize.
-  CENSGATE_TOKEN_DEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  # Bearer token sent to the OpenAI-compatible provider.
+  CENSGATE_PROVIDER_API_KEY: "REPLACE_ME"
+  # Base64-encoded 32-byte key sealing reversible token mappings, shared by
+  # every replica. Generate with: openssl rand -base64 32
+  # Leaving this unset is safer than leaving it wrong: the gateway then
+  # generates an ephemeral key and logs that tokens will not outlive the pod.
+  CENSGATE_TOKEN_DEK: "REPLACE_ME_openssl_rand_base64_32"
 
 ---
 apiVersion: apps/v1
@@ -70,7 +95,9 @@ metadata:
   labels:
     app.kubernetes.io/name: redact-gateway
 spec:
-  replicas: 2
+  # Keep at 1 unless vault.backend is vault_kv2: without a shared token map a
+  # second replica cannot restore tokens minted by the first.
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: redact-gateway
@@ -115,6 +142,7 @@ spec:
                 secretKeyRef:
                   name: redact-gateway-secrets
                   key: CENSGATE_PROVIDER_API_KEY
+            # Optional: omit entirely to run with an ephemeral per-pod key.
             - name: CENSGATE_TOKEN_DEK
               valueFrom:
                 secretKeyRef:
