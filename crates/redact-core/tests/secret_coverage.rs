@@ -155,6 +155,12 @@ fn test_openai_api_key() {
         EntityType::OpenAiApiKey,
         0.85,
     );
+    // Project-scoped keys are a distinct shape and may contain `-` / `_`.
+    assert_entity_detected(
+        "export OPENAI_API_KEY=sk-proj-abcdefghij_klmnopqrst-uvwxyz0123456789ABCDEFGHIJ",
+        EntityType::OpenAiApiKey,
+        0.85,
+    );
 }
 
 #[test]
@@ -237,6 +243,36 @@ fn test_database_connection_string() {
         EntityType::DatabaseConnectionString,
         0.85,
     );
+}
+
+#[test]
+fn test_database_connection_string_captures_path_and_query() {
+    let engine = create_engine();
+
+    for (text, expected_tail) in [
+        (
+            "DATABASE_URL=postgresql://dbuser:s3cretPass@db.internal:5432/appdb",
+            "/appdb",
+        ),
+        (
+            "Mongo: mongodb+srv://admin:hunter2@cluster0.mongodb.net/test?retryWrites=true",
+            "/test?retryWrites=true",
+        ),
+    ] {
+        let result = engine.analyze(text, None).unwrap();
+        let entity = result
+            .detected_entities
+            .iter()
+            .find(|e| e.entity_type == EntityType::DatabaseConnectionString)
+            .unwrap_or_else(|| panic!("no connection string detected in: {text}"));
+
+        let matched = &text[entity.start..entity.end];
+        assert!(
+            matched.ends_with(expected_tail),
+            "connection string should capture the trailing path/query; \
+             expected it to end with {expected_tail:?}, got {matched:?}"
+        );
+    }
 }
 
 // ============================================================================
@@ -354,6 +390,26 @@ fn test_truncated_github_token_lookalike_rejected() {
 #[test]
 fn test_truncated_google_key_lookalike_rejected() {
     assert_entity_not_detected("key: AIzaShort", EntityType::GoogleApiKey);
+}
+
+#[test]
+fn test_stripe_publishable_key_is_not_flagged() {
+    // Publishable keys are designed to ship in client-side code. Only the
+    // secret (`sk_`) and restricted (`rk_`) forms are worth redacting.
+    let tok = token("pk_live_", "abcdefghijklmnopqrstuvwx");
+    assert_entity_not_detected(
+        &format!("Frontend initialises Stripe with {tok} openly"),
+        EntityType::StripeApiKey,
+    );
+}
+
+#[test]
+fn test_hyphenated_identifier_is_not_an_openai_key() {
+    // A loose `sk-[A-Za-z0-9_-]{20,}` would match ordinary identifiers.
+    assert_entity_not_detected(
+        "Checkout branch sk-feature-branch-for-the-new-redaction-work",
+        EntityType::OpenAiApiKey,
+    );
 }
 
 #[test]

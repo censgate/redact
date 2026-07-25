@@ -64,7 +64,10 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
     },
     SecretPattern {
         entity_type: EntityType::StripeApiKey,
-        regex: r"\b(?:sk|rk|pk)_(?:live|test)_[0-9a-zA-Z]{24,99}\b",
+        // Secret (`sk_`) and restricted (`rk_`) keys only. Publishable `pk_`
+        // keys are designed to be embedded in client-side code and are not
+        // secret, so redacting them is noise rather than protection.
+        regex: r"\b(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,99}\b",
         score: 0.95,
     },
     SecretPattern {
@@ -74,7 +77,12 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
     },
     SecretPattern {
         entity_type: EntityType::OpenAiApiKey,
-        regex: r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}",
+        // Two shapes, kept separate so neither has to be loose. Classic keys
+        // are pure alphanumeric, so requiring that rules out ordinary
+        // hyphenated identifiers (`sk-feature-branch-name`) that a combined
+        // `[A-Za-z0-9_-]{20,}` would otherwise match. Project keys do contain
+        // `-`/`_`, so they carry a longer minimum length instead.
+        regex: r"\bsk-(?:proj-[A-Za-z0-9_-]{40,}|[A-Za-z0-9]{32,})",
         score: 0.90,
     },
     SecretPattern {
@@ -114,7 +122,10 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
     },
     SecretPattern {
         entity_type: EntityType::DatabaseConnectionString,
-        regex: r"\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|amqp|mssql)://[^:@/\s]+:[^@/\s]+@[^\s/]+",
+        // The trailing path/query are part of the connection string, so they
+        // are captured too. Without them a redaction leaves `/dbname` and any
+        // query parameters dangling after the placeholder.
+        regex: r"\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|amqp|mssql)://[^:@/\s]+:[^@/\s]+@[^\s/]+(?:/[^\s?#]*)?(?:\?[^\s#]*)?",
         score: 0.90,
     },
 ];
