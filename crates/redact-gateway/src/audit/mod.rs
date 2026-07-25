@@ -104,7 +104,7 @@ pub struct AuditEvent {
     /// SHA-256 of the **redacted** payload, never the original.
     pub content_sha256: Option<String>,
     /// Upstream HTTP status when known.
-    pub upstream_status: Option<u16>,
+    pub provider_status: Option<u16>,
     /// Low-cardinality error class.
     pub error_type: Option<String>,
     /// Correlated trace id.
@@ -132,8 +132,8 @@ pub struct AuditContext {
     pub subject: Option<String>,
     /// Digest of the redacted payload.
     pub content_sha256: Option<String>,
-    /// Upstream status.
-    pub upstream_status: Option<u16>,
+    /// Provider HTTP status.
+    pub provider_status: Option<u16>,
     /// Error type.
     pub error_type: Option<String>,
     /// Trace id.
@@ -179,7 +179,7 @@ impl AuditEvent {
             entity_counts: outcome.entity_counts.clone(),
             blocked_entities: outcome.blocked_entities.clone(),
             content_sha256: ctx.content_sha256,
-            upstream_status: ctx.upstream_status,
+            provider_status: ctx.provider_status,
             error_type: ctx.error_type,
             trace_id: ctx.trace_id,
             span_id: ctx.span_id,
@@ -221,8 +221,8 @@ impl AuditEvent {
         if let Some(v) = &self.content_sha256 {
             map.insert("content_sha256".into(), v.clone().into());
         }
-        if let Some(v) = self.upstream_status {
-            map.insert("upstream_status".into(), v.into());
+        if let Some(v) = self.provider_status {
+            map.insert("provider_status".into(), v.into());
         }
         if let Some(v) = &self.error_type {
             map.insert("error_type".into(), v.clone().into());

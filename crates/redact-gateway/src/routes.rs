@@ -30,7 +30,7 @@ use crate::auth::{AuthContext, Authenticator};
 use crate::config::{ConfigHandle, ResolvedConfig, StreamMode};
 use crate::error::GatewayError;
 use crate::policy::Profile;
-use crate::proxy::UpstreamClient;
+use crate::proxy::ProviderClient;
 use crate::redact::json as payload;
 use crate::redact::token::{Dek, RestoreOutcome, TokenMapping, TokenSession};
 use crate::redact::{content_digest, RedactError, RedactionContext, RedactionOutcome};
@@ -45,8 +45,8 @@ pub struct AppState {
     pub config: ConfigHandle,
     /// Detection engine shared by every request.
     pub engine: Arc<AnalyzerEngine>,
-    /// Upstream provider client.
-    pub upstream: UpstreamClient,
+    /// Inference provider client.
+    pub provider: ProviderClient,
     /// Key used to seal reversible token mappings.
     pub dek: Arc<Dek>,
     /// Token map backend.
@@ -199,7 +199,7 @@ async fn ready(State(state): State<AppState>) -> Response {
 
     let body = json!({
         "status": if ready { "ok" } else { "degraded" },
-        "upstream": config.upstream.base_url,
+        "provider": config.provider.base_url,
         "token_map": {"backend": config.vault.backend.as_str(), "ready": token_map_ready},
         "auth": {"mode": config.auth.mode.as_str(), "ready": auth_ready},
         "audit": config.audit.export.as_str(),
@@ -248,7 +248,7 @@ struct RequestScope {
     subject: Option<String>,
     known_mappings: Vec<TokenMapping>,
     forwarded_auth: Option<String>,
-    upstream_headers: reqwest::header::HeaderMap,
+    provider_headers: reqwest::header::HeaderMap,
 }
 
 impl RequestScope {
@@ -332,7 +332,7 @@ impl RequestScope {
             known_mappings.clone(),
         );
 
-        let forwarded_auth = if config.upstream.forward_client_authorization {
+        let forwarded_auth = if config.provider.forward_client_authorization {
             headers
                 .get(axum::http::header::AUTHORIZATION)
                 .and_then(|value| value.to_str().ok())
@@ -341,8 +341,8 @@ impl RequestScope {
             None
         };
 
-        let mut upstream_headers = reqwest::header::HeaderMap::new();
-        crate::telemetry::inject_context(&mut upstream_headers);
+        let mut provider_headers = reqwest::header::HeaderMap::new();
+        crate::telemetry::inject_context(&mut provider_headers);
 
         Ok(Self {
             config,
@@ -353,7 +353,7 @@ impl RequestScope {
             subject: auth.subject.clone(),
             known_mappings,
             forwarded_auth,
-            upstream_headers,
+            provider_headers,
         })
     }
 
@@ -603,30 +603,43 @@ async fn chat_completions_inner(
         return stream_chat(&state, &scope, body, &request_outcome, &lookup).await;
     }
 
-    let mut upstream = call_upstream(&state, &scope, "/v1/chat/completions", body).await?;
-    let response_outcome = redact_response_payload(&state, &scope, &mut upstream.body)?;
-    let restore = restore_response_payload(&state, &scope, &mut upstream.body, &lookup);
+    let mut response = call_provider(&state, &scope, "/v1/chat/completions", body).await?;
+    let response_outcome = redact_response_payload(&state, &scope, &mut response.body)?;
+    let restore = restore_response_payload(&state, &scope, &mut response.body, &lookup);
 
     state.audit.emit(AuditEvent::from_outcome(
         &response_outcome,
         AuditContext {
             outcome: Some(AuditOutcome::Allowed),
-            upstream_status: Some(upstream.status),
+            provider_status: Some(response.status),
             ..scope.audit_context(semconv::event::RESPONSE, "chat.completions")
         },
     ));
 
     let headers = compliance_headers(&request_outcome, &response_outcome, &restore);
     Ok((
-        StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_GATEWAY),
+        StatusCode::from_u16(response.status).unwrap_or(StatusCode::BAD_GATEWAY),
         headers,
-        Json(upstream.body),
+        Json(response.body),
     )
         .into_response())
 }
 
+/// Map a gateway path to a `gen_ai.operation.name` value.
+///
+/// The OpenTelemetry GenAI conventions define these names; a request that does
+/// not match one of them reports no operation rather than inventing a value.
+fn genai_operation(path: &str) -> &'static str {
+    match path {
+        "/v1/chat/completions" => "chat",
+        "/v1/embeddings" => "embeddings",
+        "/v1/completions" => "text_completion",
+        _ => "chat",
+    }
+}
+
 /// Split a base URL into the `server.address` and `server.port` attributes.
-fn upstream_endpoint(base_url: &str) -> (String, u16) {
+fn provider_endpoint(base_url: &str) -> (String, u16) {
     let without_scheme = base_url
         .strip_prefix("https://")
         .map(|rest| (rest, 443u16))
@@ -661,24 +674,25 @@ fn genai_response(body: &Value, request: &spans::GenAiAttrs) -> spans::GenAiAttr
     }
 }
 
-async fn call_upstream(
+async fn call_provider(
     state: &AppState,
     scope: &RequestScope,
     path: &str,
     body: &Value,
-) -> Result<crate::proxy::UpstreamResponse, GatewayError> {
+) -> Result<crate::proxy::ProviderResponse, GatewayError> {
     let level = scope.config.telemetry.operations;
     let genai = spans::GenAiAttrs {
-        operation_name: Some("chat"),
-        provider_name: Some("openai"),
+        operation_name: Some(genai_operation(path)),
+        provider_name: Some(scope.config.provider.name.clone()),
         request_model: body
             .get("model")
             .and_then(Value::as_str)
             .map(str::to_string),
+        request_stream: Some(false),
         ..spans::GenAiAttrs::default()
     };
-    let (address, port) = upstream_endpoint(state.upstream.base_url());
-    let span = spans::upstream_chat(
+    let (address, port) = provider_endpoint(state.provider.base_url());
+    let span = spans::provider_chat(
         level,
         "POST",
         &address,
@@ -688,12 +702,12 @@ async fn call_upstream(
     );
     let started = Instant::now();
     let result = state
-        .upstream
+        .provider
         .post_json(
             path,
             body,
             scope.forwarded_auth.as_deref(),
-            &scope.upstream_headers,
+            &scope.provider_headers,
         )
         .await;
     let elapsed = started.elapsed().as_secs_f64();
@@ -701,7 +715,7 @@ async fn call_upstream(
     match result {
         Ok(response) => {
             if let Some(span) = &span {
-                spans::finish_upstream_chat(
+                spans::finish_provider_chat(
                     span,
                     Some(response.status),
                     scope.config.telemetry.genai_attributes,
@@ -720,7 +734,7 @@ async fn call_upstream(
         }
         Err(err) => {
             if let Some(span) = &span {
-                spans::finish_upstream_chat(
+                spans::finish_provider_chat(
                     span,
                     None,
                     scope.config.telemetry.genai_attributes,
@@ -735,9 +749,36 @@ async fn call_upstream(
                 None,
                 Some("upstream_error"),
             );
-            Err(GatewayError::Upstream(err.to_string()))
+            Err(GatewayError::Provider(err.to_string()))
         }
     }
+}
+
+/// Client span for a streamed provider call.
+fn stream_provider_span(
+    state: &AppState,
+    scope: &RequestScope,
+    body: &Value,
+) -> Option<tracing::Span> {
+    let genai = spans::GenAiAttrs {
+        operation_name: Some("chat"),
+        provider_name: Some(scope.config.provider.name.clone()),
+        request_model: body
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        request_stream: Some(true),
+        ..spans::GenAiAttrs::default()
+    };
+    let (address, port) = provider_endpoint(state.provider.base_url());
+    spans::provider_chat(
+        scope.config.telemetry.operations,
+        "POST",
+        &address,
+        port,
+        scope.config.telemetry.genai_attributes,
+        &genai,
+    )
 }
 
 async fn stream_chat(
@@ -754,30 +795,58 @@ async fn stream_chat(
         return stream_chat_incremental(state, scope, body, request_outcome, lookup).await;
     }
 
-    let upstream = state
-        .upstream
+    let provider_span = stream_provider_span(state, scope, body);
+    let response = match state
+        .provider
         .post_sse(
             "/v1/chat/completions",
             body,
             scope.forwarded_auth.as_deref(),
-            &scope.upstream_headers,
+            &scope.provider_headers,
         )
         .await
-        .map_err(|e| GatewayError::Upstream(e.to_string()))?;
+    {
+        Ok(response) => {
+            if let Some(span) = &provider_span {
+                spans::finish_provider_chat(
+                    span,
+                    Some(response.status),
+                    scope.config.telemetry.genai_attributes,
+                    scope.config.telemetry.operations,
+                    &spans::GenAiAttrs::default(),
+                    None,
+                );
+            }
+            response
+        }
+        Err(err) => {
+            if let Some(span) = &provider_span {
+                spans::finish_provider_chat(
+                    span,
+                    None,
+                    scope.config.telemetry.genai_attributes,
+                    scope.config.telemetry.operations,
+                    &spans::GenAiAttrs::default(),
+                    Some("provider_error"),
+                );
+            }
+            return Err(GatewayError::Provider(err.to_string()));
+        }
+    };
 
-    if upstream.status >= 400 {
+    if response.status >= 400 {
         // Provider errors arrive as JSON even when the request asked for SSE.
-        let error_body = serde_json::from_str::<Value>(&upstream.body).unwrap_or_else(
-            |_| json!({"error": {"message": upstream.body, "type": "upstream_error"}}),
+        let error_body = serde_json::from_str::<Value>(&response.body).unwrap_or_else(
+            |_| json!({"error": {"message": response.body, "type": "provider_error"}}),
         );
         return Ok((
-            StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_GATEWAY),
+            StatusCode::from_u16(response.status).unwrap_or(StatusCode::BAD_GATEWAY),
             Json(error_body),
         )
             .into_response());
     }
 
-    let extracted = extract_sse(&upstream.body);
+    let extracted = extract_sse(&response.body);
     let (redacted, response_outcome) = {
         let mut ctx = RedactionContext::for_response(&state.engine, &scope.profile);
         let redacted = ctx.redact(&extracted.content).map_err(redaction_error)?;
@@ -802,7 +871,7 @@ async fn stream_chat(
         &response_outcome,
         AuditContext {
             outcome: Some(AuditOutcome::Allowed),
-            upstream_status: Some(upstream.status),
+            provider_status: Some(response.status),
             ..scope.audit_context(semconv::event::RESPONSE, "chat.completions.stream")
         },
     ));
@@ -846,19 +915,45 @@ async fn stream_chat_incremental(
     request_outcome: &RedactionOutcome,
     lookup: &HashMap<String, String>,
 ) -> Result<Response, GatewayError> {
-    let (status, upstream) = state
-        .upstream
+    let provider_span = stream_provider_span(state, scope, body);
+    let (status, body_stream) = match state
+        .provider
         .post_stream(
             "/v1/chat/completions",
             body,
             scope.forwarded_auth.as_deref(),
-            &scope.upstream_headers,
+            &scope.provider_headers,
         )
         .await
-        .map_err(|e| GatewayError::Upstream(e.to_string()))?;
+    {
+        Ok(parts) => parts,
+        Err(err) => {
+            if let Some(span) = &provider_span {
+                spans::finish_provider_chat(
+                    span,
+                    None,
+                    scope.config.telemetry.genai_attributes,
+                    scope.config.telemetry.operations,
+                    &spans::GenAiAttrs::default(),
+                    Some("provider_error"),
+                );
+            }
+            return Err(GatewayError::Provider(err.to_string()));
+        }
+    };
+    if let Some(span) = &provider_span {
+        spans::finish_provider_chat(
+            span,
+            Some(status),
+            scope.config.telemetry.genai_attributes,
+            scope.config.telemetry.operations,
+            &spans::GenAiAttrs::default(),
+            None,
+        );
+    }
 
     if status >= 400 {
-        return Err(GatewayError::Upstream(format!(
+        return Err(GatewayError::Provider(format!(
             "provider returned status {status}"
         )));
     }
@@ -869,7 +964,7 @@ async fn stream_chat_incremental(
         .unwrap_or("unknown")
         .to_string();
     let (stream_body, outcome) = crate::stream::incremental_response(
-        upstream,
+        body_stream,
         state.engine.clone(),
         scope.profile.clone(),
         lookup.clone(),
@@ -882,7 +977,7 @@ async fn stream_chat_incremental(
         request_outcome,
         AuditContext {
             outcome: Some(AuditOutcome::Allowed),
-            upstream_status: Some(status),
+            provider_status: Some(status),
             ..scope.audit_context(semconv::event::RESPONSE, "chat.completions.stream")
         },
     ));
@@ -966,40 +1061,40 @@ async fn proxy_json_surface(
     }
 
     scope.persist_tokens(&state).await?;
-    let mut upstream = call_upstream(&state, &scope, path, body).await?;
+    let mut response = call_provider(&state, &scope, path, body).await?;
 
     // Embedding vectors carry no text, so only completion-style bodies are
     // scanned on the way back.
     let response_outcome = if is_embeddings {
         RedactionOutcome::default()
     } else {
-        redact_response_payload(&state, &scope, &mut upstream.body)?
+        redact_response_payload(&state, &scope, &mut response.body)?
     };
 
     let lookup = scope.restore_lookup(&state.dek);
-    let restore = restore_response_payload(&state, &scope, &mut upstream.body, &lookup);
+    let restore = restore_response_payload(&state, &scope, &mut response.body, &lookup);
 
     state.audit.emit(AuditEvent::from_outcome(
         &request_outcome,
         AuditContext {
             outcome: Some(AuditOutcome::Allowed),
-            upstream_status: Some(upstream.status),
+            provider_status: Some(response.status),
             ..scope.audit_context(semconv::event::REQUEST, action)
         },
     ));
 
     let headers = compliance_headers(&request_outcome, &response_outcome, &restore);
     Ok((
-        StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_GATEWAY),
+        StatusCode::from_u16(response.status).unwrap_or(StatusCode::BAD_GATEWAY),
         headers,
-        Json(upstream.body),
+        Json(response.body),
     )
         .into_response())
 }
 
 async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let config = state.config();
-    let forwarded_auth = if config.upstream.forward_client_authorization {
+    let forwarded_auth = if config.provider.forward_client_authorization {
         headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
@@ -1008,12 +1103,12 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
         None
     };
 
-    let mut upstream_headers = reqwest::header::HeaderMap::new();
-    crate::telemetry::inject_context(&mut upstream_headers);
+    let mut provider_headers = reqwest::header::HeaderMap::new();
+    crate::telemetry::inject_context(&mut provider_headers);
 
     match state
-        .upstream
-        .get_json("/v1/models", forwarded_auth.as_deref(), &upstream_headers)
+        .provider
+        .get_json("/v1/models", forwarded_auth.as_deref(), &provider_headers)
         .await
     {
         Ok(upstream) => (
@@ -1021,7 +1116,7 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
             Json(upstream.body),
         )
             .into_response(),
-        Err(err) => GatewayError::Upstream(err.to_string()).into_response(),
+        Err(err) => GatewayError::Provider(err.to_string()).into_response(),
     }
 }
 

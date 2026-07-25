@@ -68,6 +68,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `redact-gateway`: standardized on **provider** for the inference destination,
+  matching the OpenTelemetry GenAI conventions the gateway emits
+  (`gen_ai.provider.name`). `backend` now refers only to token map storage and
+  `upstream` only to direction. Renames: `CENSGATE_PROVIDER_BASE_URL`,
+  `CENSGATE_PROVIDER_API_KEY`, `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS`,
+  `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS`, `CENSGATE_PROVIDER_MAX_BODY_BYTES`,
+  `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION`, YAML `provider:`, and
+  `--provider-base-url` / `--provider-api-key`. Every earlier name still works
+  as an alias.
+- `redact-gateway`: `gen_ai.operation.name` is derived from the surface being
+  called (`chat`, `embeddings`, `text_completion`), `gen_ai.request.stream`
+  marks streamed requests, streamed provider calls now get a client span, and
+  `gen_ai.provider.name` is configurable with `CENSGATE_PROVIDER_NAME` for
+  deployments whose provider is not OpenAI.
 - `redact-core`: `Instant::now()` (which panics on `wasm32-unknown-unknown`) is now
   gated behind a `Timer` helper so the engine is WASM-safe; native timing behavior is
   unchanged.

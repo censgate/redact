@@ -23,7 +23,7 @@ use http_body_util::BodyExt;
 use redact_core::AnalyzerEngine;
 use redact_gateway::config::{ConfigHandle, ResolvedConfig};
 use redact_gateway::policy::{EntityAction, PolicySet, Profile};
-use redact_gateway::proxy::UpstreamClient;
+use redact_gateway::proxy::ProviderClient;
 use redact_gateway::redact::token::Dek;
 use redact_gateway::routes::{create_router, AppState};
 use serde_json::{json, Value};
@@ -182,7 +182,7 @@ pub async fn mock_sse_upstream(sse: impl Into<String>) -> MockUpstream {
 /// A default configuration pointed at `upstream`.
 pub fn config_for(upstream: &MockUpstream) -> ResolvedConfig {
     ResolvedConfig {
-        upstream: redact_gateway::config::UpstreamSettings {
+        provider: redact_gateway::config::ProviderSettings {
             base_url: upstream.base_url(),
             ..Default::default()
         },
@@ -192,7 +192,7 @@ pub fn config_for(upstream: &MockUpstream) -> ResolvedConfig {
 
 /// Build handler state for a configuration.
 pub async fn state_for(config: ResolvedConfig) -> AppState {
-    let upstream = UpstreamClient::from_settings(&config.upstream).unwrap();
+    let provider = ProviderClient::from_settings(&config.provider).unwrap();
     let telemetry =
         Arc::new(redact_gateway::telemetry::init(&config.telemetry).expect("telemetry"));
     let audit = Arc::new(
@@ -209,7 +209,7 @@ pub async fn state_for(config: ResolvedConfig) -> AppState {
     AppState {
         config: ConfigHandle::new(config),
         engine: Arc::new(AnalyzerEngine::new()),
-        upstream,
+        provider,
         dek: Arc::new(Dek::generate().unwrap()),
         tokens,
         auth,

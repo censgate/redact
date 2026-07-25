@@ -15,7 +15,7 @@ use crate::audit::{build_dispatcher, AuditDispatcher};
 use crate::auth::{build_authenticator, Authenticator};
 use crate::config::{ConfigHandle, ResolvedConfig};
 use crate::packs::load_packs;
-use crate::proxy::UpstreamClient;
+use crate::proxy::ProviderClient;
 use crate::redact::token::Dek;
 use crate::routes::{create_router, AppState};
 use crate::telemetry::Telemetry;
@@ -89,14 +89,14 @@ impl GatewayServer {
                 .context("could not initialize audit emission")?,
         );
 
-        let upstream = UpstreamClient::from_settings(&config.upstream)
-            .context("could not build the upstream client")?;
+        let provider = ProviderClient::from_settings(&config.provider)
+            .context("could not build the provider client")?;
 
         let handle = ConfigHandle::new(config);
         let state = AppState {
             config: handle.clone(),
             engine,
-            upstream,
+            provider,
             dek,
             tokens,
             auth: authenticator,
@@ -169,7 +169,7 @@ impl GatewayServer {
 
         info!(
             address = %address,
-            upstream = %config.upstream.base_url,
+            upstream = %config.provider.base_url,
             profile = %config.policy.default_profile,
             auth = config.auth.mode.as_str(),
             token_map = config.vault.backend.as_str(),
@@ -333,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_configuration_is_rejected() {
         let mut config = ResolvedConfig::default();
-        config.upstream.base_url = "not-a-url".to_string();
+        config.provider.base_url = "not-a-url".to_string();
         assert!(GatewayServer::new(config).await.is_err());
     }
 

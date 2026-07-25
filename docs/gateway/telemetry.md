@@ -41,14 +41,51 @@ Related: [configuration](configuration.md) · [audit](audit.md) · [deployment](
 | `basic` | Yes | Yes | Minimal |
 | `detailed` | Yes | Yes | Stream chunk counts, GenAI response fields when enabled |
 
+## Vocabulary: gen_ai, provider, inference, backend
+
+Four words that sound interchangeable mean different things here. The gateway follows the OpenTelemetry GenAI semantic conventions for all of them, and reserves the two words the conventions do not own.
+
+| Word | Layer | Meaning here | Owned by |
+|------|-------|--------------|----------|
+| `gen_ai` | Telemetry namespace | The attribute family for generative AI, for example `gen_ai.provider.name` and `gen_ai.operation.name`. The conventions scope this to generative models rather than machine learning inference generally, which is why the namespace is not called `inference`. | OpenTelemetry |
+| **provider** | Configuration and prose | The service the gateway sends inference requests to: a base URL, a credential, timeouts. This is the `provider:` config section and the value of `gen_ai.provider.name`. | Industry convention, matching the OTel attribute |
+| **inference** | Operation | The act of calling a model. The conventions express it as `gen_ai.operation.name` (`chat`, `embeddings`, `text_completion`) and in metric names such as `gen_ai.client.inference.tokens`. It is a verb-like word for what happens, not a name for where it happens. | OpenTelemetry |
+| **backend** | Storage | The token map storage backend only (`vault.backend`: `off`, `memory`, `vault_kv2`). Never the inference destination. | This gateway |
+
+"Upstream" appears in prose as a direction ("forwarded upstream") and never as the name of a setting.
+
+The practical consequence: you configure a **provider**, the gateway performs an **inference** operation against it, and both facts are reported under the **`gen_ai`** namespace. Storage **backends** are a separate subsystem.
+
+### Provider identity
+
+`gen_ai.provider.name` defaults to `openai` because the gateway speaks the OpenAI wire format. When the service behind your base URL is something else, set `CENSGATE_PROVIDER_NAME` (or `provider.name` in YAML) so telemetry attributes it correctly. The conventions define these well-known values; if one applies it must be used:
+
+`anthropic`, `aws.bedrock`, `azure.ai.inference`, `azure.ai.openai`, `cohere`, `deepseek`, `gcp.gemini`, `gcp.gen_ai`, `gcp.vertex_ai`, `groq`, `ibm.watsonx.ai`, `mistral_ai`, `moonshot_ai`, `openai`, `perplexity`, `x_ai`.
+
+The conventions note that this attribute records the provider as identified by the instrumentation, which may differ from whoever ultimately serves the request — pointing an OpenAI-shaped client at a proxy is the example they give. That is exactly this gateway's position, so the value is yours to set rather than something it can infer.
+
+### Operation names
+
+The operation is derived from the surface being called and reported as `gen_ai.operation.name`:
+
+| Gateway endpoint | `gen_ai.operation.name` |
+|------------------|-------------------------|
+| `/v1/chat/completions` | `chat` |
+| `/v1/embeddings` | `embeddings` |
+| `/v1/completions` | `text_completion` |
+
+Streamed requests additionally set `gen_ai.request.stream` to `true`.
+
 ## Semantic convention stability
 
 | Convention set | Status | Default |
 |----------------|--------|---------|
-| Stable HTTP (`http.request.method`, `http.route`, `http.server.request.duration`, …) | Stable upstream | Always used for HTTP spans and metrics |
-| `gen_ai.*` (`gen_ai.request.model`, usage, finish reasons, …) | **Development** upstream; names may change | Opt-in via `CENSGATE_GENAI_ATTRIBUTES` or `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` |
+| Stable HTTP (`http.request.method`, `http.route`, `http.server.request.duration`, …) | Stable | Always used for HTTP spans and metrics |
+| `gen_ai.*` (`gen_ai.provider.name`, `gen_ai.operation.name`, `gen_ai.request.model`, usage, finish reasons, …) | **Development**, and now maintained in a separate specification repository; names may change | Opt-in via `CENSGATE_GENAI_ATTRIBUTES` or `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` |
 
-Prefer stable HTTP conventions for production dashboards and alerts. Treat `gen_ai.*` as experimental enrichment.
+Prefer stable HTTP conventions for production dashboards and alerts. Treat `gen_ai.*` as experimental enrichment: the token-usage metrics in particular are being restructured upstream, and `gen_ai.provider.name` itself replaced the now-deprecated `gen_ai.system`.
+
+Sources: the [GenAI attribute registry](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/registry/attributes/gen-ai.md) and the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) (checked 2026-07-25).
 
 ## W3C propagation
 
@@ -144,7 +181,7 @@ Pull-based scrape: `GET /metrics` when `CENSGATE_METRICS_ENDPOINT=true` and the 
 2. Start the gateway and send a traced request:
 
    ```bash
-   cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
+   cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
 
    TRACE_ID=$(openssl rand -hex 16)
    SPAN_ID=$(openssl rand -hex 8)

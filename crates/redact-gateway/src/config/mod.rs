@@ -329,27 +329,36 @@ impl Default for ServerSettings {
     }
 }
 
-/// Upstream model provider settings.
+/// Inference provider settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamSettings {
+pub struct ProviderSettings {
+    /// Provider identity reported as `gen_ai.provider.name`.
+    ///
+    /// The OpenTelemetry GenAI conventions define well-known values such as
+    /// `openai`, `anthropic`, `azure.ai.openai`, `aws.bedrock`, `gcp.gemini`,
+    /// `mistral_ai` and `groq`. The default is `openai` because the gateway
+    /// speaks the OpenAI wire format; set it to the value that matches who
+    /// actually serves the request.
+    pub name: String,
     /// Base URL of the OpenAI-compatible provider.
     pub base_url: String,
-    /// Bearer token sent upstream. Never logged or exported.
+    /// Bearer token sent to the provider. Never logged or exported.
     #[serde(skip_serializing)]
     pub api_key: Option<String>,
     /// TCP connect timeout in seconds.
     pub connect_timeout_secs: u64,
-    /// Overall upstream request timeout in seconds.
+    /// Overall provider request timeout in seconds.
     pub request_timeout_secs: u64,
-    /// Cap on buffered upstream response bodies.
+    /// Cap on buffered provider response bodies.
     pub max_body_bytes: usize,
     /// Forward the caller's `Authorization` header instead of the configured key.
     pub forward_client_authorization: bool,
 }
 
-impl Default for UpstreamSettings {
+impl Default for ProviderSettings {
     fn default() -> Self {
         Self {
+            name: "openai".to_string(),
             base_url: "http://127.0.0.1:11434".to_string(),
             api_key: None,
             connect_timeout_secs: 10,
@@ -536,8 +545,8 @@ pub struct ResolvedConfig {
     pub source: ConfigSourceKind,
     /// Listener settings.
     pub server: ServerSettings,
-    /// Upstream provider settings.
-    pub upstream: UpstreamSettings,
+    /// Inference provider settings.
+    pub provider: ProviderSettings,
     /// Redaction behavior outside of policy profiles.
     pub redaction: RedactionSettings,
     /// Pattern pack loading.
@@ -563,7 +572,7 @@ impl Default for ResolvedConfig {
         Self {
             source: ConfigSourceKind::Env,
             server: ServerSettings::default(),
-            upstream: UpstreamSettings::default(),
+            provider: ProviderSettings::default(),
             redaction: RedactionSettings::default(),
             packs: PackSettings::default(),
             vault: VaultSettings::default(),
@@ -590,17 +599,17 @@ impl ResolvedConfig {
 
     /// Reject combinations that would silently weaken protection.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.upstream.base_url.trim().is_empty() {
+        if self.provider.base_url.trim().is_empty() {
             return Err(ConfigError::Invalid(
-                "upstream base URL must not be empty".to_string(),
+                "provider base URL must not be empty".to_string(),
             ));
         }
-        if !self.upstream.base_url.starts_with("http://")
-            && !self.upstream.base_url.starts_with("https://")
+        if !self.provider.base_url.starts_with("http://")
+            && !self.provider.base_url.starts_with("https://")
         {
             return Err(ConfigError::Invalid(format!(
-                "upstream base URL must start with http:// or https://, got `{}`",
-                self.upstream.base_url
+                "provider base URL must start with http:// or https://, got `{}`",
+                self.provider.base_url
             )));
         }
         if self.auth.mode == AuthMode::ApiKey && self.auth.api_keys.is_empty() {
@@ -654,13 +663,14 @@ impl ResolvedConfig {
                 "http_trace": self.server.enable_http_trace,
                 "metrics_endpoint": self.server.metrics_endpoint,
             },
-            "upstream": {
-                "base_url": self.upstream.base_url,
-                "api_key": self.upstream.api_key.as_ref().map(|_| "<set>"),
-                "forward_client_authorization": self.upstream.forward_client_authorization,
-                "connect_timeout_secs": self.upstream.connect_timeout_secs,
-                "request_timeout_secs": self.upstream.request_timeout_secs,
-                "max_body_bytes": self.upstream.max_body_bytes,
+            "provider": {
+                "name": self.provider.name,
+                "base_url": self.provider.base_url,
+                "api_key": self.provider.api_key.as_ref().map(|_| "<set>"),
+                "forward_client_authorization": self.provider.forward_client_authorization,
+                "connect_timeout_secs": self.provider.connect_timeout_secs,
+                "request_timeout_secs": self.provider.request_timeout_secs,
+                "max_body_bytes": self.provider.max_body_bytes,
             },
             "redaction": {
                 "stream_mode": self.redaction.stream_mode.as_str(),
@@ -776,7 +786,7 @@ mod tests {
     #[test]
     fn summary_never_reveals_secrets() {
         let mut config = ResolvedConfig::default();
-        config.upstream.api_key = Some("sk-supersecret".to_string());
+        config.provider.api_key = Some("sk-supersecret".to_string());
         config.vault.token = Some("hvs.supersecret".to_string());
         config.vault.data_encryption_key = Some("QUJDREVGRw==".to_string());
         config.auth.api_keys = vec!["client-key".to_string()];
@@ -791,7 +801,7 @@ mod tests {
     #[test]
     fn serialized_config_omits_secret_fields() {
         let mut config = ResolvedConfig::default();
-        config.upstream.api_key = Some("sk-supersecret".to_string());
+        config.provider.api_key = Some("sk-supersecret".to_string());
         config.vault.token = Some("hvs.supersecret".to_string());
         let rendered = serde_json::to_string(&config).unwrap();
         assert!(!rendered.contains("supersecret"));

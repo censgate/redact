@@ -191,13 +191,13 @@ async fn models_are_proxied_untouched() {
 #[tokio::test]
 async fn an_unreachable_provider_is_reported_as_a_gateway_error() {
     let mut config = config_for(&mock_json_upstream(chat_response("ok")).await);
-    config.upstream.base_url = "http://127.0.0.1:1".to_string();
+    config.provider.base_url = "http://127.0.0.1:1".to_string();
     let router = router_for(config).await;
 
     let response = post_json(router, "/v1/chat/completions", chat_request("hello")).await;
 
     assert_eq!(response.status, StatusCode::BAD_GATEWAY);
-    assert_eq!(response.json()["error"]["type"], "upstream_error");
+    assert_eq!(response.json()["error"]["type"], "provider_error");
 }
 
 #[tokio::test]

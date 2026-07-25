@@ -12,9 +12,9 @@ server:
   metrics_endpoint: true
   enable_http_trace: true
 
-upstream:
+provider:
   base_url: https://api.openai.com
-  # Prefer injecting the key via CENSGATE_BACKEND_API_KEY rather than this file.
+  # Prefer injecting the key via CENSGATE_PROVIDER_API_KEY rather than this file.
   connect_timeout_secs: 10
   request_timeout_secs: 600
 

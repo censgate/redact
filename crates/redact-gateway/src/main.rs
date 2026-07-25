@@ -38,13 +38,18 @@ struct Cli {
     #[arg(long, env = config_env::PORT)]
     port: Option<u16>,
 
-    /// Upstream OpenAI-compatible base URL.
-    #[arg(long, env = config_env::BACKEND_URL)]
-    backend_url: Option<String>,
+    /// Base URL of the OpenAI-compatible inference provider.
+    #[arg(long, alias = "backend-url", env = config_env::PROVIDER_BASE_URL)]
+    provider_base_url: Option<String>,
 
-    /// Bearer token sent to the upstream provider.
-    #[arg(long, env = config_env::BACKEND_API_KEY, hide_env_values = true)]
-    backend_api_key: Option<String>,
+    /// Bearer token sent to the provider.
+    #[arg(
+        long,
+        alias = "backend-api-key",
+        env = config_env::PROVIDER_API_KEY,
+        hide_env_values = true
+    )]
+    provider_api_key: Option<String>,
 
     /// Policy profile applied when a request does not select one.
     #[arg(long, env = config_env::DEFAULT_PROFILE)]
@@ -91,11 +96,11 @@ impl Cli {
         if let Some(port) = self.port {
             overrides.push((config_env::PORT, port.to_string()));
         }
-        if let Some(url) = &self.backend_url {
-            overrides.push((config_env::BACKEND_URL, url.clone()));
+        if let Some(url) = &self.provider_base_url {
+            overrides.push((config_env::PROVIDER_BASE_URL, url.clone()));
         }
-        if let Some(key) = &self.backend_api_key {
-            overrides.push((config_env::BACKEND_API_KEY, key.clone()));
+        if let Some(key) = &self.provider_api_key {
+            overrides.push((config_env::PROVIDER_API_KEY, key.clone()));
         }
         if let Some(profile) = &self.profile {
             overrides.push((config_env::DEFAULT_PROFILE, profile.clone()));

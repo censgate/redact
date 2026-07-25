@@ -607,7 +607,7 @@ redact/
 
 ```bash
 # Default upstream is Ollama on 11434
-cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
+cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
 
 curl -s http://127.0.0.1:8080/health
 

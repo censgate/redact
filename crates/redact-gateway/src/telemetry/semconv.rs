@@ -51,6 +51,8 @@ pub const GEN_AI_OPERATION_NAME: &str = "gen_ai.operation.name";
 pub const GEN_AI_PROVIDER_NAME: &str = "gen_ai.provider.name";
 /// Requested model identifier (Development).
 pub const GEN_AI_REQUEST_MODEL: &str = "gen_ai.request.model";
+/// Whether the request asked for a streamed response.
+pub const GEN_AI_REQUEST_STREAM: &str = "gen_ai.request.stream";
 /// Response model identifier (Development).
 pub const GEN_AI_RESPONSE_MODEL: &str = "gen_ai.response.model";
 /// Input token usage (Development).
@@ -159,7 +161,7 @@ pub mod span_name {
     /// Response-path token restore.
     pub const RESTORE: &str = "redact.gateway.restore";
     /// Upstream chat completions call.
-    pub const UPSTREAM_CHAT: &str = "redact.gateway.upstream.chat";
+    pub const PROVIDER_CHAT: &str = "redact.gateway.provider.chat";
     /// Streaming redaction.
     pub const STREAM_REDACT: &str = "redact.gateway.stream.redact";
     /// Configuration reload.
@@ -181,7 +183,7 @@ pub mod target {
     /// Restore spans.
     pub const RESTORE: &str = "redact_gateway::restore";
     /// Upstream client spans.
-    pub const UPSTREAM: &str = "redact_gateway::upstream";
+    pub const PROVIDER: &str = "redact_gateway::provider";
     /// Streaming spans.
     pub const STREAM: &str = "redact_gateway::stream";
     /// Config reload spans.

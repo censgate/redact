@@ -18,7 +18,7 @@ Selection:
 2. Otherwise, if `CENSGATE_CONFIG_FILE` is set, use `layered`.
 3. Otherwise use `env`.
 
-CLI flags (`--config`, `--host`, `--backend-url`, `--profile`, `--policy`, `--pattern-pack`, …) are written into the corresponding environment variables before load, so precedence is identical whether you launch via flags or env.
+CLI flags (`--config`, `--host`, `--provider-base-url`, `--profile`, `--policy`, `--pattern-pack`, …) are written into the corresponding environment variables before load, so precedence is identical whether you launch via flags or env.
 
 In `layered` mode, every non-empty environment value replaces the file value for that field. Secrets such as API keys are never printed by `print-config` (they appear as `"<set>"` or a count).
 
@@ -66,9 +66,10 @@ server:
   enable_http_trace: true
   metrics_endpoint: true
 
-upstream:
+provider:
+  name: openai                     # gen_ai.provider.name value
   base_url: http://127.0.0.1:11434
-  api_key: null                    # prefer CENSGATE_BACKEND_API_KEY
+  api_key: null                    # prefer CENSGATE_PROVIDER_API_KEY
   connect_timeout_secs: 10
   request_timeout_secs: 600
   max_body_bytes: 33554432
@@ -137,6 +138,26 @@ Example documents:
 - [`crates/redact-gateway/examples/observability.yaml`](../../crates/redact-gateway/examples/observability.yaml)
 - [`crates/redact-gateway/examples/policy-healthcare.yaml`](../../crates/redact-gateway/examples/policy-healthcare.yaml)
 
+## Naming
+
+The inference destination is called the **provider** throughout: configuration, documentation, telemetry and audit records all use that one word. It matches how comparable AI gateways name the concept, and it matches the OpenTelemetry GenAI conventions this gateway emits, where the attribute is `gen_ai.provider.name`.
+
+Three neighbouring words mean different things. **Inference** is the operation performed against a provider, reported as `gen_ai.operation.name`, not a name for the destination. **Backend** means the token map storage backend (`vault.backend`) and nothing else. **Upstream** appears only as directional English in prose, never as the name of a setting. [Gateway telemetry](telemetry.md#vocabulary-gen_ai-provider-inference-backend) sets this out in full alongside the conventions it follows.
+
+Settings that used to say `backend` or `upstream` were renamed accordingly. Every earlier spelling still works as an alias, so existing deployments and configuration files keep loading unchanged:
+
+| Preferred | Still accepted |
+|-----------|----------------|
+| `CENSGATE_PROVIDER_BASE_URL` | `CENSGATE_BACKEND_URL`, `BACKEND_URL` |
+| `CENSGATE_PROVIDER_API_KEY` | `CENSGATE_BACKEND_API_KEY`, `BACKEND_API_KEY`, `OPENAI_API_KEY` |
+| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `CENSGATE_CONNECT_TIMEOUT_SECS`, `CONNECT_TIMEOUT_SECS` |
+| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `CENSGATE_REQUEST_TIMEOUT_SECS`, `REQUEST_TIMEOUT_SECS` |
+| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `CENSGATE_MAX_UPSTREAM_BODY_BYTES`, `MAX_UPSTREAM_BODY_BYTES` |
+| `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `CENSGATE_FORWARD_CLIENT_AUTHORIZATION` |
+| YAML `provider:` | YAML `upstream:` |
+| `--provider-base-url` | `--backend-url` |
+| `--provider-api-key` | `--backend-api-key` |
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -147,14 +168,15 @@ Example documents:
 | `CENSGATE_DEFAULT_PROFILE` | `default` | Default profile name |
 | `CENSGATE_HOST` / `HOST` | `0.0.0.0` | Bind address |
 | `CENSGATE_PORT` / `PORT` | `8080` | Bind port |
-| `CENSGATE_BACKEND_URL` / `BACKEND_URL` | `http://127.0.0.1:11434` | Upstream base URL |
-| `CENSGATE_BACKEND_API_KEY` / `BACKEND_API_KEY` / `OPENAI_API_KEY` | unset | Upstream bearer |
-| `CENSGATE_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward caller auth upstream |
+| `CENSGATE_PROVIDER_NAME` | `openai` | Provider identity reported as `gen_ai.provider.name` |
+| `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL (aliases: `CENSGATE_BACKEND_URL`, `BACKEND_URL`) |
+| `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token (aliases: `CENSGATE_BACKEND_API_KEY`, `BACKEND_API_KEY`, `OPENAI_API_KEY`) |
+| `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider (alias: `CENSGATE_FORWARD_CLIENT_AUTHORIZATION`) |
 | `CENSGATE_ENABLE_TRACING` / `ENABLE_TRACING` | `true` | HTTP tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
-| `CENSGATE_CONNECT_TIMEOUT_SECS` / `CONNECT_TIMEOUT_SECS` | `10` | Connect timeout |
-| `CENSGATE_REQUEST_TIMEOUT_SECS` / `REQUEST_TIMEOUT_SECS` | `600` | Request timeout |
-| `CENSGATE_MAX_UPSTREAM_BODY_BYTES` / `MAX_UPSTREAM_BODY_BYTES` | `33554432` | Buffered body cap |
+| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout (aliases: `CENSGATE_CONNECT_TIMEOUT_SECS`, `CONNECT_TIMEOUT_SECS`) |
+| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout (aliases: `CENSGATE_REQUEST_TIMEOUT_SECS`, `REQUEST_TIMEOUT_SECS`) |
+| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Buffered body cap (aliases: `CENSGATE_MAX_UPSTREAM_BODY_BYTES`, `MAX_UPSTREAM_BODY_BYTES`) |
 | `CENSGATE_STREAM_MODE` | `buffered` | Streaming mode |
 | `CENSGATE_STREAM_HOLDBACK_BYTES` | `256` | Incremental hold-back |
 | `CENSGATE_SESSION_HEADER` | `x-censgate-session-id` | Session header name |

@@ -24,9 +24,11 @@ pub struct GatewayDocument {
     /// Listener settings.
     #[serde(default)]
     pub server: Option<ServerDocument>,
-    /// Upstream provider settings.
-    #[serde(default)]
-    pub upstream: Option<UpstreamDocument>,
+    /// Inference provider settings.
+    ///
+    /// Accepts the earlier `upstream:` key so existing files keep loading.
+    #[serde(default, alias = "upstream")]
+    pub provider: Option<ProviderDocument>,
     /// Redaction behavior outside of policy profiles.
     #[serde(default)]
     pub redaction: Option<RedactionDocument>,
@@ -67,21 +69,23 @@ pub struct ServerDocument {
     pub metrics_endpoint: Option<bool>,
 }
 
-/// Upstream section.
+/// Provider section.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct UpstreamDocument {
+pub struct ProviderDocument {
+    /// Provider identity reported as `gen_ai.provider.name`.
+    pub name: Option<String>,
     /// Base URL of the OpenAI-compatible provider.
     pub base_url: Option<String>,
-    /// Bearer token sent upstream.
+    /// Bearer token sent to the provider.
     pub api_key: Option<String>,
     /// TCP connect timeout in seconds.
     pub connect_timeout_secs: Option<u64>,
     /// Overall request timeout in seconds.
     pub request_timeout_secs: Option<u64>,
-    /// Cap on buffered upstream bodies.
+    /// Cap on buffered provider response bodies.
     pub max_body_bytes: Option<usize>,
-    /// Forward the caller's `Authorization` header upstream.
+    /// Forward the caller's `Authorization` header to the provider.
     pub forward_client_authorization: Option<bool>,
 }
 
@@ -230,23 +234,24 @@ impl GatewayDocument {
             apply_opt(&mut config.server.metrics_endpoint, server.metrics_endpoint);
         }
 
-        if let Some(upstream) = self.upstream {
-            apply_opt(&mut config.upstream.base_url, upstream.base_url);
-            if upstream.api_key.is_some() {
-                config.upstream.api_key = upstream.api_key.filter(|v| !v.is_empty());
+        if let Some(provider) = self.provider {
+            apply_opt(&mut config.provider.name, provider.name);
+            apply_opt(&mut config.provider.base_url, provider.base_url);
+            if provider.api_key.is_some() {
+                config.provider.api_key = provider.api_key.filter(|v| !v.is_empty());
             }
             apply_opt(
-                &mut config.upstream.connect_timeout_secs,
-                upstream.connect_timeout_secs,
+                &mut config.provider.connect_timeout_secs,
+                provider.connect_timeout_secs,
             );
             apply_opt(
-                &mut config.upstream.request_timeout_secs,
-                upstream.request_timeout_secs,
+                &mut config.provider.request_timeout_secs,
+                provider.request_timeout_secs,
             );
-            apply_opt(&mut config.upstream.max_body_bytes, upstream.max_body_bytes);
+            apply_opt(&mut config.provider.max_body_bytes, provider.max_body_bytes);
             apply_opt(
-                &mut config.upstream.forward_client_authorization,
-                upstream.forward_client_authorization,
+                &mut config.provider.forward_client_authorization,
+                provider.forward_client_authorization,
             );
         }
 
@@ -403,7 +408,7 @@ mod tests {
         let mut config = ResolvedConfig::default();
         doc.apply(&mut config, None).unwrap();
         assert_eq!(config.server.port, 8080);
-        assert_eq!(config.upstream.base_url, "http://127.0.0.1:11434");
+        assert_eq!(config.provider.base_url, "http://127.0.0.1:11434");
     }
 
     #[test]
@@ -413,7 +418,7 @@ server:
   host: 127.0.0.1
   port: 9090
   metrics_endpoint: false
-upstream:
+provider:
   base_url: https://api.openai.com
   request_timeout_secs: 120
 redaction:
@@ -438,8 +443,8 @@ telemetry:
         assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 9090);
         assert!(!config.server.metrics_endpoint);
-        assert_eq!(config.upstream.base_url, "https://api.openai.com");
-        assert_eq!(config.upstream.request_timeout_secs, 120);
+        assert_eq!(config.provider.base_url, "https://api.openai.com");
+        assert_eq!(config.provider.request_timeout_secs, 120);
         assert_eq!(config.redaction.stream_mode, StreamMode::Incremental);
         assert_eq!(config.redaction.stream_holdback_bytes, 64);
         assert_eq!(config.vault.backend, VaultBackend::Memory);
@@ -449,6 +454,16 @@ telemetry:
         assert_eq!(config.audit.export, AuditExport::Stdout);
         assert_eq!(config.telemetry.operations, TraceLevel::Detailed);
         assert!(config.telemetry.genai_attributes);
+    }
+
+    #[test]
+    fn the_legacy_upstream_key_still_loads() {
+        let doc =
+            GatewayDocument::from_yaml("upstream:\n  base_url: https://example.com\n", "test")
+                .unwrap();
+        let mut config = ResolvedConfig::default();
+        doc.apply(&mut config, None).unwrap();
+        assert_eq!(config.provider.base_url, "https://example.com");
     }
 
     #[test]

@@ -213,8 +213,8 @@ impl AuditSink for OtlpSink {
         if let Some(digest) = &event.content_sha256 {
             attrs.push(("content_sha256".into(), digest.clone().into()));
         }
-        if let Some(status) = event.upstream_status {
-            attrs.push(("upstream_status".into(), AnyValue::Int(i64::from(status))));
+        if let Some(status) = event.provider_status {
+            attrs.push(("provider_status".into(), AnyValue::Int(i64::from(status))));
         }
         if let Some(err) = &event.error_type {
             attrs.push((semconv::ERROR_TYPE.into(), err.clone().into()));

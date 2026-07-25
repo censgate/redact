@@ -19,11 +19,11 @@ Further reading:
 
 ## Quick start
 
-Requires an OpenAI-compatible upstream. The default is Ollama at `http://127.0.0.1:11434`.
+Requires an OpenAI-compatible provider. The default is Ollama at `http://127.0.0.1:11434`.
 
 ```bash
 # From the repository root
-cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
+cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
 
 # Health probe (no authentication)
 curl -s http://127.0.0.1:8080/health
@@ -37,7 +37,7 @@ curl -s http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-With the bundled `default` profile, the upstream receives `Email me at [EMAIL_ADDRESS]`. The JSON response includes the provider's answer (also scanned) plus response headers such as:
+With the bundled `default` profile, the provider receives `Email me at [EMAIL_ADDRESS]`. The JSON response includes the provider's answer (also scanned) plus response headers such as:
 
 | Header | Meaning |
 |--------|---------|
@@ -67,7 +67,7 @@ Middleware order on the model surfaces is authenticate, evaluate policy, redact,
 2. Select a policy profile (credential claim wins over `x-censgate-profile`).
 3. Detect entities with `redact-core` and apply per-entity actions.
 4. Persist newly minted sealed token mappings when a token map backend is configured.
-5. Forward the rewritten body to the upstream provider.
+5. Forward the rewritten body to the provider.
 
 **Inbound (provider → application)**
 
@@ -115,7 +115,7 @@ export CENSGATE_VAULT_BACKEND=memory
 export CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
 export CENSGATE_DEFAULT_PROFILE=reversible
 
-cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
+cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
 
 curl -s http://127.0.0.1:8080/v1/chat/completions \
   -H 'content-type: application/json' \
@@ -163,14 +163,15 @@ Every gateway knob uses the `CENSGATE_` prefix. Legacy unprefixed names remain a
 | `CENSGATE_DEFAULT_PROFILE` | `default` | Default profile name |
 | `CENSGATE_HOST` / `HOST` | `0.0.0.0` | Bind address |
 | `CENSGATE_PORT` / `PORT` | `8080` | Bind port |
-| `CENSGATE_BACKEND_URL` / `BACKEND_URL` | `http://127.0.0.1:11434` | Upstream base URL |
-| `CENSGATE_BACKEND_API_KEY` / `BACKEND_API_KEY` / `OPENAI_API_KEY` | unset | Upstream bearer token |
-| `CENSGATE_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward caller `Authorization` upstream |
+| `CENSGATE_PROVIDER_NAME` | `openai` | Provider identity reported as `gen_ai.provider.name` |
+| `CENSGATE_PROVIDER_BASE_URL` | `http://127.0.0.1:11434` | Provider base URL (aliases: `CENSGATE_BACKEND_URL`, `BACKEND_URL`) |
+| `CENSGATE_PROVIDER_API_KEY` | unset | Provider bearer token (aliases: `CENSGATE_BACKEND_API_KEY`, `BACKEND_API_KEY`, `OPENAI_API_KEY`) |
+| `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
 | `CENSGATE_ENABLE_TRACING` / `ENABLE_TRACING` | `true` | HTTP request tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
-| `CENSGATE_CONNECT_TIMEOUT_SECS` / `CONNECT_TIMEOUT_SECS` | `10` | Upstream connect timeout |
-| `CENSGATE_REQUEST_TIMEOUT_SECS` / `REQUEST_TIMEOUT_SECS` | `600` | Upstream request timeout |
-| `CENSGATE_MAX_UPSTREAM_BODY_BYTES` / `MAX_UPSTREAM_BODY_BYTES` | `33554432` | Cap on buffered upstream bodies |
+| `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout (aliases: `CENSGATE_CONNECT_TIMEOUT_SECS`, `CONNECT_TIMEOUT_SECS`) |
+| `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout (aliases: `CENSGATE_REQUEST_TIMEOUT_SECS`, `REQUEST_TIMEOUT_SECS`) |
+| `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Cap on buffered provider response bodies (aliases: `CENSGATE_MAX_UPSTREAM_BODY_BYTES`, `MAX_UPSTREAM_BODY_BYTES`) |
 | `CENSGATE_STREAM_MODE` | `buffered` | `buffered` or `incremental` |
 | `CENSGATE_STREAM_HOLDBACK_BYTES` | `256` | Hold-back window in incremental mode |
 | `CENSGATE_SESSION_HEADER` | `x-censgate-session-id` | Session id header |
@@ -212,7 +213,7 @@ Documents use `deny_unknown_fields`. Unknown keys fail startup. Sections:
 
 ```yaml
 server:      # host, port, enable_http_trace, metrics_endpoint
-upstream:    # base_url, api_key, timeouts, max_body_bytes, forward_client_authorization
+provider:    # name, base_url, api_key, timeouts, max_body_bytes, forward_client_authorization
 redaction:   # stream_mode, stream_holdback_bytes, session_header, profile_header, allow_profile_header
 packs:       # paths, disable_builtin
 vault:       # backend, address, token, mount, path_prefix, namespace, ttl_secs, data_encryption_key
@@ -223,7 +224,7 @@ policy:      # inline PolicySet  — mutually exclusive with policy_file
 policy_file: # path relative to this document
 ```
 
-CLI flags (`--config`, `--backend-url`, `--profile`, …) are applied through the same environment overlay, so precedence matches library loading. Subcommands: `serve` (default), `validate-config`, `print-config`, `print-policy`. On Unix, `SIGHUP` reloads configuration; a failed reload keeps the last good snapshot.
+CLI flags (`--config`, `--provider-base-url`, `--profile`, …) are applied through the same environment overlay, so precedence matches library loading. Subcommands: `serve` (default), `validate-config`, `print-config`, `print-policy`. On Unix, `SIGHUP` reloads configuration; a failed reload keeps the last good snapshot.
 
 ## Library usage
 
@@ -250,7 +251,13 @@ These are present-tense boundaries of the OSS runtime. Closing each gap is an op
 | Ephemeral sealing key | Without `CENSGATE_TOKEN_DEK`, the process generates an ephemeral key; tokens cannot be restored after a restart or by another replica. |
 | Auth mode `none` | Inbound authentication is off by default and is only appropriate on a trusted network. Enable `api_key` or `oidc` before exposing the gateway on an untrusted edge. |
 | Fail-closed profiles | When `fail_closed` is true, token-map or tokenization failures reject the request instead of forwarding unredacted content. Keep this enabled for production profiles. |
-| Buffered streaming default | Buffered mode sees the full upstream stream before redacting, so entities cannot hide in a token split. Incremental mode trades that guarantee for lower time-to-first-token within a hold-back window. |
+| Buffered streaming default | Buffered mode sees the full provider stream before redacting, so entities cannot hide in a token split. Incremental mode trades that guarantee for lower time-to-first-token within a hold-back window. |
+
+## Design notes
+
+**Why the provider client is hand-rolled.** The gateway talks to providers through a thin `reqwest` wrapper over `serde_json::Value` rather than one of the Rust LLM client crates. A proxy must return the provider's response with only the spans it redacted changed, and typed clients deserialize into fixed structs that silently drop fields they do not model — which would discard provider extensions and anything the wire format gains next. Working on `Value` keeps unknown fields intact, and owning the transport keeps raw byte access for incremental streaming, response size caps, and verbatim provider error bodies. See [`src/proxy.rs`](src/proxy.rs).
+
+**Why "provider".** The inference destination is a *provider*; *inference* is the operation performed against it; *backend* refers only to token map storage. This lines up with the OpenTelemetry GenAI conventions the gateway emits, and [`docs/gateway/telemetry.md`](../../docs/gateway/telemetry.md#vocabulary-gen_ai-provider-inference-backend) sets out the full vocabulary.
 
 ## Features
 

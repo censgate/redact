@@ -61,10 +61,10 @@ pub fn finish_http_server(span: &Span, status_code: u16, error_type: Option<&str
     }
 }
 
-/// HTTP client span for upstream calls (SpanKind Client).
+/// HTTP client span for provider calls (SpanKind Client).
 pub fn http_client(method: &str, server_address: &str, server_port: u16) -> Span {
     tracing::info_span!(
-        target: semconv::target::UPSTREAM,
+        target: semconv::target::PROVIDER,
         "http.client",
         otel.kind = "client",
         { semconv::HTTP_REQUEST_METHOD } = method,
@@ -293,15 +293,17 @@ pub fn finish_restore(
     }
 }
 
-/// Optional GenAI attributes attached to upstream spans when enabled.
+/// Optional GenAI attributes attached to provider spans when enabled.
 #[derive(Debug, Clone, Default)]
 pub struct GenAiAttrs {
     /// `gen_ai.operation.name`
     pub operation_name: Option<&'static str>,
     /// `gen_ai.provider.name`
-    pub provider_name: Option<&'static str>,
+    pub provider_name: Option<String>,
     /// `gen_ai.request.model`
     pub request_model: Option<String>,
+    /// `gen_ai.request.stream`
+    pub request_stream: Option<bool>,
     /// `gen_ai.response.model`
     pub response_model: Option<String>,
     /// `gen_ai.usage.input_tokens`
@@ -312,10 +314,10 @@ pub struct GenAiAttrs {
     pub finish_reasons: Option<String>,
 }
 
-/// `redact.gateway.upstream.chat` (SpanKind Client).
+/// `redact.gateway.provider.chat` (SpanKind Client).
 ///
 /// GenAI attributes are attached only when `emit_genai` is `true`.
-pub fn upstream_chat(
+pub fn provider_chat(
     level: TraceLevel,
     method: &str,
     server_address: &str,
@@ -327,8 +329,8 @@ pub fn upstream_chat(
         return None;
     }
     let span = tracing::info_span!(
-        target: semconv::target::UPSTREAM,
-        { semconv::span_name::UPSTREAM_CHAT },
+        target: semconv::target::PROVIDER,
+        { semconv::span_name::PROVIDER_CHAT },
         otel.kind = "client",
         { semconv::HTTP_REQUEST_METHOD } = method,
         { semconv::SERVER_ADDRESS } = server_address,
@@ -337,6 +339,7 @@ pub fn upstream_chat(
         { semconv::GEN_AI_OPERATION_NAME } = tracing::field::Empty,
         { semconv::GEN_AI_PROVIDER_NAME } = tracing::field::Empty,
         { semconv::GEN_AI_REQUEST_MODEL } = tracing::field::Empty,
+        { semconv::GEN_AI_REQUEST_STREAM } = tracing::field::Empty,
         { semconv::GEN_AI_RESPONSE_MODEL } = tracing::field::Empty,
         { semconv::GEN_AI_USAGE_INPUT_TOKENS } = tracing::field::Empty,
         { semconv::GEN_AI_USAGE_OUTPUT_TOKENS } = tracing::field::Empty,
@@ -349,11 +352,14 @@ pub fn upstream_chat(
         if let Some(op) = genai.operation_name {
             span.record(semconv::GEN_AI_OPERATION_NAME, op);
         }
-        if let Some(provider) = genai.provider_name {
+        if let Some(provider) = genai.provider_name.as_deref() {
             span.record(semconv::GEN_AI_PROVIDER_NAME, provider);
         }
         if let Some(model) = genai.request_model.as_deref() {
             span.record(semconv::GEN_AI_REQUEST_MODEL, model);
+        }
+        if let Some(stream) = genai.request_stream {
+            span.record(semconv::GEN_AI_REQUEST_STREAM, stream);
         }
         if level.is_detailed() {
             if let Some(model) = genai.response_model.as_deref() {
@@ -373,8 +379,8 @@ pub fn upstream_chat(
     Some(span)
 }
 
-/// Record upstream response status / GenAI response fields.
-pub fn finish_upstream_chat(
+/// Record provider response status and GenAI response fields.
+pub fn finish_provider_chat(
     span: &Span,
     status_code: Option<u16>,
     emit_genai: bool,

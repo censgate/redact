@@ -322,7 +322,7 @@ impl HoldbackBuffer {
 
 /// State carried across polls of an incremental stream.
 struct IncrementalState {
-    upstream: crate::proxy::UpstreamByteStream,
+    body: crate::proxy::ProviderByteStream,
     parser: SseParser,
     holdback: HoldbackBuffer,
     engine: std::sync::Arc<redact_core::AnalyzerEngine>,
@@ -335,7 +335,7 @@ struct IncrementalState {
     finish_reason: Option<String>,
     ready: std::collections::VecDeque<String>,
     role_sent: bool,
-    upstream_done: bool,
+    provider_finished: bool,
     completed: bool,
 }
 
@@ -343,7 +343,7 @@ impl IncrementalState {
     /// Handle one decoded upstream frame.
     fn absorb(&mut self, payload: &str) {
         if payload == "[DONE]" {
-            self.upstream_done = true;
+            self.provider_finished = true;
             return;
         }
         let Ok(chunk) = serde_json::from_str::<Value>(payload) else {
@@ -479,7 +479,7 @@ fn split_trailing_open_bracket(text: &str, limit: usize) -> (&str, &str) {
 /// redaction totals, which are only complete once the stream has finished.
 #[allow(clippy::too_many_arguments)]
 pub fn incremental_response(
-    upstream: crate::proxy::UpstreamByteStream,
+    body: crate::proxy::ProviderByteStream,
     engine: std::sync::Arc<redact_core::AnalyzerEngine>,
     profile: std::sync::Arc<crate::policy::Profile>,
     lookup: std::collections::HashMap<String, String>,
@@ -496,7 +496,7 @@ pub fn incremental_response(
         crate::redact::RedactionOutcome::default(),
     ));
     let state = IncrementalState {
-        upstream,
+        body,
         parser: SseParser::new(),
         holdback: HoldbackBuffer::new(holdback_bytes),
         engine,
@@ -509,7 +509,7 @@ pub fn incremental_response(
         finish_reason: None,
         ready: std::collections::VecDeque::new(),
         role_sent: false,
-        upstream_done: false,
+        provider_finished: false,
         completed: false,
     };
 
@@ -521,12 +521,12 @@ pub fn incremental_response(
             if state.completed {
                 return None;
             }
-            if state.upstream_done {
+            if state.provider_finished {
                 state.finish();
                 continue;
             }
 
-            match state.upstream.next().await {
+            match state.body.next().await {
                 Some(Ok(bytes)) => {
                     let text = String::from_utf8_lossy(&bytes).into_owned();
                     for payload in state.parser.push(&text) {

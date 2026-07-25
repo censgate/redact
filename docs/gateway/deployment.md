@@ -16,8 +16,8 @@ The image is distroless (`gcr.io/distroless/cc-debian12`), runs as UID `65532`, 
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -e CENSGATE_BACKEND_URL=http://host.docker.internal:11434 \
-  -e CENSGATE_BACKEND_API_KEY \
+  -e CENSGATE_PROVIDER_BASE_URL=http://host.docker.internal:11434 \
+  -e CENSGATE_PROVIDER_API_KEY \
   -e CENSGATE_AUTH_MODE=api_key \
   -e CENSGATE_API_KEYS=dev-key \
   -e CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)" \
@@ -40,7 +40,7 @@ CENSGATE_VAULT_BACKEND=vault_kv2 \
 
 # Point at a hosted OpenAI-compatible provider
 BACKEND_URL=https://api.openai.com \
-CENSGATE_BACKEND_API_KEY=sk-… \
+CENSGATE_PROVIDER_API_KEY=sk-… \
   docker compose -f docker-compose.gateway.yml up --build
 ```
 
@@ -60,7 +60,7 @@ Manifests: [`deploy/kubernetes/redact-gateway.yaml`](../../deploy/kubernetes/red
 ```bash
 # Create secrets (do not commit real values)
 kubectl create secret generic redact-gateway-secrets \
-  --from-literal=CENSGATE_BACKEND_API_KEY='…' \
+  --from-literal=CENSGATE_PROVIDER_API_KEY='…' \
   --from-literal=CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
 
 kubectl apply -f deploy/kubernetes/redact-gateway.yaml
@@ -84,7 +84,7 @@ The Deployment:
 | Shared token map | Use `vault_kv2` (Vault or OpenBao) for multi-replica deployments. The `memory` backend is process-local. |
 | Fail-closed profiles | Keep `fail_closed: true` on production profiles so dependency failures reject rather than forward unprotected content. |
 | Audit sink | Set `CENSGATE_AUDIT_EXPORT` to `otlp` (preferred) or `file`, and retain records in a collector / object store with your retention policy. |
-| Resource limits | Set CPU/memory requests and limits (the sample Deployment uses 100m–2 CPU and 256Mi–1Gi as a starting point). Cap bodies with `CENSGATE_MAX_UPSTREAM_BODY_BYTES`. |
+| Resource limits | Set CPU/memory requests and limits (the sample Deployment uses 100m–2 CPU and 256Mi–1Gi as a starting point). Cap bodies with `CENSGATE_PROVIDER_MAX_BODY_BYTES`. |
 | Upstream TLS | Prefer `https://` upstream URLs. Inject provider keys via secrets, not ConfigMaps. |
 | Profile selection | When profiles come from JWT claims, set `allow_profile_header: false`. |
 | Metrics / health | Leave `/livez` and `/readyz` unauthenticated (they already are). Protect `/metrics` at the network layer if scrape labels are sensitive in your environment. |

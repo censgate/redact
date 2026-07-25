@@ -22,7 +22,7 @@ data:
       metrics_endpoint: true
       enable_http_trace: true
     upstream:
-      # Override via Secret / env in real deployments (CENSGATE_BACKEND_URL).
+      # Override via Secret / env in real deployments (CENSGATE_PROVIDER_BASE_URL).
       base_url: http://ollama.default.svc.cluster.local:11434
     redaction:
       stream_mode: buffered
@@ -46,7 +46,7 @@ data:
 # Template for secrets. DO NOT commit real values.
 # Create with:
 #   kubectl create secret generic redact-gateway-secrets \
-#     --from-literal=CENSGATE_BACKEND_API_KEY='...' \
+#     --from-literal=CENSGATE_PROVIDER_API_KEY='...' \
 #     --from-literal=CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
 apiVersion: v1
 kind: Secret
@@ -57,7 +57,7 @@ metadata:
 type: Opaque
 stringData:
   # Bearer token sent to the upstream OpenAI-compatible provider.
-  CENSGATE_BACKEND_API_KEY: "replace-me"
+  CENSGATE_PROVIDER_API_KEY: "replace-me"
   # Base64-encoded 32-byte key used to seal reversible token mappings.
   # Required when vault.backend is memory or vault_kv2 and profiles tokenize.
   CENSGATE_TOKEN_DEK: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -110,11 +110,11 @@ spec:
               value: http://otel-collector:4317
             - name: OTEL_EXPORTER_OTLP_PROTOCOL
               value: grpc
-            - name: CENSGATE_BACKEND_API_KEY
+            - name: CENSGATE_PROVIDER_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: redact-gateway-secrets
-                  key: CENSGATE_BACKEND_API_KEY
+                  key: CENSGATE_PROVIDER_API_KEY
             - name: CENSGATE_TOKEN_DEK
               valueFrom:
                 secretKeyRef:

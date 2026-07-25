@@ -4,11 +4,18 @@
 
 //! Environment variable names and the overlay that applies them.
 //!
-//! Every gateway knob uses the `CENSGATE_` prefix. Earlier unprefixed names
+//! Every gateway knob uses the `CENSGATE_` prefix. Earlier names
 //! (`HOST`, `PORT`, `BACKEND_URL`, …) remain accepted so existing deployments
-//! keep working. Telemetry transport is deliberately absent here: exporters,
-//! endpoints, protocol, sampling and resource attributes are configured with
-//! the standard `OTEL_*` variables defined by the OpenTelemetry specification.
+//! keep working; where a variable was renamed, the older spelling is listed as
+//! an alias beside it. Telemetry transport is deliberately absent here:
+//! exporters, endpoints, protocol, sampling and resource attributes are
+//! configured with the standard `OTEL_*` variables defined by the
+//! OpenTelemetry specification.
+//!
+//! The inference destination is called the *provider* throughout, matching the
+//! vocabulary of the OpenTelemetry GenAI conventions this gateway emits
+//! (`gen_ai.provider.name`). "Backend" is reserved for the token map storage
+//! backend, which is a different thing.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -32,22 +39,24 @@ pub const DEFAULT_PROFILE: &str = "CENSGATE_DEFAULT_PROFILE";
 pub const HOST: &str = "CENSGATE_HOST";
 /// Bind port.
 pub const PORT: &str = "CENSGATE_PORT";
-/// Upstream base URL.
-pub const BACKEND_URL: &str = "CENSGATE_BACKEND_URL";
-/// Upstream bearer token.
-pub const BACKEND_API_KEY: &str = "CENSGATE_BACKEND_API_KEY";
-/// Forward the caller's `Authorization` header upstream.
-pub const FORWARD_CLIENT_AUTH: &str = "CENSGATE_FORWARD_CLIENT_AUTHORIZATION";
+/// Provider identity reported as `gen_ai.provider.name`.
+pub const PROVIDER_NAME: &str = "CENSGATE_PROVIDER_NAME";
+/// Base URL of the inference provider.
+pub const PROVIDER_BASE_URL: &str = "CENSGATE_PROVIDER_BASE_URL";
+/// Bearer token sent to the provider.
+pub const PROVIDER_API_KEY: &str = "CENSGATE_PROVIDER_API_KEY";
+/// Forward the caller's `Authorization` header to the provider.
+pub const FORWARD_CLIENT_AUTH: &str = "CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION";
 /// Emit HTTP request tracing.
 pub const ENABLE_TRACING: &str = "CENSGATE_ENABLE_TRACING";
 /// Serve the pull-based metrics endpoint.
 pub const METRICS_ENDPOINT: &str = "CENSGATE_METRICS_ENDPOINT";
-/// Upstream connect timeout in seconds.
-pub const CONNECT_TIMEOUT_SECS: &str = "CENSGATE_CONNECT_TIMEOUT_SECS";
-/// Upstream request timeout in seconds.
-pub const REQUEST_TIMEOUT_SECS: &str = "CENSGATE_REQUEST_TIMEOUT_SECS";
-/// Cap on buffered upstream bodies.
-pub const MAX_UPSTREAM_BODY_BYTES: &str = "CENSGATE_MAX_UPSTREAM_BODY_BYTES";
+/// Connect timeout for provider requests, in seconds.
+pub const CONNECT_TIMEOUT_SECS: &str = "CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS";
+/// Overall timeout for provider requests, in seconds.
+pub const REQUEST_TIMEOUT_SECS: &str = "CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS";
+/// Cap on buffered provider response bodies.
+pub const MAX_BODY_BYTES: &str = "CENSGATE_PROVIDER_MAX_BODY_BYTES";
 /// Streaming redaction mode.
 pub const STREAM_MODE: &str = "CENSGATE_STREAM_MODE";
 /// Bytes held back in incremental streaming mode.
@@ -223,23 +232,43 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
         config.server.metrics_endpoint = parse_bool(METRICS_ENDPOINT, &value)?;
     }
 
-    if let Some(value) = first(&[BACKEND_URL, "BACKEND_URL"]) {
-        config.upstream.base_url = value;
+    if let Some(value) = first(&[PROVIDER_NAME]) {
+        config.provider.name = value;
     }
-    if let Some(value) = first(&[BACKEND_API_KEY, "BACKEND_API_KEY", "OPENAI_API_KEY"]) {
-        config.upstream.api_key = Some(value);
+    if let Some(value) = first(&[PROVIDER_BASE_URL, "CENSGATE_BACKEND_URL", "BACKEND_URL"]) {
+        config.provider.base_url = value;
     }
-    if let Some(value) = first(&[FORWARD_CLIENT_AUTH]) {
-        config.upstream.forward_client_authorization = parse_bool(FORWARD_CLIENT_AUTH, &value)?;
+    if let Some(value) = first(&[
+        PROVIDER_API_KEY,
+        "CENSGATE_BACKEND_API_KEY",
+        "BACKEND_API_KEY",
+        "OPENAI_API_KEY",
+    ]) {
+        config.provider.api_key = Some(value);
     }
-    if let Some(value) = first(&[CONNECT_TIMEOUT_SECS, "CONNECT_TIMEOUT_SECS"]) {
-        config.upstream.connect_timeout_secs = parse(CONNECT_TIMEOUT_SECS, &value)?;
+    if let Some(value) = first(&[FORWARD_CLIENT_AUTH, "CENSGATE_FORWARD_CLIENT_AUTHORIZATION"]) {
+        config.provider.forward_client_authorization = parse_bool(FORWARD_CLIENT_AUTH, &value)?;
     }
-    if let Some(value) = first(&[REQUEST_TIMEOUT_SECS, "REQUEST_TIMEOUT_SECS"]) {
-        config.upstream.request_timeout_secs = parse(REQUEST_TIMEOUT_SECS, &value)?;
+    if let Some(value) = first(&[
+        CONNECT_TIMEOUT_SECS,
+        "CENSGATE_CONNECT_TIMEOUT_SECS",
+        "CONNECT_TIMEOUT_SECS",
+    ]) {
+        config.provider.connect_timeout_secs = parse(CONNECT_TIMEOUT_SECS, &value)?;
     }
-    if let Some(value) = first(&[MAX_UPSTREAM_BODY_BYTES, "MAX_UPSTREAM_BODY_BYTES"]) {
-        config.upstream.max_body_bytes = parse(MAX_UPSTREAM_BODY_BYTES, &value)?;
+    if let Some(value) = first(&[
+        REQUEST_TIMEOUT_SECS,
+        "CENSGATE_REQUEST_TIMEOUT_SECS",
+        "REQUEST_TIMEOUT_SECS",
+    ]) {
+        config.provider.request_timeout_secs = parse(REQUEST_TIMEOUT_SECS, &value)?;
+    }
+    if let Some(value) = first(&[
+        MAX_BODY_BYTES,
+        "CENSGATE_MAX_UPSTREAM_BODY_BYTES",
+        "MAX_UPSTREAM_BODY_BYTES",
+    ]) {
+        config.provider.max_body_bytes = parse(MAX_BODY_BYTES, &value)?;
     }
 
     if let Some(value) = first(&[STREAM_MODE]) {

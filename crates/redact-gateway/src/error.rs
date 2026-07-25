@@ -41,9 +41,9 @@ pub enum GatewayError {
     #[error("redaction failed: {0}")]
     Redaction(String),
 
-    /// The upstream model provider failed or was unreachable.
-    #[error("upstream error: {0}")]
-    Upstream(String),
+    /// The inference provider failed or was unreachable.
+    #[error("provider error: {0}")]
+    Provider(String),
 
     /// Any other unexpected failure.
     #[error("internal error: {0}")]
@@ -60,7 +60,7 @@ impl GatewayError {
             Self::PolicyBlocked(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::DependencyUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Redaction(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::Upstream(_) => StatusCode::BAD_GATEWAY,
+            Self::Provider(_) => StatusCode::BAD_GATEWAY,
         }
     }
 
@@ -73,7 +73,7 @@ impl GatewayError {
             Self::PolicyBlocked(_) => "policy_violation",
             Self::DependencyUnavailable(_) => "dependency_unavailable",
             Self::Redaction(_) => "redaction_error",
-            Self::Upstream(_) => "upstream_error",
+            Self::Provider(_) => "provider_error",
             Self::Internal(_) => "internal_error",
         }
     }
@@ -125,8 +125,8 @@ mod tests {
             "invalid_request_error"
         );
         assert_eq!(
-            GatewayError::Upstream("x".into()).error_type(),
-            "upstream_error"
+            GatewayError::Provider("x".into()).error_type(),
+            "provider_error"
         );
     }
 }

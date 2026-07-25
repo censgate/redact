@@ -7,7 +7,7 @@
 #   docker compose -f docker-compose.gateway.yml --profile vault up --build
 #
 # Override the upstream provider (default is the Ollama service below):
-#   BACKEND_URL=https://api.openai.com CENSGATE_BACKEND_API_KEY=sk-... \
+#   BACKEND_URL=https://api.openai.com CENSGATE_PROVIDER_API_KEY=sk-... \
 #     docker compose -f docker-compose.gateway.yml up --build
 
 services:
@@ -20,8 +20,8 @@ services:
       - "8080:8080"
     environment:
       # Prefer CENSGATE_* names; BACKEND_URL is accepted as a legacy alias.
-      CENSGATE_BACKEND_URL: ${BACKEND_URL:-http://ollama:11434}
-      CENSGATE_BACKEND_API_KEY: ${CENSGATE_BACKEND_API_KEY:-}
+      CENSGATE_PROVIDER_BASE_URL: ${BACKEND_URL:-http://ollama:11434}
+      CENSGATE_PROVIDER_API_KEY: ${CENSGATE_PROVIDER_API_KEY:-}
       CENSGATE_HOST: "0.0.0.0"
       CENSGATE_PORT: "8080"
       CENSGATE_PATTERN_PACKS: /app/patterns
@@ -52,7 +52,7 @@ services:
     # Distroless has no shell/curl, so there is no compose healthcheck here.
     # Probe http://localhost:8080/livez and /readyz from your host or orchestrator.
 
-  # Local OpenAI-compatible upstream (Ollama). Point CENSGATE_BACKEND_URL /
+  # Local OpenAI-compatible upstream (Ollama). Point CENSGATE_PROVIDER_BASE_URL /
   # BACKEND_URL elsewhere to use a hosted provider instead.
   ollama:
     image: ollama/ollama:latest

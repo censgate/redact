@@ -164,7 +164,7 @@ Load it:
 ```bash
 cargo run -p redact-gateway -- \
   --config crates/redact-gateway/examples/policy-healthcare.yaml \
-  --backend-url http://127.0.0.1:11434
+  --provider-base-url http://127.0.0.1:11434
 ```
 
 Or point `CENSGATE_POLICY_FILE` / `policy_file` at a standalone document. Inline `policy` and `policy_file` are mutually exclusive.
