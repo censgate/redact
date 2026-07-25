@@ -52,7 +52,7 @@ jobs:
         run: |
           VERSION=${{ env.VERSION }}
           sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" Cargo.toml
-          for f in crates/redact-ner/Cargo.toml crates/redact-api/Cargo.toml crates/redact-cli/Cargo.toml; do
+          for f in crates/redact-ner/Cargo.toml crates/redact-api/Cargo.toml crates/redact-cli/Cargo.toml crates/redact-gateway/Cargo.toml; do
             sed -i "s/\(redact-core = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$VERSION/" "$f"
             sed -i "s/\(redact-ner = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$VERSION/" "$f"
           done
