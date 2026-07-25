@@ -50,7 +50,7 @@ fn streamed_content(body: &str) -> String {
 #[tokio::test]
 async fn entities_split_across_deltas_are_still_redacted() {
     let upstream = mock_sse_upstream(split_email_sse()).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let mut request = chat_request("say the address");
     request["stream"] = json!(true);
@@ -69,7 +69,7 @@ async fn entities_split_across_deltas_are_still_redacted() {
 #[tokio::test]
 async fn prompts_are_redacted_on_the_streaming_path_too() {
     let upstream = mock_sse_upstream(split_email_sse()).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let mut request = chat_request("mail alice@example.com");
     request["stream"] = json!(true);
@@ -83,7 +83,7 @@ async fn prompts_are_redacted_on_the_streaming_path_too() {
 #[tokio::test]
 async fn upstream_metadata_is_preserved_on_the_rebuilt_stream() {
     let upstream = mock_sse_upstream(split_email_sse()).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let mut request = chat_request("hello");
     request["stream"] = json!(true);
@@ -124,7 +124,7 @@ async fn tokens_are_restored_in_streamed_answers() {
     };
     policy.normalize().unwrap();
     config.policy = Arc::new(policy);
-    let router = router_for(config);
+    let router = router_for(config).await;
 
     let mut request = chat_request("mail alice@example.com");
     request["stream"] = json!(true);
@@ -143,7 +143,7 @@ async fn tokens_are_restored_in_streamed_answers() {
 #[tokio::test]
 async fn a_blocked_prompt_never_opens_a_stream() {
     let upstream = mock_sse_upstream(split_email_sse()).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let mut request = chat_request("key AKIAIOSFODNN7EXAMPLE");
     request["stream"] = json!(true);

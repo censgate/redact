@@ -242,6 +242,27 @@ pub fn tokenmap_get(
     ))
 }
 
+/// Record the outcome of a token map operation.
+pub fn finish_tokenmap(span: &Span, entries: usize, error_type: Option<&str>) {
+    span.record(semconv::REDACT_TOKENMAP_ENTRIES, entries);
+    if let Some(err) = error_type {
+        record_error(span, err);
+    }
+}
+
+/// Attach the caller's propagated trace context as this span's parent.
+///
+/// Without this the gateway would start a new trace per request and an
+/// operator could not follow one call from the application through to the
+/// model provider.
+pub fn adopt_remote_parent(span: &Span, headers: &axum::http::HeaderMap) {
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let context = super::extract_context(headers);
+    // A malformed inbound `traceparent` must not fail the request; the span
+    // simply starts a new trace instead.
+    let _ = span.set_parent(context);
+}
+
 /// `redact.gateway.restore`.
 pub fn restore(level: TraceLevel) -> Option<Span> {
     if !level.records_operations() {

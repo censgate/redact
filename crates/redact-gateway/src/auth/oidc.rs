@@ -199,8 +199,8 @@ impl OidcAuthenticator {
     }
 
     fn validate_token(&self, token: &str, jwk: &Jwk) -> Result<TokenClaims, AuthError> {
-        let header = decode_header(token)
-            .map_err(|e| AuthError::Invalid(format!("jwt header: {e}")))?;
+        let header =
+            decode_header(token).map_err(|e| AuthError::Invalid(format!("jwt header: {e}")))?;
 
         if !SUPPORTED_ALGS.contains(&header.alg) {
             return Err(AuthError::Invalid(format!(
@@ -296,8 +296,8 @@ impl Authenticator for OidcAuthenticator {
         let token = bearer_token(headers).ok_or(AuthError::Missing)?;
 
         // Reject `alg: none` (and any other non-enumerable alg) before key lookup.
-        let header = decode_header(token)
-            .map_err(|e| AuthError::Invalid(format!("jwt header: {e}")))?;
+        let header =
+            decode_header(token).map_err(|e| AuthError::Invalid(format!("jwt header: {e}")))?;
         if !SUPPORTED_ALGS.contains(&header.alg) {
             return Err(AuthError::Invalid(format!(
                 "unsupported jwt algorithm {:?}",
@@ -322,10 +322,9 @@ impl Authenticator for OidcAuthenticator {
 
 fn ensure_alg_matches_key(alg: Algorithm, jwk: &Jwk) -> Result<(), AuthError> {
     let key_family_ok = match &jwk.algorithm {
-        AlgorithmParameters::RSA(_) => matches!(
-            alg,
-            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512
-        ),
+        AlgorithmParameters::RSA(_) => {
+            matches!(alg, Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512)
+        }
         AlgorithmParameters::EllipticCurve(_) => {
             matches!(alg, Algorithm::ES256 | Algorithm::ES384)
         }

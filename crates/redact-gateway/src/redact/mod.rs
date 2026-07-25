@@ -233,6 +233,52 @@ impl<'a> RedactionContext<'a> {
         Ok(redacted)
     }
 
+    /// Redact the part of `text` that is safe to emit while a stream is still open.
+    ///
+    /// Returns the redacted prefix plus the tail that must be retained. The cut
+    /// point starts at `text.len() - holdback` and moves back so it never falls
+    /// inside a detected entity. Because an entity that is still arriving is by
+    /// definition at the end of the buffer, this makes detection reliable for
+    /// any entity shorter than `holdback`; longer ones need the buffered mode.
+    pub fn redact_prefix(
+        &mut self,
+        text: &str,
+        holdback: usize,
+    ) -> Result<(String, String), RedactError> {
+        if text.len() <= holdback {
+            return Ok((String::new(), text.to_string()));
+        }
+
+        let analysis = self
+            .engine
+            .analyze(text, None)
+            .map_err(|e| RedactError::Detection(e.to_string()))?;
+
+        let mut cut = text.len() - holdback;
+        // Never split a detected entity: move the cut back to its start.
+        loop {
+            match analysis
+                .detected_entities
+                .iter()
+                .filter(|entity| entity.start < cut && entity.end > cut)
+                .map(|entity| entity.start)
+                .min()
+            {
+                Some(start) if start < cut => cut = start,
+                _ => break,
+            }
+        }
+        while cut > 0 && !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if cut == 0 {
+            return Ok((String::new(), text.to_string()));
+        }
+
+        let head = self.redact(&text[..cut])?;
+        Ok((head, text[cut..].to_string()))
+    }
+
     /// Consume the context and return what it did.
     pub fn finish(self) -> RedactionOutcome {
         self.outcome

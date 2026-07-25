@@ -153,19 +153,36 @@ pub fn config_for(upstream: &MockUpstream) -> ResolvedConfig {
 }
 
 /// Build handler state for a configuration.
-pub fn state_for(config: ResolvedConfig) -> AppState {
+pub async fn state_for(config: ResolvedConfig) -> AppState {
     let upstream = UpstreamClient::from_settings(&config.upstream).unwrap();
+    let telemetry =
+        Arc::new(redact_gateway::telemetry::init(&config.telemetry).expect("telemetry"));
+    let audit = Arc::new(
+        redact_gateway::audit::build_dispatcher(&config.audit, telemetry.logger_provider())
+            .expect("audit"),
+    );
+    let tokens = redact_gateway::vault::build_store(&config.vault)
+        .await
+        .expect("token map");
+    let auth = redact_gateway::auth::build_authenticator(&config.auth)
+        .await
+        .expect("authenticator");
+
     AppState {
         config: ConfigHandle::new(config),
         engine: Arc::new(AnalyzerEngine::new()),
         upstream,
         dek: Arc::new(Dek::generate().unwrap()),
+        tokens,
+        auth,
+        audit,
+        telemetry,
     }
 }
 
 /// Build a router for a configuration.
-pub fn router_for(config: ResolvedConfig) -> Router {
-    create_router(state_for(config))
+pub async fn router_for(config: ResolvedConfig) -> Router {
+    create_router(state_for(config).await)
 }
 
 /// Result of driving the router once.

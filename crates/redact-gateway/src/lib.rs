@@ -18,16 +18,34 @@
 //! GatewayServer::new(config).await?.run().await
 //! # }
 //! ```
+//!
+//! # Subsystems
+//!
+//! | Module | Responsibility |
+//! |--------|----------------|
+//! | [`config`] | Resolved configuration from files, environment and flags |
+//! | [`policy`] | Per-entity actions and profiles |
+//! | [`packs`] | Pattern packs loaded from YAML at runtime |
+//! | [`redact`] | Detection, action application, tokens and payload traversal |
+//! | [`vault`] | Pluggable token map backends |
+//! | [`auth`] | Inbound API key and OIDC authentication |
+//! | [`telemetry`] | OpenTelemetry traces, metrics and logs |
+//! | [`audit`] | Audit records emitted as OpenTelemetry log records |
 
+pub mod audit;
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod openai;
+pub mod packs;
 pub mod policy;
 pub mod proxy;
 pub mod redact;
 pub mod routes;
 pub mod server;
 pub mod stream;
+pub mod telemetry;
+pub mod vault;
 
 pub use config::{ConfigError, ConfigHandle, ResolvedConfig};
 pub use error::GatewayError;

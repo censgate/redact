@@ -27,7 +27,7 @@ fn policy_with(profile: Profile) -> PolicySet {
 #[tokio::test]
 async fn prompts_are_redacted_before_they_reach_the_provider() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(
         router,
@@ -52,7 +52,7 @@ async fn prompts_are_redacted_before_they_reach_the_provider() {
 #[tokio::test]
 async fn model_answers_are_redacted_before_they_reach_the_caller() {
     let upstream = mock_json_upstream(chat_response("reply to bob@example.com")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(router, "/v1/chat/completions", chat_request("hello")).await;
 
@@ -67,7 +67,7 @@ async fn model_answers_are_redacted_before_they_reach_the_caller() {
 #[tokio::test]
 async fn blocked_entities_are_refused_and_never_forwarded() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(
         router,
@@ -98,7 +98,7 @@ async fn tokenized_values_are_restored_in_the_answer() {
         restore_responses: true,
         ..Profile::default()
     }));
-    let router = router_for(config);
+    let router = router_for(config).await;
 
     let response = post_json(
         router,
@@ -125,7 +125,7 @@ async fn tokenized_values_are_restored_in_the_answer() {
 #[tokio::test]
 async fn a_profile_can_be_selected_per_request() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json_with_headers(
         router,
@@ -147,7 +147,7 @@ async fn a_profile_can_be_selected_per_request() {
 #[tokio::test]
 async fn an_unknown_profile_is_rejected_rather_than_downgraded() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json_with_headers(
         router,
@@ -164,7 +164,7 @@ async fn an_unknown_profile_is_rejected_rather_than_downgraded() {
 #[tokio::test]
 async fn embeddings_input_is_redacted() {
     let upstream = mock_json_upstream(json!({"object": "list", "data": []})).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(
         router,
@@ -180,7 +180,7 @@ async fn embeddings_input_is_redacted() {
 #[tokio::test]
 async fn models_are_proxied_untouched() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = get_path(router, "/v1/models").await;
 
@@ -192,7 +192,7 @@ async fn models_are_proxied_untouched() {
 async fn an_unreachable_provider_is_reported_as_a_gateway_error() {
     let mut config = config_for(&mock_json_upstream(chat_response("ok")).await);
     config.upstream.base_url = "http://127.0.0.1:1".to_string();
-    let router = router_for(config);
+    let router = router_for(config).await;
 
     let response = post_json(router, "/v1/chat/completions", chat_request("hello")).await;
 
@@ -204,7 +204,7 @@ async fn an_unreachable_provider_is_reported_as_a_gateway_error() {
 async fn health_and_status_describe_the_active_policy() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let config = config_for(&upstream);
-    let router = router_for(config);
+    let router = router_for(config).await;
 
     let health = get_path(router.clone(), "/health").await;
     assert_eq!(health.status, StatusCode::OK);
@@ -220,7 +220,7 @@ async fn health_and_status_describe_the_active_policy() {
 #[tokio::test]
 async fn the_redact_endpoint_applies_policy_without_an_upstream_call() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(
         router,
@@ -238,7 +238,7 @@ async fn the_redact_endpoint_applies_policy_without_an_upstream_call() {
 #[tokio::test]
 async fn the_compliance_check_endpoint_reports_a_block_without_rewriting() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
-    let router = router_for(config_for(&upstream));
+    let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(
         router,

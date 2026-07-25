@@ -3,28 +3,40 @@
 // in the project root for license information.
 
 //! HTTP surface: OpenAI-compatible endpoints plus gateway utilities.
+//!
+//! Middleware order on the model surfaces is authenticate, then evaluate
+//! policy, redact, forward, restore, and finally emit an audit record. Health
+//! and metrics endpoints are deliberately outside the authentication layer so
+//! orchestrators can probe a gateway that rejects unauthenticated traffic.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
-use axum::extract::State;
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use redact_core::AnalyzerEngine;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tracing::{warn, Instrument};
 use uuid::Uuid;
 
-use crate::config::{ConfigHandle, ResolvedConfig};
+use crate::audit::{AuditContext, AuditDispatcher, AuditEvent, AuditOutcome};
+use crate::auth::{AuthContext, Authenticator};
+use crate::config::{ConfigHandle, ResolvedConfig, StreamMode};
 use crate::error::GatewayError;
 use crate::policy::Profile;
 use crate::proxy::UpstreamClient;
 use crate::redact::json as payload;
-use crate::redact::token::{Dek, RestoreOutcome, TokenSession};
+use crate::redact::token::{Dek, RestoreOutcome, TokenMapping, TokenSession};
 use crate::redact::{content_digest, RedactError, RedactionContext, RedactionOutcome};
-use crate::stream::{build_redacted_sse, extract_sse};
+use crate::stream::{build_redacted_sse_with_passthrough, extract_sse};
+use crate::telemetry::{semconv, spans, Telemetry};
+use crate::vault::TokenMapStore;
 
 /// Shared handler state.
 #[derive(Clone)]
@@ -37,6 +49,14 @@ pub struct AppState {
     pub upstream: UpstreamClient,
     /// Key used to seal reversible token mappings.
     pub dek: Arc<Dek>,
+    /// Token map backend.
+    pub tokens: Arc<dyn TokenMapStore>,
+    /// Inbound authenticator.
+    pub auth: Arc<dyn Authenticator>,
+    /// Audit record dispatcher.
+    pub audit: Arc<AuditDispatcher>,
+    /// Telemetry handles.
+    pub telemetry: Arc<Telemetry>,
 }
 
 impl AppState {
@@ -48,19 +68,111 @@ impl AppState {
 
 /// Build the gateway router.
 pub fn create_router(state: AppState) -> Router {
-    Router::new()
+    let public = Router::new()
         .route("/health", get(health))
         .route("/healthz", get(health))
         .route("/livez", get(live))
         .route("/readyz", get(ready))
+        .route("/metrics", get(metrics))
+        .with_state(state.clone());
+
+    let protected = Router::new()
         .route("/v1/chat/completions", post(chat_completions))
         .route("/v1/completions", post(completions))
         .route("/v1/embeddings", post(embeddings))
         .route("/v1/models", get(models))
         .route("/v1/redact", post(redact_endpoint))
+        .route("/v1/restore", post(restore_endpoint))
         .route("/v1/compliance/status", get(compliance_status))
         .route("/v1/compliance/check", post(compliance_check))
-        .with_state(state)
+        .layer(from_fn_with_state(state.clone(), authenticate))
+        .with_state(state.clone());
+
+    public
+        .merge(protected)
+        .layer(from_fn_with_state(state, observe))
+}
+
+/// Record OpenTelemetry server spans and metrics for every request.
+async fn observe(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let method = request.method().as_str().to_string();
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|matched| matched.as_str().to_string())
+        .unwrap_or_else(|| "/{unmatched}".to_string());
+    let scheme = request.uri().scheme_str().unwrap_or("http").to_string();
+
+    let span = spans::http_server(&method, &route, &scheme);
+    // Join the caller's trace when they propagated one.
+    spans::adopt_remote_parent(&span, request.headers());
+
+    let metrics = state.telemetry.metrics();
+    metrics.http_server_active_add(1, &method, &scheme);
+    let started = Instant::now();
+
+    let response = next.run(request).instrument(span.clone()).await;
+
+    let status = response.status();
+    let error_type = if status.is_client_error() || status.is_server_error() {
+        Some(status.as_str().to_string())
+    } else {
+        None
+    };
+    spans::finish_http_server(&span, status.as_u16(), error_type.as_deref());
+    metrics.record_http_server(
+        started.elapsed().as_secs_f64(),
+        &method,
+        &scheme,
+        &route,
+        status.as_u16(),
+        error_type.as_deref(),
+    );
+    metrics.http_server_active_add(-1, &method, &scheme);
+
+    let dropped = state.audit.dropped();
+    if dropped > 0 {
+        metrics.record_audit_dropped(dropped);
+    }
+
+    response
+}
+
+/// Authenticate the caller and attach an [`AuthContext`] to the request.
+async fn authenticate(State(state): State<AppState>, mut request: Request, next: Next) -> Response {
+    let config = state.config();
+    let level = config.telemetry.operations;
+    let span = spans::authenticate(level, state.auth.mode());
+
+    match state.auth.authenticate(request.headers()).await {
+        Ok(context) => {
+            if let Some(span) = &span {
+                spans::finish_authenticate(span, "allowed", None);
+            }
+            request.extensions_mut().insert(context);
+            next.run(request).await
+        }
+        Err(err) => {
+            let error: GatewayError = err.into();
+            if let Some(span) = &span {
+                spans::finish_authenticate(span, "denied", Some(error.telemetry_error_type()));
+            }
+            state.audit.emit(AuditEvent::from_outcome(
+                &RedactionOutcome::default(),
+                AuditContext {
+                    event_name: semconv::event::AUTH_DENIED,
+                    action: request.uri().path().to_string(),
+                    outcome: Some(AuditOutcome::Denied),
+                    profile: config.policy.default_profile.clone(),
+                    tenant: "unknown".to_string(),
+                    error_type: Some(error.telemetry_error_type().to_string()),
+                    include_entity_types: config.audit.include_entity_types,
+                    ..AuditContext::default()
+                },
+            ));
+            error.into_response()
+        }
+    }
 }
 
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
@@ -79,41 +191,145 @@ async fn live() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
 }
 
-async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+async fn ready(State(state): State<AppState>) -> Response {
     let config = state.config();
-    Json(json!({
-        "status": "ok",
+    let token_map_ready = state.tokens.health().await.is_ok();
+    let auth_ready = state.auth.ready().await;
+    let ready = token_map_ready && auth_ready;
+
+    let body = json!({
+        "status": if ready { "ok" } else { "degraded" },
         "upstream": config.upstream.base_url,
-        "token_map": config.vault.backend.as_str(),
-        "auth": config.auth.mode.as_str(),
-    }))
+        "token_map": {"backend": config.vault.backend.as_str(), "ready": token_map_ready},
+        "auth": {"mode": config.auth.mode.as_str(), "ready": auth_ready},
+        "audit": config.audit.export.as_str(),
+    });
+
+    let status = if ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(body)).into_response()
+}
+
+async fn metrics(State(state): State<AppState>) -> Response {
+    let config = state.config();
+    if !config.server.metrics_endpoint {
+        return (StatusCode::NOT_FOUND, "metrics endpoint is disabled").into_response();
+    }
+
+    match state.telemetry.prometheus_metrics() {
+        Some(rendered) => (
+            StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
+            rendered,
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "this build has no pull-based metrics exporter; export metrics over OTLP instead",
+        )
+            .into_response(),
+    }
 }
 
 /// Everything a request-scoped pipeline needs after policy selection.
 struct RequestScope {
+    config: Arc<ResolvedConfig>,
     profile: Arc<Profile>,
     session: TokenSession,
+    session_id: String,
+    tenant: String,
+    subject: Option<String>,
+    known_mappings: Vec<TokenMapping>,
     forwarded_auth: Option<String>,
-    upstream_headers: HeaderMap,
+    upstream_headers: reqwest::header::HeaderMap,
 }
 
 impl RequestScope {
-    fn build(state: &AppState, headers: &HeaderMap) -> Result<Self, GatewayError> {
+    async fn build(
+        state: &AppState,
+        headers: &HeaderMap,
+        auth: &AuthContext,
+    ) -> Result<Self, GatewayError> {
         let config = state.config();
 
-        let requested_profile = if config.redaction.allow_profile_header {
-            header_value(headers, &config.redaction.profile_header)
-        } else {
-            None
-        };
+        // A credential-supplied profile wins over the request header so a
+        // caller cannot widen the policy their credential was issued for.
+        let requested_profile = auth.profile.clone().or_else(|| {
+            if config.redaction.allow_profile_header {
+                header_value(headers, &config.redaction.profile_header)
+            } else {
+                None
+            }
+        });
         let profile = config
             .policy
             .profile(requested_profile.as_deref())
             .map_err(|e| GatewayError::InvalidRequest(e.to_string()))?;
 
-        let session_id = header_value(headers, &config.redaction.session_header)
+        let caller_session = header_value(headers, &config.redaction.session_header);
+        let session_id = caller_session
+            .clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let session = TokenSession::new(session_id, "default", state.dek.clone());
+        let tenant = auth.tenant.clone();
+
+        // Resume prior tokens only when the caller identified a session, so
+        // unrelated requests never share a token namespace.
+        let known_mappings = if caller_session.is_some() && state.tokens.backend_name() != "off" {
+            let span = spans::tokenmap_get(
+                config.telemetry.operations,
+                state.tokens.backend_name(),
+                0,
+                config.vault.address.as_deref(),
+                None,
+            );
+            match state.tokens.get(&tenant, &session_id).await {
+                Ok(mappings) => {
+                    if let Some(span) = &span {
+                        spans::finish_tokenmap(span, mappings.len(), None);
+                    }
+                    state.telemetry.metrics().record_tokenmap_operation(
+                        state.tokens.backend_name(),
+                        "get",
+                        0.0,
+                        None,
+                    );
+                    mappings
+                }
+                Err(err) => {
+                    if let Some(span) = &span {
+                        spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                    }
+                    state.telemetry.metrics().record_tokenmap_operation(
+                        state.tokens.backend_name(),
+                        "get",
+                        0.0,
+                        Some("token_map_error"),
+                    );
+                    if profile.fail_closed {
+                        return Err(GatewayError::DependencyUnavailable(format!(
+                            "token map is unavailable: {err}"
+                        )));
+                    }
+                    warn!(error = %err, "token map read failed; continuing without prior tokens");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        let session = TokenSession::resume(
+            session_id.clone(),
+            tenant.clone(),
+            state.dek.clone(),
+            known_mappings.clone(),
+        );
 
         let forwarded_auth = if config.upstream.forward_client_authorization {
             headers
@@ -124,12 +340,78 @@ impl RequestScope {
             None
         };
 
+        let mut upstream_headers = reqwest::header::HeaderMap::new();
+        crate::telemetry::inject_context(&mut upstream_headers);
+
         Ok(Self {
+            config,
             profile,
             session,
+            session_id,
+            tenant,
+            subject: auth.subject.clone(),
+            known_mappings,
             forwarded_auth,
-            upstream_headers: HeaderMap::new(),
+            upstream_headers,
         })
+    }
+
+    /// Persist newly minted mappings so a later request can restore them.
+    async fn persist_tokens(&mut self, state: &AppState) -> Result<(), GatewayError> {
+        let minted = self.session.take_new_mappings();
+        if minted.is_empty() || state.tokens.backend_name() == "off" {
+            self.known_mappings.extend(minted);
+            return Ok(());
+        }
+
+        let span = spans::tokenmap_put(
+            self.config.telemetry.operations,
+            state.tokens.backend_name(),
+            minted.len(),
+            self.config.vault.address.as_deref(),
+            None,
+        );
+        let started = Instant::now();
+        let result = state
+            .tokens
+            .put(&self.tenant, &self.session_id, &minted)
+            .await;
+        let elapsed = started.elapsed().as_secs_f64();
+
+        match result {
+            Ok(()) => {
+                if let Some(span) = &span {
+                    spans::finish_tokenmap(span, minted.len(), None);
+                }
+                state.telemetry.metrics().record_tokenmap_operation(
+                    state.tokens.backend_name(),
+                    "put",
+                    elapsed,
+                    None,
+                );
+                self.known_mappings.extend(minted);
+                Ok(())
+            }
+            Err(err) => {
+                if let Some(span) = &span {
+                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                }
+                state.telemetry.metrics().record_tokenmap_operation(
+                    state.tokens.backend_name(),
+                    "put",
+                    elapsed,
+                    Some("token_map_error"),
+                );
+                if self.profile.fail_closed {
+                    return Err(GatewayError::DependencyUnavailable(format!(
+                        "token map write failed: {err}"
+                    )));
+                }
+                warn!(error = %err, "token map write failed; tokens will not survive this request");
+                self.known_mappings.extend(minted);
+                Ok(())
+            }
+        }
     }
 
     /// Token lookup for restoring values in a response.
@@ -137,15 +419,29 @@ impl RequestScope {
         if !self.profile.restore_responses {
             return HashMap::new();
         }
-        self.session
-            .new_mappings()
+        self.known_mappings
             .iter()
+            .chain(self.session.new_mappings())
             .filter_map(|mapping| {
                 dek.open(&mapping.sealed_value)
                     .ok()
                     .map(|plaintext| (mapping.token.clone(), plaintext))
             })
             .collect()
+    }
+
+    fn audit_context(&self, event_name: &'static str, action: &str) -> AuditContext {
+        AuditContext {
+            event_name,
+            action: action.to_string(),
+            outcome: None,
+            profile: self.profile.name.clone(),
+            tenant: self.tenant.clone(),
+            session_id: Some(self.session_id.clone()),
+            subject: self.subject.clone(),
+            include_entity_types: self.config.audit.include_entity_types,
+            ..AuditContext::default()
+        }
     }
 }
 
@@ -174,12 +470,94 @@ fn blocked_error(outcome: &RedactionOutcome) -> GatewayError {
     ))
 }
 
+/// Run detection and policy over a request payload, recording telemetry.
+fn redact_request_payload(
+    state: &AppState,
+    scope: &mut RequestScope,
+    body: &mut Value,
+    embeddings: bool,
+) -> Result<RedactionOutcome, GatewayError> {
+    let level = scope.config.telemetry.operations;
+    let policy_span = spans::policy_evaluate(level, &scope.profile.name);
+    let detect_span = spans::detect(level, body.to_string().len());
+
+    let mut ctx = RedactionContext::with_session(&state.engine, &scope.profile, &mut scope.session);
+    let result = if embeddings {
+        payload::redact_embeddings_request(&mut ctx, body)
+    } else {
+        payload::redact_chat_request(&mut ctx, body)
+    };
+    let outcome = ctx.finish();
+
+    if let Some(span) = &detect_span {
+        spans::finish_detect(
+            span,
+            outcome.redactions_applied + outcome.allowed,
+            level,
+            result.as_ref().err().map(|_| "redaction_error"),
+        );
+    }
+    let decision = if outcome.is_blocked() {
+        "blocked"
+    } else if outcome.redactions_applied > 0 {
+        "redacted"
+    } else {
+        "allowed"
+    };
+    if let Some(span) = &policy_span {
+        spans::finish_policy_evaluate(span, decision, None);
+    }
+
+    let metrics = state.telemetry.metrics();
+    metrics.record_redaction_outcome(&outcome, &scope.profile.name);
+    metrics.record_policy_decision(&scope.profile.name, decision);
+
+    result.map_err(redaction_error)?;
+    Ok(outcome)
+}
+
+/// Run detection and policy over a response payload.
+fn redact_response_payload(
+    state: &AppState,
+    scope: &RequestScope,
+    body: &mut Value,
+) -> Result<RedactionOutcome, GatewayError> {
+    let mut ctx = RedactionContext::new(&state.engine, &scope.profile);
+    let result = payload::redact_chat_response(&mut ctx, body);
+    let outcome = ctx.finish();
+    state
+        .telemetry
+        .metrics()
+        .record_redaction_outcome(&outcome, &scope.profile.name);
+    result.map_err(redaction_error)?;
+    Ok(outcome)
+}
+
+fn restore_response_payload(
+    state: &AppState,
+    scope: &RequestScope,
+    body: &mut Value,
+    lookup: &HashMap<String, String>,
+) -> RestoreOutcome {
+    if lookup.is_empty() {
+        return RestoreOutcome::default();
+    }
+    let span = spans::restore(scope.config.telemetry.operations);
+    let outcome = payload::restore_chat_response(body, lookup);
+    if let Some(span) = &span {
+        spans::finish_restore(span, outcome.restored, outcome.missing, None);
+    }
+    let _ = state;
+    outcome
+}
+
 async fn chat_completions(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Json(mut body): Json<Value>,
 ) -> Response {
-    match chat_completions_inner(state, headers, &mut body).await {
+    match chat_completions_inner(state, auth, headers, &mut body).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -187,46 +565,55 @@ async fn chat_completions(
 
 async fn chat_completions_inner(
     state: AppState,
+    auth: AuthContext,
     headers: HeaderMap,
     body: &mut Value,
 ) -> Result<Response, GatewayError> {
-    let mut scope = RequestScope::build(&state, &headers)?;
+    let mut scope = RequestScope::build(&state, &headers, &auth).await?;
     let streaming = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
 
-    let request_outcome = {
-        let mut ctx =
-            RedactionContext::with_session(&state.engine, &scope.profile, &mut scope.session);
-        payload::redact_chat_request(&mut ctx, body).map_err(redaction_error)?;
-        ctx.finish()
-    };
+    let request_outcome = redact_request_payload(&state, &mut scope, body, false)?;
     if request_outcome.is_blocked() {
-        return Err(blocked_error(&request_outcome));
+        let error = blocked_error(&request_outcome);
+        state.audit.emit(AuditEvent::from_outcome(
+            &request_outcome,
+            AuditContext {
+                outcome: Some(AuditOutcome::Blocked),
+                error_type: Some(error.telemetry_error_type().to_string()),
+                ..scope.audit_context(semconv::event::POLICY_BLOCK, "chat.completions")
+            },
+        ));
+        return Err(error);
     }
 
+    scope.persist_tokens(&state).await?;
     let lookup = scope.restore_lookup(&state.dek);
+
+    state.audit.emit(AuditEvent::from_outcome(
+        &request_outcome,
+        AuditContext {
+            outcome: Some(AuditOutcome::Allowed),
+            content_sha256: Some(content_digest(&body.to_string())),
+            ..scope.audit_context(semconv::event::REQUEST, "chat.completions")
+        },
+    ));
 
     if streaming {
         return stream_chat(&state, &scope, body, &request_outcome, &lookup).await;
     }
 
-    let mut upstream = state
-        .upstream
-        .post_json(
-            "/v1/chat/completions",
-            body,
-            scope.forwarded_auth.as_deref(),
-            &scope.upstream_headers,
-        )
-        .await
-        .map_err(|e| GatewayError::Upstream(e.to_string()))?;
+    let mut upstream = call_upstream(&state, &scope, "/v1/chat/completions", body).await?;
+    let response_outcome = redact_response_payload(&state, &scope, &mut upstream.body)?;
+    let restore = restore_response_payload(&state, &scope, &mut upstream.body, &lookup);
 
-    let response_outcome = {
-        let mut ctx = RedactionContext::new(&state.engine, &scope.profile);
-        payload::redact_chat_response(&mut ctx, &mut upstream.body).map_err(redaction_error)?;
-        ctx.finish()
-    };
-
-    let restore = payload::restore_chat_response(&mut upstream.body, &lookup);
+    state.audit.emit(AuditEvent::from_outcome(
+        &response_outcome,
+        AuditContext {
+            outcome: Some(AuditOutcome::Allowed),
+            upstream_status: Some(upstream.status),
+            ..scope.audit_context(semconv::event::RESPONSE, "chat.completions")
+        },
+    ));
 
     let headers = compliance_headers(&request_outcome, &response_outcome, &restore);
     Ok((
@@ -237,6 +624,121 @@ async fn chat_completions_inner(
         .into_response())
 }
 
+/// Split a base URL into the `server.address` and `server.port` attributes.
+fn upstream_endpoint(base_url: &str) -> (String, u16) {
+    let without_scheme = base_url
+        .strip_prefix("https://")
+        .map(|rest| (rest, 443u16))
+        .or_else(|| base_url.strip_prefix("http://").map(|rest| (rest, 80u16)));
+    let (rest, default_port) = match without_scheme {
+        Some(parts) => parts,
+        None => (base_url, 0),
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    match authority.rsplit_once(':') {
+        Some((host, port)) => (host.to_string(), port.parse().unwrap_or(default_port)),
+        None => (authority.to_string(), default_port),
+    }
+}
+
+/// Fill in GenAI response attributes from an upstream body.
+fn genai_response(body: &Value, request: &spans::GenAiAttrs) -> spans::GenAiAttrs {
+    spans::GenAiAttrs {
+        response_model: body
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        input_tokens: body.pointer("/usage/prompt_tokens").and_then(Value::as_u64),
+        output_tokens: body
+            .pointer("/usage/completion_tokens")
+            .and_then(Value::as_u64),
+        finish_reasons: body
+            .pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        ..request.clone()
+    }
+}
+
+async fn call_upstream(
+    state: &AppState,
+    scope: &RequestScope,
+    path: &str,
+    body: &Value,
+) -> Result<crate::proxy::UpstreamResponse, GatewayError> {
+    let level = scope.config.telemetry.operations;
+    let genai = spans::GenAiAttrs {
+        operation_name: Some("chat"),
+        provider_name: Some("openai"),
+        request_model: body
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        ..spans::GenAiAttrs::default()
+    };
+    let (address, port) = upstream_endpoint(state.upstream.base_url());
+    let span = spans::upstream_chat(
+        level,
+        "POST",
+        &address,
+        port,
+        scope.config.telemetry.genai_attributes,
+        &genai,
+    );
+    let started = Instant::now();
+    let result = state
+        .upstream
+        .post_json(
+            path,
+            body,
+            scope.forwarded_auth.as_deref(),
+            &scope.upstream_headers,
+        )
+        .await;
+    let elapsed = started.elapsed().as_secs_f64();
+
+    match result {
+        Ok(response) => {
+            if let Some(span) = &span {
+                spans::finish_upstream_chat(
+                    span,
+                    Some(response.status),
+                    scope.config.telemetry.genai_attributes,
+                    level,
+                    &genai_response(&response.body, &genai),
+                    None,
+                );
+            }
+            state.telemetry.metrics().record_http_client(
+                elapsed,
+                "POST",
+                Some(response.status),
+                None,
+            );
+            Ok(response)
+        }
+        Err(err) => {
+            if let Some(span) = &span {
+                spans::finish_upstream_chat(
+                    span,
+                    None,
+                    scope.config.telemetry.genai_attributes,
+                    level,
+                    &genai,
+                    Some("upstream_error"),
+                );
+            }
+            state.telemetry.metrics().record_http_client(
+                elapsed,
+                "POST",
+                None,
+                Some("upstream_error"),
+            );
+            Err(GatewayError::Upstream(err.to_string()))
+        }
+    }
+}
+
 async fn stream_chat(
     state: &AppState,
     scope: &RequestScope,
@@ -244,6 +746,13 @@ async fn stream_chat(
     request_outcome: &RedactionOutcome,
     lookup: &HashMap<String, String>,
 ) -> Result<Response, GatewayError> {
+    let mode = scope.config.redaction.stream_mode;
+    let span = spans::stream_redact(scope.config.telemetry.operations, mode.as_str());
+
+    if mode == StreamMode::Incremental {
+        return stream_chat_incremental(state, scope, body, request_outcome, lookup).await;
+    }
+
     let upstream = state
         .upstream
         .post_sse(
@@ -273,8 +782,29 @@ async fn stream_chat(
         let redacted = ctx.redact(&extracted.content).map_err(redaction_error)?;
         (redacted, ctx.finish())
     };
+    state
+        .telemetry
+        .metrics()
+        .record_redaction_outcome(&response_outcome, &scope.profile.name);
 
     let (restored, restore) = crate::redact::token::restore_text(&redacted, lookup);
+    if let Some(span) = &span {
+        spans::finish_stream_redact(
+            span,
+            extracted.chunks,
+            scope.config.telemetry.operations,
+            None,
+        );
+    }
+
+    state.audit.emit(AuditEvent::from_outcome(
+        &response_outcome,
+        AuditContext {
+            outcome: Some(AuditOutcome::Allowed),
+            upstream_status: Some(upstream.status),
+            ..scope.audit_context(semconv::event::RESPONSE, "chat.completions.stream")
+        },
+    ));
 
     let id = format!("chatcmpl-{}", Uuid::new_v4());
     let model = extracted
@@ -282,12 +812,13 @@ async fn stream_chat(
         .as_deref()
         .or_else(|| body.get("model").and_then(Value::as_str))
         .unwrap_or("unknown");
-    let sse = build_redacted_sse(
+    let sse = build_redacted_sse_with_passthrough(
         &id,
         model,
         &restored,
         extracted.finish_reason.as_deref(),
         extracted.created,
+        &extracted.passthrough,
     );
 
     let mut headers = compliance_headers(request_outcome, &response_outcome, &restore);
@@ -302,12 +833,90 @@ async fn stream_chat(
     Ok((StatusCode::OK, headers, sse).into_response())
 }
 
+/// Forward a stream while redacting text as it arrives.
+///
+/// Time to first token is preserved at the cost of a bounded detection window:
+/// values longer than the configured hold-back can straddle the boundary, which
+/// is why the buffered mode remains the default.
+async fn stream_chat_incremental(
+    state: &AppState,
+    scope: &RequestScope,
+    body: &Value,
+    request_outcome: &RedactionOutcome,
+    lookup: &HashMap<String, String>,
+) -> Result<Response, GatewayError> {
+    let (status, upstream) = state
+        .upstream
+        .post_stream(
+            "/v1/chat/completions",
+            body,
+            scope.forwarded_auth.as_deref(),
+            &scope.upstream_headers,
+        )
+        .await
+        .map_err(|e| GatewayError::Upstream(e.to_string()))?;
+
+    if status >= 400 {
+        return Err(GatewayError::Upstream(format!(
+            "provider returned status {status}"
+        )));
+    }
+
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let (stream_body, outcome) = crate::stream::incremental_response(
+        upstream,
+        state.engine.clone(),
+        scope.profile.clone(),
+        lookup.clone(),
+        scope.config.redaction.stream_holdback_bytes,
+        format!("chatcmpl-{}", Uuid::new_v4()),
+        model,
+    );
+
+    state.audit.emit(AuditEvent::from_outcome(
+        request_outcome,
+        AuditContext {
+            outcome: Some(AuditOutcome::Allowed),
+            upstream_status: Some(status),
+            ..scope.audit_context(semconv::event::RESPONSE, "chat.completions.stream")
+        },
+    ));
+    // Response totals are only known once the stream drains, so the headers
+    // report the request-side counts and the stream itself carries the rest.
+    let _ = outcome;
+
+    let mut headers = compliance_headers(
+        request_outcome,
+        &RedactionOutcome::default(),
+        &RestoreOutcome::default(),
+    );
+    headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("text/event-stream; charset=utf-8"),
+    );
+    headers.insert(
+        HeaderName::from_static("cache-control"),
+        HeaderValue::from_static("no-cache"),
+    );
+    headers.insert(
+        HeaderName::from_static("x-censgate-stream-mode"),
+        HeaderValue::from_static("incremental"),
+    );
+
+    Ok((StatusCode::OK, headers, stream_body).into_response())
+}
+
 async fn completions(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Json(mut body): Json<Value>,
 ) -> Response {
-    match proxy_json_surface(state, headers, &mut body, "/v1/completions").await {
+    match proxy_json_surface(state, auth, headers, &mut body, "/v1/completions").await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -315,10 +924,11 @@ async fn completions(
 
 async fn embeddings(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Json(mut body): Json<Value>,
 ) -> Response {
-    match proxy_json_surface(state, headers, &mut body, "/v1/embeddings").await {
+    match proxy_json_surface(state, auth, headers, &mut body, "/v1/embeddings").await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -327,49 +937,55 @@ async fn embeddings(
 /// Shared pipeline for non-streaming JSON surfaces.
 async fn proxy_json_surface(
     state: AppState,
+    auth: AuthContext,
     headers: HeaderMap,
     body: &mut Value,
     path: &str,
 ) -> Result<Response, GatewayError> {
-    let mut scope = RequestScope::build(&state, &headers)?;
-
-    let request_outcome = {
-        let mut ctx =
-            RedactionContext::with_session(&state.engine, &scope.profile, &mut scope.session);
-        if path == "/v1/embeddings" {
-            payload::redact_embeddings_request(&mut ctx, body).map_err(redaction_error)?;
-        } else {
-            payload::redact_chat_request(&mut ctx, body).map_err(redaction_error)?;
-        }
-        ctx.finish()
+    let is_embeddings = path == "/v1/embeddings";
+    let action = if is_embeddings {
+        "embeddings"
+    } else {
+        "completions"
     };
+
+    let mut scope = RequestScope::build(&state, &headers, &auth).await?;
+    let request_outcome = redact_request_payload(&state, &mut scope, body, is_embeddings)?;
     if request_outcome.is_blocked() {
-        return Err(blocked_error(&request_outcome));
+        let error = blocked_error(&request_outcome);
+        state.audit.emit(AuditEvent::from_outcome(
+            &request_outcome,
+            AuditContext {
+                outcome: Some(AuditOutcome::Blocked),
+                error_type: Some(error.telemetry_error_type().to_string()),
+                ..scope.audit_context(semconv::event::POLICY_BLOCK, action)
+            },
+        ));
+        return Err(error);
     }
 
-    let mut upstream = state
-        .upstream
-        .post_json(
-            path,
-            body,
-            scope.forwarded_auth.as_deref(),
-            &scope.upstream_headers,
-        )
-        .await
-        .map_err(|e| GatewayError::Upstream(e.to_string()))?;
+    scope.persist_tokens(&state).await?;
+    let mut upstream = call_upstream(&state, &scope, path, body).await?;
 
     // Embedding vectors carry no text, so only completion-style bodies are
     // scanned on the way back.
-    let response_outcome = if path == "/v1/embeddings" {
+    let response_outcome = if is_embeddings {
         RedactionOutcome::default()
     } else {
-        let mut ctx = RedactionContext::new(&state.engine, &scope.profile);
-        payload::redact_chat_response(&mut ctx, &mut upstream.body).map_err(redaction_error)?;
-        ctx.finish()
+        redact_response_payload(&state, &scope, &mut upstream.body)?
     };
 
     let lookup = scope.restore_lookup(&state.dek);
-    let restore = payload::restore_chat_response(&mut upstream.body, &lookup);
+    let restore = restore_response_payload(&state, &scope, &mut upstream.body, &lookup);
+
+    state.audit.emit(AuditEvent::from_outcome(
+        &request_outcome,
+        AuditContext {
+            outcome: Some(AuditOutcome::Allowed),
+            upstream_status: Some(upstream.status),
+            ..scope.audit_context(semconv::event::REQUEST, action)
+        },
+    ));
 
     let headers = compliance_headers(&request_outcome, &response_outcome, &restore);
     Ok((
@@ -391,9 +1007,12 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
         None
     };
 
+    let mut upstream_headers = reqwest::header::HeaderMap::new();
+    crate::telemetry::inject_context(&mut upstream_headers);
+
     match state
         .upstream
-        .get_json("/v1/models", forwarded_auth.as_deref(), &HeaderMap::new())
+        .get_json("/v1/models", forwarded_auth.as_deref(), &upstream_headers)
         .await
     {
         Ok(upstream) => (
@@ -413,6 +1032,9 @@ pub struct RedactRequest {
     /// Policy profile to apply. Defaults to the configured default profile.
     #[serde(default)]
     pub profile: Option<String>,
+    /// Session used for token numbering and persistence.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Response body for `/v1/redact`.
@@ -422,6 +1044,8 @@ pub struct RedactResponse {
     pub text: String,
     /// Profile that was applied.
     pub profile: String,
+    /// Session that owns any minted tokens.
+    pub session_id: String,
     /// Whether policy would refuse this content.
     pub blocked: bool,
     /// What the pass did.
@@ -432,6 +1056,7 @@ pub struct RedactResponse {
 
 async fn redact_endpoint(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
     Json(request): Json<RedactRequest>,
 ) -> Response {
     let config = state.config();
@@ -440,7 +1065,10 @@ async fn redact_endpoint(
         Err(err) => return GatewayError::InvalidRequest(err.to_string()).into_response(),
     };
 
-    let mut session = TokenSession::new(Uuid::new_v4().to_string(), "default", state.dek.clone());
+    let session_id = request
+        .session_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let mut session = TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone());
     let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
     let text = match ctx.redact(&request.text) {
         Ok(text) => text,
@@ -448,13 +1076,82 @@ async fn redact_endpoint(
     };
     let outcome = ctx.finish();
 
+    let minted = session.take_new_mappings();
+    if !minted.is_empty() && state.tokens.backend_name() != "off" {
+        if let Err(err) = state.tokens.put(&auth.tenant, &session_id, &minted).await {
+            if profile.fail_closed {
+                return GatewayError::DependencyUnavailable(format!(
+                    "token map write failed: {err}"
+                ))
+                .into_response();
+            }
+            warn!(error = %err, "token map write failed");
+        }
+    }
+
+    state
+        .telemetry
+        .metrics()
+        .record_redaction_outcome(&outcome, &profile.name);
+
     Json(RedactResponse {
         content_sha256: content_digest(&text),
         text,
         profile: profile.name.clone(),
+        session_id,
         blocked: outcome.is_blocked(),
         outcome,
     })
+    .into_response()
+}
+
+/// Request body for `/v1/restore`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RestoreRequest {
+    /// Text containing tokens to restore.
+    pub text: String,
+    /// Session that minted the tokens.
+    pub session_id: String,
+}
+
+async fn restore_endpoint(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
+    Json(request): Json<RestoreRequest>,
+) -> Response {
+    if state.tokens.backend_name() == "off" {
+        return GatewayError::DependencyUnavailable(
+            "restore requires a token map backend; configure CENSGATE_VAULT_BACKEND".to_string(),
+        )
+        .into_response();
+    }
+
+    let mappings = match state.tokens.get(&auth.tenant, &request.session_id).await {
+        Ok(mappings) => mappings,
+        Err(err) => {
+            return GatewayError::DependencyUnavailable(format!("token map read failed: {err}"))
+                .into_response()
+        }
+    };
+
+    let lookup: HashMap<String, String> = mappings
+        .iter()
+        .filter_map(|mapping| {
+            state
+                .dek
+                .open(&mapping.sealed_value)
+                .ok()
+                .map(|plaintext| (mapping.token.clone(), plaintext))
+        })
+        .collect();
+
+    let (text, outcome) = crate::redact::token::restore_text(&request.text, &lookup);
+    Json(json!({
+        "text": text,
+        "session_id": request.session_id,
+        "restored": outcome.restored,
+        "missing": outcome.missing,
+    }))
     .into_response()
 }
 
@@ -468,21 +1165,13 @@ async fn compliance_check(
         Err(err) => return GatewayError::InvalidRequest(err.to_string()).into_response(),
     };
 
-    let mut ctx = RedactionContext::new(&state.engine, &profile);
-    // A check reports what policy would do without minting tokens, so a
-    // caller can pre-flight content without touching the token map.
-    let would_tokenize = profile.uses_tokenization();
+    // A check reports what policy would do. Tokens are minted into a throwaway
+    // session and never persisted, so callers can pre-flight content without
+    // touching the token map.
+    let mut session = TokenSession::new(Uuid::new_v4().to_string(), "check", state.dek.clone());
+    let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
     let outcome = match ctx.redact(&request.text) {
         Ok(_) => ctx.finish(),
-        Err(RedactError::TokenizationUnavailable) => {
-            let mut session =
-                TokenSession::new(Uuid::new_v4().to_string(), "check", state.dek.clone());
-            let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
-            match ctx.redact(&request.text) {
-                Ok(_) => ctx.finish(),
-                Err(err) => return redaction_error(err).into_response(),
-            }
-        }
         Err(err) => return redaction_error(err).into_response(),
     };
 
@@ -492,7 +1181,7 @@ async fn compliance_check(
         "blocked_entities": outcome.blocked_entities,
         "entity_counts": outcome.entity_counts,
         "action_counts": outcome.action_counts,
-        "would_tokenize": would_tokenize,
+        "would_tokenize": profile.uses_tokenization(),
     }))
     .into_response()
 }
@@ -528,6 +1217,7 @@ async fn compliance_status(State(state): State<AppState>) -> impl IntoResponse {
         "token_map_backend": config.vault.backend.as_str(),
         "auth_mode": config.auth.mode.as_str(),
         "audit_export": config.audit.export.as_str(),
+        "telemetry": state.telemetry.summary(),
     }))
 }
 
