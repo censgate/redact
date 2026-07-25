@@ -7,8 +7,11 @@
 
 #![allow(dead_code)]
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::Json;
@@ -19,6 +22,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use redact_core::AnalyzerEngine;
 use redact_gateway::config::{ConfigHandle, ResolvedConfig};
+use redact_gateway::policy::{EntityAction, PolicySet, Profile};
 use redact_gateway::proxy::UpstreamClient;
 use redact_gateway::redact::token::Dek;
 use redact_gateway::routes::{create_router, AppState};
@@ -41,6 +45,11 @@ impl MockUpstream {
             .unwrap()
             .clone()
             .expect("upstream should have received a request")
+    }
+
+    /// Whether the mock has not received any request yet.
+    pub fn received_nothing(&self) -> bool {
+        self.captured.lock().unwrap().is_none()
     }
 
     /// Base URL of the mock.
@@ -119,6 +128,35 @@ pub async fn mock_json_upstream(response: Value) -> MockUpstream {
     MockUpstream { addr, captured }
 }
 
+/// Mock upstream that returns a different JSON body for each successive request.
+pub async fn mock_json_upstream_sequence(responses: Vec<Value>) -> MockUpstream {
+    assert!(
+        !responses.is_empty(),
+        "mock_json_upstream_sequence requires at least one response"
+    );
+    let captured: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let sink = captured.clone();
+    let fallback = responses.last().cloned().unwrap();
+    let queue: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(responses.into()));
+
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(move |Json(body): Json<Value>| {
+            let sink = sink.clone();
+            let queue = queue.clone();
+            let fallback = fallback.clone();
+            async move {
+                *sink.lock().unwrap() = Some(body);
+                let response = queue.lock().unwrap().pop_front().unwrap_or(fallback);
+                Json(response)
+            }
+        }),
+    );
+
+    let addr = spawn(router).await;
+    MockUpstream { addr, captured }
+}
+
 /// Mock upstream that answers with a raw `text/event-stream` body.
 pub async fn mock_sse_upstream(sse: impl Into<String>) -> MockUpstream {
     let captured: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
@@ -185,6 +223,57 @@ pub async fn router_for(config: ResolvedConfig) -> Router {
     create_router(state_for(config).await)
 }
 
+/// Build state and a router that share it (needed when tests flush audit or
+/// inspect readiness against the same backends the router uses).
+pub async fn state_and_router(config: ResolvedConfig) -> (AppState, Router) {
+    let state = state_for(config).await;
+    let router = create_router(state.clone());
+    (state, router)
+}
+
+/// A [`PolicySet`] with a single named profile used as the default.
+pub fn policy_with(profile: Profile) -> PolicySet {
+    let mut profiles = std::collections::BTreeMap::new();
+    let name = if profile.name.is_empty() {
+        "default".to_string()
+    } else {
+        profile.name.clone()
+    };
+    profiles.insert(name.clone(), Arc::new(profile));
+    let mut set = PolicySet {
+        default_profile: name,
+        profiles,
+    };
+    set.normalize().unwrap();
+    set
+}
+
+/// Tokenize-everything profile suitable for token-map persistence tests.
+pub fn tokenize_profile(fail_closed: bool) -> Profile {
+    Profile {
+        name: "default".to_string(),
+        default_action: EntityAction::Tokenize,
+        min_confidence: 0.4,
+        restore_responses: true,
+        fail_closed,
+        ..Profile::default()
+    }
+}
+
+/// Poll an audit file until it contains `needle` or the retry budget is spent.
+pub async fn wait_for_audit_containing(path: &Path, needle: &str) -> String {
+    for _ in 0..50 {
+        if let Ok(contents) = std::fs::read_to_string(path) {
+            if contents.contains(needle) {
+                return contents;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let contents = std::fs::read_to_string(path).unwrap_or_default();
+    panic!("audit file never contained `{needle}` within retry budget; got:\n{contents}");
+}
+
 /// Result of driving the router once.
 pub struct TestResponse {
     /// HTTP status.
@@ -225,6 +314,15 @@ pub async fn post_json_with_headers(
 /// GET a path from the router.
 pub async fn get_path(router: Router, uri: &str) -> TestResponse {
     request(router, "GET", uri, None, &[]).await
+}
+
+/// GET a path with extra request headers.
+pub async fn get_path_with_headers(
+    router: Router,
+    uri: &str,
+    headers: &[(&str, &str)],
+) -> TestResponse {
+    request(router, "GET", uri, None, headers).await
 }
 
 async fn request(
