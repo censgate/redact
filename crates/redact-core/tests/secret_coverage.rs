@@ -4,6 +4,14 @@
 /// Validates positive detection, overlap-resolution precedence against
 /// existing generic patterns, false-positive guards, and EntityType
 /// metadata round-trips for the 18 new secret/credential entity types.
+///
+/// # Secret-like fixtures
+///
+/// Format-accurate fixtures are required for these tests, but committing
+/// complete secret-shaped literals trips GitHub secret scanning / push
+/// protection (false positives — the values are never live credentials).
+/// Every fixture below is assembled at run time from split parts so the
+/// contiguous token never appears in source.
 use redact_core::{AnalyzerEngine, EntityType};
 
 fn create_engine() -> AnalyzerEngine {
@@ -43,14 +51,150 @@ fn assert_entity_not_detected(text: &str, entity_type: EntityType) {
 }
 
 /// Join a token prefix and body at run time.
-///
-/// A few fixtures below are format-accurate enough that upstream secret
-/// scanners (GitHub push protection among them) flag them as live
-/// credentials. Splitting those tokens so the complete literal never appears
-/// in source keeps the fixtures realistic — the assembled string is
-/// byte-identical at run time — without tripping those scanners.
 fn token(prefix: &str, body: &str) -> String {
     format!("{prefix}{body}")
+}
+
+/// Join an arbitrary number of fragments at run time.
+fn join(parts: &[&str]) -> String {
+    parts.concat()
+}
+
+/// Build a PEM private-key block without a contiguous BEGIN/END literal.
+fn pem_block(kind: &str, body: &str) -> String {
+    let begin = format!("-----{} {}-----", "BEGIN", kind);
+    let end = format!("-----{} {}-----", "END", kind);
+    format!("{begin}\n{body}\n{end}")
+}
+
+/// Synthetic OpenSSH PEM used by several tests.
+fn sample_openssh_pem() -> String {
+    let body = join(&[
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW",
+        "\n",
+        "QyNTUxOQAAACBOa1234567890abcdefghijklmnopqrstuvwxyzABCD",
+    ]);
+    pem_block("OPENSSH PRIVATE KEY", &body)
+}
+
+/// Classic three-segment JWT assembled from split header/payload/sig parts.
+fn sample_jwt() -> String {
+    let header = join(&["eyJ", "hbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"]);
+    let payload = join(&["eyJ", "zdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0"]);
+    let sig = join(&["SflKxwRJ", "SMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"]);
+    format!("{header}.{payload}.{sig}")
+}
+
+fn sample_aws_access_key() -> String {
+    // AWS documentation example shape; split so scanners do not see a full ID.
+    token("AKIA", "IOSFODNN7EXAMPLE")
+}
+
+fn sample_github_token() -> String {
+    token("ghp_", "abcdefghijklmnopqrstuvwxyz0123456789")
+}
+
+fn sample_gitlab_token() -> String {
+    token("glpat-", "abcdefghijklmnopqrst")
+}
+
+fn sample_slack_token() -> String {
+    join(&[
+        "xoxb-",
+        "123456789012-",
+        "123456789012-",
+        "abcdefghijklmnopqrstuvwx",
+    ])
+}
+
+fn sample_slack_webhook() -> String {
+    join(&[
+        "https://hooks.",
+        "slack.com/services/",
+        "T00000000/B00000000/",
+        "XXXXXXXXXXXXXXXXXXXXXXXX",
+    ])
+}
+
+fn sample_stripe_secret_key() -> String {
+    token("sk_live_", "abcdefghijklmnopqrstuvwx")
+}
+
+fn sample_stripe_publishable_key() -> String {
+    token("pk_live_", "abcdefghijklmnopqrstuvwx")
+}
+
+fn sample_google_api_key() -> String {
+    // 39 chars after "AIza" to satisfy `\bAIza[A-Za-z0-9_-]{35}`.
+    token("AIza", "SyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe")
+}
+
+fn sample_openai_api_key() -> String {
+    token("sk-", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL")
+}
+
+fn sample_openai_project_key() -> String {
+    token(
+        "sk-proj-",
+        "abcdefghij_klmnopqrst-uvwxyz0123456789ABCDEFGHIJ",
+    )
+}
+
+fn sample_anthropic_api_key() -> String {
+    token(
+        "sk-ant-",
+        "api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF",
+    )
+}
+
+fn sample_npm_token() -> String {
+    token("npm_", "abcdefghijklmnopqrstuvwxyz0123456789")
+}
+
+fn sample_pypi_token() -> String {
+    token(
+        "pypi-",
+        "AgEIcHlwaS5vcmcabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOP",
+    )
+}
+
+fn sample_sendgrid_api_key() -> String {
+    token(
+        "SG.",
+        "abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    )
+}
+
+fn sample_twilio_api_key() -> String {
+    token("SK", "0123456789abcdef0123456789abcdef")
+}
+
+fn sample_telegram_bot_token() -> String {
+    token("123456789:", "AAH1234567890abcdefghijklmnopqrstuv")
+}
+
+fn sample_vault_token() -> String {
+    token("hvs.", "CAESIabcdefghijklmnopqrstuvwxyz0123456789")
+}
+
+fn sample_postgres_url() -> String {
+    join(&[
+        "postgresql://",
+        "dbuser:s3cretPass@",
+        "db.internal:5432/appdb",
+    ])
+}
+
+fn sample_mongo_url() -> String {
+    join(&[
+        "mongodb+srv://",
+        "admin:hunter2@",
+        "cluster0.mongodb.net/test",
+    ])
+}
+
+fn sample_mongo_url_with_query() -> String {
+    format!("{}?retryWrites=true", sample_mongo_url())
 }
 
 // ============================================================================
@@ -59,26 +203,20 @@ fn token(prefix: &str, body: &str) -> String {
 
 #[test]
 fn test_private_key() {
-    let openssh_pem = r#"-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBOa1234567890abcdefghijklmnopqrstuvwxyzABCD
------END OPENSSH PRIVATE KEY-----"#;
-    let text = format!(
-        "Rotate this key immediately:\n{}\nDo not commit.",
-        openssh_pem
-    );
+    let openssh_pem = sample_openssh_pem();
+    let text = format!("Rotate this key immediately:\n{openssh_pem}\nDo not commit.");
     assert_entity_detected(&text, EntityType::PrivateKey, 0.9);
 
-    let rsa_pem =
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA1234567890abcdef\n-----END RSA PRIVATE KEY-----";
-    let text2 = format!("Backup key:\n{}\n", rsa_pem);
+    let rsa_pem = pem_block("RSA PRIVATE KEY", "MIIEpAIBAAKCAQEA1234567890abcdef");
+    let text2 = format!("Backup key:\n{rsa_pem}\n");
     assert_entity_detected(&text2, EntityType::PrivateKey, 0.9);
 }
 
 #[test]
 fn test_jwt_token() {
+    let jwt = sample_jwt();
     assert_entity_detected(
-        "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c in the header",
+        &format!("Authorization: Bearer {jwt} in the header"),
         EntityType::JwtToken,
         0.85,
     );
@@ -86,8 +224,9 @@ fn test_jwt_token() {
 
 #[test]
 fn test_aws_access_key() {
+    let key = sample_aws_access_key();
     assert_entity_detected(
-        "Set AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE in the environment",
+        &format!("Set AWS_ACCESS_KEY_ID={key} in the environment"),
         EntityType::AwsAccessKey,
         0.9,
     );
@@ -95,8 +234,9 @@ fn test_aws_access_key() {
 
 #[test]
 fn test_github_token() {
+    let tok = sample_github_token();
     assert_entity_detected(
-        "Deploy with token ghp_abcdefghijklmnopqrstuvwxyz0123456789 in CI",
+        &format!("Deploy with token {tok} in CI"),
         EntityType::GithubToken,
         0.9,
     );
@@ -104,8 +244,9 @@ fn test_github_token() {
 
 #[test]
 fn test_gitlab_token() {
+    let tok = sample_gitlab_token();
     assert_entity_detected(
-        "CI variable GITLAB_TOKEN=glpat-abcdefghijklmnopqrst was leaked",
+        &format!("CI variable GITLAB_TOKEN={tok} was leaked"),
         EntityType::GitlabToken,
         0.9,
     );
@@ -113,17 +254,15 @@ fn test_gitlab_token() {
 
 #[test]
 fn test_slack_token() {
-    let tok = token(
-        "xoxb-123456789012-123456789012-",
-        "abcdefghijklmnopqrstuvwx",
-    );
+    let tok = sample_slack_token();
     assert_entity_detected(&format!("Bot token: {tok}"), EntityType::SlackToken, 0.9);
 }
 
 #[test]
 fn test_slack_webhook() {
+    let url = sample_slack_webhook();
     assert_entity_detected(
-        "Post alerts to https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+        &format!("Post alerts to {url}"),
         EntityType::SlackWebhook,
         0.9,
     );
@@ -131,7 +270,7 @@ fn test_slack_webhook() {
 
 #[test]
 fn test_stripe_api_key() {
-    let tok = token("sk_live_", "abcdefghijklmnopqrstuvwx");
+    let tok = sample_stripe_secret_key();
     assert_entity_detected(
         &format!("Live key {tok} must stay secret"),
         EntityType::StripeApiKey,
@@ -141,8 +280,9 @@ fn test_stripe_api_key() {
 
 #[test]
 fn test_google_api_key() {
+    let key = sample_google_api_key();
     assert_entity_detected(
-        "Maps key AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe is restricted",
+        &format!("Maps key {key} is restricted"),
         EntityType::GoogleApiKey,
         0.9,
     );
@@ -150,14 +290,16 @@ fn test_google_api_key() {
 
 #[test]
 fn test_openai_api_key() {
+    let classic = sample_openai_api_key();
     assert_entity_detected(
-        "export OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL",
+        &format!("export OPENAI_API_KEY={classic}"),
         EntityType::OpenAiApiKey,
         0.85,
     );
     // Project-scoped keys are a distinct shape and may contain `-` / `_`.
+    let project = sample_openai_project_key();
     assert_entity_detected(
-        "export OPENAI_API_KEY=sk-proj-abcdefghij_klmnopqrst-uvwxyz0123456789ABCDEFGHIJ",
+        &format!("export OPENAI_API_KEY={project}"),
         EntityType::OpenAiApiKey,
         0.85,
     );
@@ -165,8 +307,9 @@ fn test_openai_api_key() {
 
 #[test]
 fn test_anthropic_api_key() {
+    let tok = sample_anthropic_api_key();
     assert_entity_detected(
-        "export ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF",
+        &format!("export ANTHROPIC_API_KEY={tok}"),
         EntityType::AnthropicApiKey,
         0.9,
     );
@@ -174,8 +317,9 @@ fn test_anthropic_api_key() {
 
 #[test]
 fn test_npm_token() {
+    let tok = sample_npm_token();
     assert_entity_detected(
-        "//registry.npmjs.org/:_authToken=npm_abcdefghijklmnopqrstuvwxyz0123456789",
+        &format!("//registry.npmjs.org/:_authToken={tok}"),
         EntityType::NpmToken,
         0.9,
     );
@@ -183,19 +327,13 @@ fn test_npm_token() {
 
 #[test]
 fn test_pypi_token() {
-    assert_entity_detected(
-        "TWINE_PASSWORD=pypi-AgEIcHlwaS5vcmcabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOP",
-        EntityType::PyPiToken,
-        0.9,
-    );
+    let tok = sample_pypi_token();
+    assert_entity_detected(&format!("TWINE_PASSWORD={tok}"), EntityType::PyPiToken, 0.9);
 }
 
 #[test]
 fn test_sendgrid_api_key() {
-    let tok = token(
-        "SG.",
-        "abcdefghijklmnopqrstuv.abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-    );
+    let tok = sample_sendgrid_api_key();
     assert_entity_detected(
         &format!("SENDGRID_API_KEY={tok}"),
         EntityType::SendGridApiKey,
@@ -205,7 +343,7 @@ fn test_sendgrid_api_key() {
 
 #[test]
 fn test_twilio_api_key() {
-    let tok = token("SK", "0123456789abcdef0123456789abcdef");
+    let tok = sample_twilio_api_key();
     assert_entity_detected(
         &format!("Twilio API key {tok} in use"),
         EntityType::TwilioApiKey,
@@ -215,8 +353,9 @@ fn test_twilio_api_key() {
 
 #[test]
 fn test_telegram_bot_token() {
+    let tok = sample_telegram_bot_token();
     assert_entity_detected(
-        "Bot token 123456789:AAH1234567890abcdefghijklmnopqrstuv for the alerts bot",
+        &format!("Bot token {tok} for the alerts bot"),
         EntityType::TelegramBotToken,
         0.9,
     );
@@ -224,8 +363,9 @@ fn test_telegram_bot_token() {
 
 #[test]
 fn test_hashicorp_vault_token() {
+    let tok = sample_vault_token();
     assert_entity_detected(
-        "VAULT_TOKEN=hvs.CAESIabcdefghijklmnopqrstuvwxyz0123456789",
+        &format!("VAULT_TOKEN={tok}"),
         EntityType::HashicorpVaultToken,
         0.9,
     );
@@ -233,13 +373,15 @@ fn test_hashicorp_vault_token() {
 
 #[test]
 fn test_database_connection_string() {
+    let pg = sample_postgres_url();
     assert_entity_detected(
-        "DATABASE_URL=postgresql://dbuser:s3cretPass@db.internal:5432/appdb",
+        &format!("DATABASE_URL={pg}"),
         EntityType::DatabaseConnectionString,
         0.85,
     );
+    let mongo = sample_mongo_url();
     assert_entity_detected(
-        "Mongo connection: mongodb+srv://admin:hunter2@cluster0.mongodb.net/test",
+        &format!("Mongo connection: {mongo}"),
         EntityType::DatabaseConnectionString,
         0.85,
     );
@@ -248,16 +390,12 @@ fn test_database_connection_string() {
 #[test]
 fn test_database_connection_string_captures_path_and_query() {
     let engine = create_engine();
+    let pg = format!("DATABASE_URL={}", sample_postgres_url());
+    let mongo = format!("Mongo: {}", sample_mongo_url_with_query());
 
     for (text, expected_tail) in [
-        (
-            "DATABASE_URL=postgresql://dbuser:s3cretPass@db.internal:5432/appdb",
-            "/appdb",
-        ),
-        (
-            "Mongo: mongodb+srv://admin:hunter2@cluster0.mongodb.net/test?retryWrites=true",
-            "/test?retryWrites=true",
-        ),
+        (pg.as_str(), "/appdb"),
+        (mongo.as_str(), "/test?retryWrites=true"),
     ] {
         let result = engine.analyze(text, None).unwrap();
         let entity = result
@@ -281,27 +419,24 @@ fn test_database_connection_string_captures_path_and_query() {
 
 #[test]
 fn test_anthropic_key_wins_over_openai_pattern() {
-    let text = "export ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF";
-    assert_entity_detected(text, EntityType::AnthropicApiKey, 0.9);
-    assert_entity_not_detected(text, EntityType::OpenAiApiKey);
+    let text = format!("export ANTHROPIC_API_KEY={}", sample_anthropic_api_key());
+    assert_entity_detected(&text, EntityType::AnthropicApiKey, 0.9);
+    assert_entity_not_detected(&text, EntityType::OpenAiApiKey);
 }
 
 #[test]
 fn test_slack_webhook_wins_over_generic_url() {
-    let text = "Post alerts to https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX";
-    assert_entity_detected(text, EntityType::SlackWebhook, 0.9);
-    assert_entity_not_detected(text, EntityType::Url);
+    let text = format!("Post alerts to {}", sample_slack_webhook());
+    assert_entity_detected(&text, EntityType::SlackWebhook, 0.9);
+    assert_entity_not_detected(&text, EntityType::Url);
 }
 
 #[test]
 fn test_private_key_pem_yields_single_entity_no_hash_overlap() {
-    let openssh_pem = r#"-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBOa1234567890abcdefghijklmnopqrstuvwxyzABCD
------END OPENSSH PRIVATE KEY-----"#;
+    let openssh_pem = sample_openssh_pem();
 
     let engine = create_engine();
-    let result = engine.analyze(openssh_pem, None).unwrap();
+    let result = engine.analyze(&openssh_pem, None).unwrap();
 
     let private_key_entities: Vec<_> = result
         .detected_entities
@@ -315,16 +450,16 @@ QyNTUxOQAAACBOa1234567890abcdefghijklmnopqrstuvwxyzABCD
         result.detected_entities
     );
 
-    assert_entity_not_detected(openssh_pem, EntityType::Md5Hash);
-    assert_entity_not_detected(openssh_pem, EntityType::Sha1Hash);
-    assert_entity_not_detected(openssh_pem, EntityType::Sha256Hash);
+    assert_entity_not_detected(&openssh_pem, EntityType::Md5Hash);
+    assert_entity_not_detected(&openssh_pem, EntityType::Sha1Hash);
+    assert_entity_not_detected(&openssh_pem, EntityType::Sha256Hash);
 }
 
 #[test]
 fn test_database_connection_string_wins_over_domain_name() {
-    let text = "postgresql://dbuser:s3cretPass@db.internal:5432/appdb";
-    assert_entity_detected(text, EntityType::DatabaseConnectionString, 0.85);
-    assert_entity_not_detected(text, EntityType::DomainName);
+    let text = sample_postgres_url();
+    assert_entity_detected(&text, EntityType::DatabaseConnectionString, 0.85);
+    assert_entity_not_detected(&text, EntityType::DomainName);
 }
 
 // ============================================================================
@@ -384,19 +519,21 @@ fn test_bare_sha256_hash_is_not_a_secret_type() {
 
 #[test]
 fn test_truncated_github_token_lookalike_rejected() {
-    assert_entity_not_detected("token: ghp_tooshort", EntityType::GithubToken);
+    let short = token("ghp_", "tooshort");
+    assert_entity_not_detected(&format!("token: {short}"), EntityType::GithubToken);
 }
 
 #[test]
 fn test_truncated_google_key_lookalike_rejected() {
-    assert_entity_not_detected("key: AIzaShort", EntityType::GoogleApiKey);
+    let short = token("AIza", "Short");
+    assert_entity_not_detected(&format!("key: {short}"), EntityType::GoogleApiKey);
 }
 
 #[test]
 fn test_stripe_publishable_key_is_not_flagged() {
     // Publishable keys are designed to ship in client-side code. Only the
     // secret (`sk_`) and restricted (`rk_`) forms are worth redacting.
-    let tok = token("pk_live_", "abcdefghijklmnopqrstuvwx");
+    let tok = sample_stripe_publishable_key();
     assert_entity_not_detected(
         &format!("Frontend initialises Stripe with {tok} openly"),
         EntityType::StripeApiKey,
