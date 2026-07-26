@@ -197,19 +197,23 @@ impl OidcAuthenticator {
 
         // Key rotation: force one refresh on kid miss, but coalesce bursts of
         // unknown-kid traffic so unauthenticated callers cannot amplify fetches.
+        // Stamp last_force_refresh under the write lock *before* releasing it so
+        // concurrent misses cannot all pass the interval check.
         let allow_force = {
-            let state = self.state.read().await;
-            state
+            let mut state = self.state.write().await;
+            let allow = state
                 .last_force_refresh
                 .map(|t| t.elapsed() >= FORCE_REFRESH_MIN_INTERVAL)
-                .unwrap_or(true)
-        };
-        if allow_force {
-            self.ensure_jwks(true).await?;
-            {
-                let mut state = self.state.write().await;
+                .unwrap_or(true);
+            if allow {
                 state.last_force_refresh = Some(Instant::now());
             }
+            allow
+        };
+        if allow_force {
+            // Keep the throttle stamp even when this fails so a failing IdP is
+            // not hammered; the next forced attempt waits for the interval.
+            self.ensure_jwks(true).await?;
         }
         self.lookup_cached(kid).await.ok_or_else(|| {
             AuthError::Invalid(match kid {

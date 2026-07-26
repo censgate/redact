@@ -111,9 +111,10 @@ impl TokenMapStore for MemoryStore {
             }
         }
 
+        // Clone first so a merge conflict leaves the incumbent mappings intact.
         let existing = guard
-            .remove(&key)
-            .map(|entry| entry.mappings)
+            .get(&key)
+            .map(|entry| entry.mappings.clone())
             .unwrap_or_default();
         let merged = merge_mappings(existing, mappings)?;
         guard.insert(

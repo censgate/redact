@@ -1295,7 +1295,10 @@ async fn redact_endpoint(
             .put(&auth.tenant, &token_map_session, &minted)
             .await
         {
-            if profile.fail_closed {
+            use crate::vault::TokenMapError;
+            // Conflicts are integrity failures even when fail_closed is off:
+            // returning a colliding token that was not persisted is unsafe.
+            if matches!(err, TokenMapError::Conflict(_)) || profile.fail_closed {
                 return GatewayError::DependencyUnavailable(format!(
                     "token map write failed: {err}"
                 ))
