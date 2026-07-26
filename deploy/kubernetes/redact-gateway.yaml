@@ -1,0 +1,206 @@
+# Kubernetes manifests for redact-gateway.
+#
+# This sample is deliberately single-replica and authenticated-by-default-off,
+# because those two choices interact. Read the checklist before exposing it
+# beyond a trusted network:
+#
+#   1. auth.mode below is `none`, which accepts any caller that can reach the
+#      Service. Set it to `api_key` or `oidc` before the gateway is reachable
+#      by anything you do not control. See docs/gateway/authentication.md.
+#   2. replicas is 1. Token mappings live in the gateway process unless
+#      vault.backend is vault_kv2, so a second replica cannot restore a token
+#      the first one minted. Scale out only after configuring a shared token
+#      map, and give every replica the same CENSGATE_TOKEN_DEK.
+#   3. The Secret below contains placeholders that the gateway REFUSES to
+#      start with. Create the real Secret yourself; do not apply the template.
+#
+# Apply (after creating secrets):
+#   kubectl apply -f deploy/kubernetes/
+#
+# Image naming matches release.yml: ghcr.io/<org>/redact-gateway:<tag>
+# (suffix form, same pattern as ghcr.io/<org>/redact-ner-base).
+
+---
+# Non-secret gateway configuration. Mounted read-only at /etc/redact-gateway.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redact-gateway-config
+  labels:
+    app.kubernetes.io/name: redact-gateway
+data:
+  gateway.yaml: |
+    server:
+      host: 0.0.0.0
+      port: 8080
+      metrics_endpoint: true
+      enable_http_trace: true
+    provider:
+      # Override via Secret / env in real deployments (CENSGATE_PROVIDER_BASE_URL).
+      base_url: http://ollama.default.svc.cluster.local:11434
+    redaction:
+      stream_mode: buffered
+      stream_holdback_bytes: 256
+    packs:
+      paths:
+        - /app/patterns
+    vault:
+      # "off" keeps token mappings inside the request that minted them. Use
+      # vault_kv2 (with vault.address) for tokens that survive a restart or
+      # need to be restored by another replica.
+      backend: "off"
+    auth:
+      # LOCAL / TRUSTED-NETWORK ONLY. Change to api_key or oidc before this
+      # Service is reachable by callers you do not control.
+      mode: none
+    audit:
+      export: otlp
+      queue_capacity: 1024
+      include_entity_types: true
+    telemetry:
+      operations: basic
+      genai_attributes: false
+
+---
+# Secret TEMPLATE — the values below are placeholders and will NOT start the
+# gateway. Create the real Secret out of band instead of applying this:
+#
+#   kubectl create secret generic redact-gateway-secrets \
+#     --from-literal=CENSGATE_PROVIDER_API_KEY='sk-...' \
+#     --from-literal=CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
+#
+# A sealing key of all zero bytes is rejected at startup precisely so a
+# copied template cannot become a production key.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redact-gateway-secrets
+  labels:
+    app.kubernetes.io/name: redact-gateway
+type: Opaque
+stringData:
+  # Bearer token sent to the OpenAI-compatible provider.
+  CENSGATE_PROVIDER_API_KEY: "REPLACE_ME"
+  # Base64-encoded 32-byte key sealing reversible token mappings, shared by
+  # every replica. Generate with: openssl rand -base64 32
+  # Leaving this unset is safer than leaving it wrong: the gateway then
+  # generates an ephemeral key and logs that tokens will not outlive the pod.
+  CENSGATE_TOKEN_DEK: "REPLACE_ME_openssl_rand_base64_32"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redact-gateway
+  labels:
+    app.kubernetes.io/name: redact-gateway
+spec:
+  # Keep at 1 unless vault.backend is vault_kv2: without a shared token map a
+  # second replica cannot restore tokens minted by the first.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redact-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redact-gateway
+    spec:
+      # Distroless nonroot UID (matches USER nonroot:nonroot in Dockerfile.gateway)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: ghcr.io/censgate/redact-gateway:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config
+            - /etc/redact-gateway/gateway.yaml
+            - serve
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Pattern packs baked into the image; keep explicit for clarity.
+            - name: CENSGATE_PATTERN_PACKS
+              value: /app/patterns
+            # OTLP transport (not part of the YAML schema — use OTEL_* vars).
+            - name: OTEL_SERVICE_NAME
+              value: redact-gateway
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: CENSGATE_PROVIDER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: redact-gateway-secrets
+                  key: CENSGATE_PROVIDER_API_KEY
+            # Optional: omit entirely to run with an ephemeral per-pod key.
+            - name: CENSGATE_TOKEN_DEK
+              valueFrom:
+                secretKeyRef:
+                  name: redact-gateway-secrets
+                  key: CENSGATE_TOKEN_DEK
+                  optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          # Distroless has no shell — use HTTP probes against the binary.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redact-gateway
+              readOnly: true
+            # Writable scratch for any temporary needs under a read-only root.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: redact-gateway-config
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redact-gateway
+  labels:
+    app.kubernetes.io/name: redact-gateway
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redact-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

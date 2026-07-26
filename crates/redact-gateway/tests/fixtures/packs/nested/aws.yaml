@@ -1,0 +1,11 @@
+# Nested pack used to verify directory recursion.
+version: "1.0"
+framework: "Fixture-Nested"
+description: "AWS access key pattern in a subdirectory"
+patterns:
+  - id: "sec_aws_access_key"
+    name: "AWS Access Key"
+    category: "cloud_credentials"
+    regex: '\bAKIA[0-9A-Z]{16}\b'
+    confidence: 0.95
+    enabled: true

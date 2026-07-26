@@ -1,0 +1,46 @@
+# oidc.yaml — OIDC / OAuth 2.0 resource-server authentication.
+#
+# Use when inbound callers present bearer JWTs from your identity provider.
+# The gateway validates issuer, audience, and optional required scopes; it can
+# also map tenant / profile claims onto request context.
+#
+# Replace the issuer / audience / JWKS URL with your IdP values before deploy.
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  metrics_endpoint: true
+  enable_http_trace: true
+
+provider:
+  base_url: https://api.openai.com
+  # Prefer injecting the key via CENSGATE_PROVIDER_API_KEY rather than this file.
+  connect_timeout_secs: 10
+  request_timeout_secs: 600
+
+redaction:
+  stream_mode: buffered
+  stream_holdback_bytes: 256
+  # Profiles come from the JWT claim below — disable the free-form header.
+  allow_profile_header: false
+
+auth:
+  mode: oidc
+  oidc:
+    issuer: https://login.example.com/oauth2/default
+    audience: redact-gateway
+    # Optional; when omitted the gateway derives JWKS from the issuer metadata.
+    jwks_url: https://login.example.com/oauth2/default/v1/keys
+    required_scopes:
+      - redact.invoke
+    tenant_claim: tid
+    profile_claim: redact_profile
+    jwks_refresh_secs: 300
+    leeway_secs: 60
+
+audit:
+  export: stdout
+  include_entity_types: true
+
+telemetry:
+  operations: basic

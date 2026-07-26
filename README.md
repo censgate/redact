@@ -22,6 +22,7 @@ A production-ready, Rust-based solution designed as a drop-in replacement for Mi
 - **Memory Safe** — Rust's borrow checker eliminates entire classes of security vulnerabilities
 - **Production Ready** — 54 pattern-based entity types with validation, plus transformer-based NER
 - **Multi-Platform** — Native server, CLI, and WebAssembly (pattern-only) support
+- **AI Privacy Gateway** — OpenAI-compatible proxy that redacts prompts and model answers in flight, with policy profiles, reversible tokenization, and OpenTelemetry
 - **ML-Powered** — Full ONNX Runtime integration for transformer models (BERT, RoBERTa, DistilBERT)
 - **Lightweight** — ~20-50MB memory footprint vs ~300MB for Presidio
 - **Extensible** — Plugin architecture for custom recognizers and anonymization strategies
@@ -210,6 +211,14 @@ docker run -p 8080:8080 ghcr.io/censgate/redact:latest
 ```
 
 The image uses a minimal [distroless](https://github.com/GoogleContainerTools/distroless) base (~37MB) optimized for ARM64 (AWS Graviton, Apple Silicon) and AMD64.
+
+The privacy gateway ships as a separate image:
+
+```bash
+docker pull ghcr.io/censgate/redact-gateway:latest
+docker run -p 8080:8080 -e CENSGATE_PROVIDER_BASE_URL=http://host.docker.internal:11434 \
+  ghcr.io/censgate/redact-gateway:latest
+```
 
 #### Full image (pattern + ONNX NER)
 
@@ -427,6 +436,44 @@ curl -X POST http://localhost:8080/api/v1/anonymize \
   }'
 ```
 
+## Privacy Gateway
+
+`redact-gateway` is an OpenAI-compatible proxy that embeds `redact-core` in-process. It sits between your application and a model provider: outbound prompts are scanned and rewritten according to a policy profile, and inbound completions can be scanned and (when using reversible tokens) restored for the caller.
+
+**Start here:** [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md) — `/v1/redact` with no provider, then Ollama chat, then an OpenAI SDK.
+
+```bash
+# Local redaction without a model provider
+export OTEL_SDK_DISABLED=true
+cargo run -p redact-gateway -- --host 127.0.0.1
+
+curl -s http://127.0.0.1:8080/v1/redact \
+  -H 'content-type: application/json' \
+  -d '{"text":"Email me at alice@example.com"}'
+
+# Chat proxy (requires a provider such as Ollama with a pulled model)
+cargo run -p redact-gateway -- --provider-base-url http://127.0.0.1:11434
+
+curl -s http://127.0.0.1:8080/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "llama3.2",
+    "messages": [{"role":"user","content":"Email me at alice@example.com"}]
+  }'
+```
+
+With the bundled `default` profile the provider sees `[EMAIL_ADDRESS]` instead of the raw address. Surfaces include `/v1/chat/completions` (JSON and SSE), `/v1/completions`, `/v1/embeddings`, `/v1/redact`, `/v1/restore`, and compliance helpers. Configuration is YAML and/or `CENSGATE_*` environment variables; `validate-config`, `print-config`, and `print-policy` subcommands inspect the resolved settings without serving.
+
+| Capability | Notes |
+|------------|--------|
+| Policy profiles | Per-entity `allow` / `block` / `mask` / `replace` / `hash` / `tokenize` |
+| Token map | `off`, process-local `memory`, or shared `vault_kv2` (Vault / OpenBao); configured via `CENSGATE_VAULT_BACKEND` |
+| Auth | `none`, static API keys, or OIDC bearer JWTs |
+| Telemetry | OpenTelemetry traces, metrics, and audit log records (`OTEL_*` + `CENSGATE_TRACE_*`) |
+| Streaming | Buffered (default, in-place SSE rewrite) or incremental with a hold-back window |
+
+Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gateway.yml`, `deploy/`. Full docs: [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md), [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md), and [`docs/gateway/`](docs/gateway/).
+
 ## Supported Entity Types
 
 ### Pattern-Based (54 types)
@@ -591,18 +638,15 @@ redact/
 │   ├── redact-wasm/      # WebAssembly bindings
 │   └── redact-gateway/   # OpenAI-compatible privacy gateway (embeds redact-core)
 ├── patterns/             # PII detection patterns (GDPR, HIPAA, CCPA)
+├── deploy/               # Gateway Collector config and Kubernetes manifests
 ├── scripts/              # Utility scripts (model export)
 ├── examples/             # Usage examples
-└── docs/                 # Documentation
+├── docs/
+│   ├── gateway/          # Gateway operator documentation
+│   └── benchmarks/       # Benchmark methodology and results
+├── Dockerfile.gateway
+└── docker-compose.gateway.yml
 ```
-
-### Privacy gateway (open core)
-
-```bash
-cargo run -p redact-gateway -- --backend-url http://127.0.0.1:11434
-```
-
-`POST /v1/chat/completions` (including `stream: true`) redacts prompt and model-output content in-process via `redact-core`, then returns JSON or SSE to the client. See [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md).
 
 ## Testing
 
@@ -630,6 +674,8 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 ## Documentation
 
 - [API Documentation](https://docs.rs/redact-core) — Rust API docs
+- [Gateway getting started](/censgate/redact/blob/main/docs/gateway/getting-started.md) — Local redaction, Ollama chat, OpenAI SDK
+- [Gateway Documentation](/censgate/redact/blob/main/docs/gateway) — Configuration, policy, tokenization, auth, telemetry, audit, streaming, deployment
 - [Test Coverage](/censgate/redact/blob/main/TEST_COVERAGE.md) — Testing details
 - [Contributing Guide](/censgate/redact/blob/main/CONTRIBUTING.md) — How to contribute
 - [Examples](/censgate/redact/blob/main/examples) — Code examples
@@ -654,6 +700,8 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 #### Unreleased
 
 - [x] 18 secret/credential entity types (54 pattern-based total) — Phase 1 of #101
+- [x] `redact-gateway`: policy profiles, reversible tokenization, OIDC and API key auth,
+      OpenTelemetry traces/metrics/logs, runtime pattern packs, container and Kubernetes assets
 
 #### v0.9.0 (Planned)
 

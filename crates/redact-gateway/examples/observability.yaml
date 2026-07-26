@@ -1,0 +1,41 @@
+# observability.yaml — audit export plus telemetry detail settings.
+#
+# Use when you need operation spans, optional gen_ai.* attributes, and audit
+# records exported as OTLP log records.
+#
+# Transport (endpoints, protocol, sampling, resource attributes) is configured
+# with standard OTEL_* environment variables — not in this file. For example:
+#
+#   export OTEL_SERVICE_NAME=redact-gateway
+#   export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+#   export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+#   export OTEL_TRACES_EXPORTER=otlp
+#   export OTEL_METRICS_EXPORTER=otlp
+#   export OTEL_LOGS_EXPORTER=otlp
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  enable_http_trace: true
+  metrics_endpoint: true
+
+provider:
+  base_url: http://127.0.0.1:11434
+
+redaction:
+  stream_mode: buffered
+  stream_holdback_bytes: 256
+
+audit:
+  # otlp | stdout | file | off — otlp sends audit events as OTLP log records.
+  export: otlp
+  queue_capacity: 2048
+  include_entity_types: true
+
+telemetry:
+  # off | basic | detailed
+  operations: detailed
+  # Optional target filter directive (tracing-subscriber style).
+  filter: redact_gateway=info,tower_http=info
+  # Development-stage gen_ai.* attributes (also gated by OTEL_SEMCONV_STABILITY_OPT_IN).
+  genai_attributes: true

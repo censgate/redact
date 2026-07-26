@@ -781,13 +781,13 @@ mod tests {
         assert_eq!(cfg.label_mappings.get("B-LOC"), Some(&EntityType::Location));
 
         // MISC labels should NOT appear (no EntityType mapping exists)
-        assert!(cfg.label_mappings.get("B-MISC").is_none());
-        assert!(cfg.label_mappings.get("I-MISC").is_none());
+        assert!(!cfg.label_mappings.contains_key("B-MISC"));
+        assert!(!cfg.label_mappings.contains_key("I-MISC"));
 
         // No stale defaults: B-DATE / I-DATE should NOT leak in because
         // they are not present in the provided id2label
-        assert!(cfg.label_mappings.get("B-DATE").is_none());
-        assert!(cfg.label_mappings.get("I-DATE").is_none());
+        assert!(!cfg.label_mappings.contains_key("B-DATE"));
+        assert!(!cfg.label_mappings.contains_key("I-DATE"));
     }
 
     #[test]

@@ -126,8 +126,7 @@ fn test_ner_with_bert_base() -> Result<()> {
         // Verify expected entities are detected
         for (expected_type, expected_text) in &test_case.expected_entities {
             let found = results.iter().any(|r| {
-                r.entity_type == *expected_type
-                    && r.text.as_ref().map(|t| t.as_str()) == Some(*expected_text)
+                r.entity_type == *expected_type && r.text.as_deref() == Some(*expected_text)
             });
 
             assert!(

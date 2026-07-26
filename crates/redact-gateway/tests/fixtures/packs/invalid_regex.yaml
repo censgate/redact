@@ -1,0 +1,12 @@
+# Pack containing one deliberately invalid regex.
+version: "1.0"
+framework: "Fixture-Invalid"
+patterns:
+  - id: "broken"
+    regex: '(unclosed'
+    confidence: 0.9
+    enabled: true
+  - id: "global_email"
+    regex: 'VALID_TOKEN_[A-Z]+'
+    confidence: 0.9
+    enabled: true

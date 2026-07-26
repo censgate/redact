@@ -59,42 +59,48 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-      - name: Build CLI binary (Linux ARM64)
+      - name: Build CLI and gateway binaries (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
           export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-          cargo build --release --package redact-cli --target ${{ matrix.target }}
+          cargo build --release --package redact-cli --package redact-gateway --target ${{ matrix.target }}
 
-      - name: Build CLI binary (other targets)
+      - name: Build CLI and gateway binaries (other targets)
         if: matrix.target != 'aarch64-unknown-linux-gnu'
-        run: cargo build --release --package redact-cli --target ${{ matrix.target }}
+        run: cargo build --release --package redact-cli --package redact-gateway --target ${{ matrix.target }}
 
-      - name: Strip binary (Linux x64)
+      - name: Strip binaries (Linux x64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+        run: |
+          strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          strip target/${{ matrix.target }}/release/redact-gateway
 
-      - name: Strip binary (Linux ARM64)
+      - name: Strip binaries (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+        run: |
+          aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          aarch64-linux-gnu-strip target/${{ matrix.target }}/release/redact-gateway
 
-      - name: Strip binary (macOS)
+      - name: Strip binaries (macOS)
         if: runner.os == 'macOS'
-        run: strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+        run: |
+          strip target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          strip target/${{ matrix.target }}/release/redact-gateway
 
       - name: Create archive (Unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../redact-${{ matrix.target }}.tar.gz ${{ matrix.binary_name }}
+          tar czf ../../../redact-${{ matrix.target }}.tar.gz ${{ matrix.binary_name }} redact-gateway
 
       - name: Create archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../redact-${{ matrix.target }}.zip ${{ matrix.binary_name }}
+          7z a ../../../redact-${{ matrix.target }}.zip ${{ matrix.binary_name }} redact-gateway.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -338,4 +344,49 @@ jobs:
             NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v2
           cache-from: type=gha,scope=ner-full
           cache-to: type=gha,mode=max,scope=ner-full
+          platforms: linux/amd64,linux/arm64
+
+  # Publishes ghcr.io/<repo>-gateway (suffix form), matching redact-ner-base
+  # rather than a :gateway tag on the main API image — gateway is a separate binary.
+  docker-gateway:
+    name: Build and Push Docker Image (gateway)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute Docker tags (gateway)
+        id: meta-gateway
+        run: |
+          VER="${VERSION#v}"
+          MAJOR="${VER%%.*}"
+          MINOR="${VER%.*}"
+          IMAGE="ghcr.io/${{ github.repository }}-gateway"
+          TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Build and push gateway image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.gateway
+          push: true
+          tags: ${{ steps.meta-gateway.outputs.tags }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
           platforms: linux/amd64,linux/arm64

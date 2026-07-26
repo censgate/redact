@@ -2,18 +2,52 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-//! `redact-gateway` — OpenAI-compatible AI privacy gateway.
+//! OpenAI-compatible AI privacy gateway that embeds `redact-core` in-process.
 //!
-//! Embeds [`redact_core::AnalyzerEngine`] in-process to redact prompts before
-//! forwarding to an upstream OpenAI-compatible backend.
+//! The gateway sits between an application and a model provider. On the way
+//! out it detects sensitive values and applies the action a policy profile
+//! specifies for each entity type: allow, block, mask, replace, hash, or
+//! tokenize. On the way back it can restore tokenized values so the caller
+//! sees a complete answer while the provider only ever saw placeholders.
+//!
+//! ```no_run
+//! use redact_gateway::{config::ResolvedConfig, GatewayServer};
+//!
+//! # async fn run() -> anyhow::Result<()> {
+//! let config = ResolvedConfig::load()?;
+//! GatewayServer::new(config).await?.run().await
+//! # }
+//! ```
+//!
+//! # Subsystems
+//!
+//! | Module | Responsibility |
+//! |--------|----------------|
+//! | [`config`] | Resolved configuration from files, environment and flags |
+//! | [`policy`] | Per-entity actions and profiles |
+//! | [`packs`] | Pattern packs loaded from YAML at runtime |
+//! | [`redact`] | Detection, action application, tokens and payload traversal |
+//! | [`vault`] | Pluggable token map backends |
+//! | [`auth`] | Inbound API key and OIDC authentication |
+//! | [`telemetry`] | OpenTelemetry traces, metrics and logs |
+//! | [`audit`] | Audit records emitted as OpenTelemetry log records |
 
+pub mod audit;
+pub mod auth;
 pub mod config;
+pub mod error;
 pub mod openai;
+pub mod packs;
+pub mod policy;
 pub mod proxy;
 pub mod redact;
 pub mod routes;
 pub mod server;
 pub mod stream;
+pub mod telemetry;
+pub mod vault;
 
-pub use config::{parse_strategy, ConfigError, GatewayConfig};
+pub use config::{ConfigError, ConfigHandle, ResolvedConfig};
+pub use error::GatewayError;
+pub use policy::{EntityAction, PolicySet, Profile};
 pub use server::GatewayServer;

@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `redact-gateway`: policy profiles with per-entity actions (`allow`, `block`,
+  `mask`, `replace`, `hash`, `tokenize`), confidence floors, scan targets, and
+  bundled `default` / `reversible` / `strict` / `secrets_only` / `permissive`
+  profiles (fail-closed by default on traffic-handling profiles).
+- `redact-gateway`: resolved configuration from YAML and/or `CENSGATE_*`
+  environment variables (`env` / `file` / `layered`), `deny_unknown_fields`
+  schema, `SIGHUP` reload that keeps the last good snapshot, and
+  `validate-config` / `print-config` / `print-policy` subcommands.
+- `redact-gateway`: reversible tokenization with AES-256-GCM sealed mappings
+  (`CENSGATE_TOKEN_DEK`) and token map backends `off`, process-local `memory`,
+  and shared `vault_kv2` (HashiCorp Vault or OpenBao KV v2).
+- `redact-gateway`: inbound authentication modes `none`, static `api_key`, and
+  OIDC/JWT resource-server validation with JWKS refresh and tenant/profile
+  claim mapping.
+- `redact-gateway`: OpenTelemetry traces, metrics, and logs (`OTEL_*`),
+  gateway operation spans (`CENSGATE_TRACE_OPERATIONS`), opt-in development-stage
+  `gen_ai.*` attributes, and audit records via `stdout` / `file` / `otlp` sinks.
+- `redact-gateway`: runtime YAML pattern packs (`CENSGATE_PATTERN_PACKS` /
+  `packs.paths`) loaded alongside or instead of built-in patterns.
+- `redact-gateway`: expanded HTTP surface — `/v1/chat/completions`,
+  `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/redact`, `/v1/restore`,
+  `/v1/compliance/status`, `/v1/compliance/check`, plus `/health`/`/livez`/
+  `/readyz`/`/metrics` outside the auth layer.
+- `redact-gateway`: streaming redaction modes `buffered` (default, full-stream
+  detection with in-place SSE rewrite of content and tool-call argument deltas)
+  and `incremental` (hold-back window).
+- `redact-gateway`: deployment assets — `Dockerfile.gateway`,
+  `docker-compose.gateway.yml`, an audit-grade OpenTelemetry Collector config
+  and Kubernetes manifests under `deploy/`, and example configurations under
+  `crates/redact-gateway/examples/` validated in CI.
+- Docs: operator guide under `docs/gateway/` (including
+  `docs/gateway/getting-started.md`) and rewritten
+  `crates/redact-gateway/README.md`.
 - `redact-core`: 18 new secret/credential entity types (`PRIVATE_KEY`, `JWT_TOKEN`,
   `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`,
   `STRIPE_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
@@ -36,6 +69,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `redact-gateway`: the inference destination is called a **provider**
+  throughout, matching the OpenTelemetry GenAI conventions the gateway emits
+  (`gen_ai.provider.name`). `backend` refers only to token map storage and
+  `upstream` only to direction. Settings are `CENSGATE_PROVIDER_*`, the YAML
+  section is `provider:`, and the flags are `--provider-base-url` /
+  `--provider-api-key`. Each setting has exactly one name; `VAULT_ADDR` /
+  `VAULT_TOKEN` (and the OpenBao `BAO_` spellings) are the only unprefixed
+  variables read, since they configure the token map server rather than the
+  gateway.
+- `redact-gateway`: `redaction.allow_profile_header` defaults to `false`; the
+  profile header is ignored unless enabled. Startup refuses
+  `forward_client_authorization` with inbound auth, non-32-byte sealing keys,
+  and all-zero sealing keys; warns for tokenize without a durable token map and
+  for profile-header-with-auth-off. `/v1/restore` requires authentication;
+  authenticated token-map keys are subject-bound. KV v2 writes use check-and-set
+  with bounded retries. SIGHUP reload applies a documented subset of settings
+  and logs restart-required field names.
+- `redact-gateway`: `gen_ai.operation.name` is derived from the surface being
+  called (`chat`, `embeddings`, `text_completion`), `gen_ai.request.stream`
+  marks streamed requests, streamed provider calls now get a client span, and
+  `gen_ai.provider.name` is configurable with `CENSGATE_PROVIDER_NAME` for
+  deployments whose provider is not OpenAI.
 - `redact-core`: `Instant::now()` (which panics on `wasm32-unknown-unknown`) is now
   gated behind a `Timer` helper so the engine is WASM-safe; native timing behavior is
   unchanged.
@@ -44,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WASM scope: NER (`PERSON`, `ORGANIZATION`, `LOCATION` in prose) is not available in
   the WASM build because the ONNX model + runtime do not fit browser/Cloudflare Workers
   limits. See the README "WebAssembly" section for the hybrid alternative.
+
+### Fixed
+
+- `patterns/security/credentials.yaml`: the password-field pattern escaped a
+  quote with a backslash inside a single-quoted YAML scalar, which made the
+  whole pack unparseable. Pattern packs are now parsed strictly rather than
+  repaired by the loader.
 
 ### Security
 

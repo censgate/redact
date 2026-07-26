@@ -1,0 +1,63 @@
+# reversible.yaml — tokenization with an in-memory token map and response restore.
+#
+# Use when callers need model answers with original PII restored after the
+# upstream round-trip. Requires a token map backend (`memory` here; swap to
+# `vault_kv2` for multi-replica deployments) and a sealing key
+# (`vault.data_encryption_key` / CENSGATE_TOKEN_DEK).
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  metrics_endpoint: true
+
+provider:
+  base_url: http://127.0.0.1:11434
+
+redaction:
+  stream_mode: buffered
+  stream_holdback_bytes: 256
+  # Session header groups token reuse across turns of a conversation.
+  session_header: x-censgate-session-id
+  # Leave profile selection by header off unless callers are trusted: with
+  # inbound authentication disabled, any caller could otherwise choose a
+  # weaker profile than the one configured here.
+  allow_profile_header: false
+
+vault:
+  backend: memory
+  ttl_secs: 3600
+  # The sealing key is deliberately absent so this file works as-is: the
+  # gateway generates an ephemeral one and logs that tokens will not survive a
+  # restart. Supply a real key out of band when you need them to:
+  #   CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
+  # A key of all zero bytes is refused at startup, so a copied placeholder
+  # cannot become a production key.
+
+auth:
+  mode: none
+
+# Inline reversible profile (tokenize + restore). Equivalent to selecting the
+# bundled profile via CENSGATE_DEFAULT_PROFILE=reversible.
+policy:
+  default_profile: reversible
+  profiles:
+    reversible:
+      description: Tokenize personal data so responses can be restored.
+      default_action: tokenize
+      min_confidence: 0.5
+      restore_responses: true
+      fail_closed: true
+      entities:
+        PRIVATE_KEY: { action: block }
+        AWS_ACCESS_KEY: { action: block }
+        GITHUB_TOKEN: { action: block }
+        OPENAI_API_KEY: { action: block }
+        ANTHROPIC_API_KEY: { action: block }
+        DATABASE_CONNECTION_STRING: { action: block }
+        HASHICORP_VAULT_TOKEN: { action: block }
+        JWT_TOKEN: { action: block }
+        DATE_TIME: { action: allow }
+        AGE: { action: allow }
+        URL: { action: allow }
+        DOMAIN_NAME: { action: allow }
+        GUID: { action: allow }

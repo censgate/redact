@@ -2,91 +2,200 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-use clap::Parser;
-use redact_gateway::config::{parse_strategy, GatewayConfig};
+//! `redact-gateway` binary entry point.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use redact_gateway::config::{env as config_env, ConfigSourceKind, ResolvedConfig};
+use redact_gateway::server::reload_config;
 use redact_gateway::GatewayServer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::{info, warn};
 
-/// CLI is the single config owner for the binary (flags + env via clap).
+/// OpenAI-compatible privacy gateway.
+///
+/// Telemetry is configured with the standard OpenTelemetry environment
+/// variables (`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and so on)
+/// rather than gateway-specific flags.
 #[derive(Debug, Parser)]
-#[command(
-    name = "redact-gateway",
-    about = "Censgate AI privacy gateway (OpenAI-compatible, embeds redact-core)"
-)]
+#[command(name = "redact-gateway", version, about, long_about = None)]
 struct Cli {
-    /// Bind host
-    #[arg(long, env = "HOST", default_value = "0.0.0.0")]
-    host: String,
+    /// Configuration file to load.
+    #[arg(long, env = config_env::CONFIG_FILE, global = true)]
+    config: Option<PathBuf>,
 
-    /// Bind port
-    #[arg(long, env = "PORT", default_value_t = 8080)]
-    port: u16,
+    /// Configuration source: env, file or layered.
+    #[arg(long, env = config_env::CONFIG_SOURCE, global = true)]
+    config_source: Option<ConfigSourceKind>,
 
-    /// Upstream OpenAI-compatible base URL
-    #[arg(long, env = "BACKEND_URL", default_value = "http://127.0.0.1:11434")]
-    backend_url: String,
+    /// Bind address.
+    #[arg(long, env = config_env::HOST)]
+    host: Option<String>,
 
-    /// Upstream API key (falls back to OPENAI_API_KEY)
-    #[arg(long, env = "BACKEND_API_KEY")]
-    backend_api_key: Option<String>,
+    /// Bind port.
+    #[arg(long, env = config_env::PORT)]
+    port: Option<u16>,
 
-    /// Redaction strategy: replace | mask | hash
-    #[arg(long, env = "REDACTION_STRATEGY", default_value = "replace")]
-    redaction_strategy: String,
+    /// Base URL of the OpenAI-compatible inference provider.
+    #[arg(long, env = config_env::PROVIDER_BASE_URL)]
+    provider_base_url: Option<String>,
 
-    /// Enable HTTP request tracing
-    #[arg(long, env = "ENABLE_TRACING", default_value_t = true)]
-    enable_tracing: bool,
+    /// Bearer token sent to the provider.
+    #[arg(long, env = config_env::PROVIDER_API_KEY, hide_env_values = true)]
+    provider_api_key: Option<String>,
 
-    /// Upstream TCP connect timeout (seconds)
-    #[arg(long, env = "CONNECT_TIMEOUT_SECS", default_value_t = 10)]
-    connect_timeout_secs: u64,
+    /// Policy profile applied when a request does not select one.
+    #[arg(long, env = config_env::DEFAULT_PROFILE)]
+    profile: Option<String>,
 
-    /// Upstream request timeout (seconds); streams may run for minutes
-    #[arg(long, env = "REQUEST_TIMEOUT_SECS", default_value_t = 600)]
-    request_timeout_secs: u64,
+    /// Policy document to load.
+    #[arg(long, env = config_env::POLICY_FILE)]
+    policy: Option<PathBuf>,
 
-    /// Max buffered upstream response body bytes (JSON or SSE)
-    #[arg(long, env = "MAX_UPSTREAM_BODY_BYTES", default_value_t = 33_554_432)]
-    max_upstream_body_bytes: usize,
+    /// Directory or file of additional pattern packs. Repeatable.
+    #[arg(long = "pattern-pack", value_delimiter = ',')]
+    pattern_packs: Vec<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Serve traffic. This is the default when no subcommand is given.
+    Serve,
+    /// Load the configuration and report any problems without serving.
+    ValidateConfig,
+    /// Print the resolved configuration with secrets redacted.
+    PrintConfig,
+    /// Print the effective policy as YAML.
+    PrintPolicy,
 }
 
 impl Cli {
-    fn into_config(self) -> anyhow::Result<GatewayConfig> {
-        let strategy = parse_strategy(&self.redaction_strategy)?;
-        let backend_api_key = self.backend_api_key.filter(|s| !s.is_empty()).or_else(|| {
-            std::env::var("OPENAI_API_KEY")
-                .ok()
-                .filter(|s| !s.is_empty())
-        });
+    fn resolve(&self) -> Result<ResolvedConfig> {
+        // Flags are applied through the same environment overlay the library
+        // uses, so precedence is identical however the gateway is launched.
+        let mut overrides: Vec<(&str, String)> = Vec::new();
+        if let Some(path) = &self.config {
+            overrides.push((config_env::CONFIG_FILE, path.display().to_string()));
+        }
+        if let Some(source) = &self.config_source {
+            overrides.push((config_env::CONFIG_SOURCE, source.as_str().to_string()));
+        }
+        if let Some(host) = &self.host {
+            overrides.push((config_env::HOST, host.clone()));
+        }
+        if let Some(port) = self.port {
+            overrides.push((config_env::PORT, port.to_string()));
+        }
+        if let Some(url) = &self.provider_base_url {
+            overrides.push((config_env::PROVIDER_BASE_URL, url.clone()));
+        }
+        if let Some(key) = &self.provider_api_key {
+            overrides.push((config_env::PROVIDER_API_KEY, key.clone()));
+        }
+        if let Some(profile) = &self.profile {
+            overrides.push((config_env::DEFAULT_PROFILE, profile.clone()));
+        }
+        if let Some(policy) = &self.policy {
+            overrides.push((config_env::POLICY_FILE, policy.display().to_string()));
+        }
+        if !self.pattern_packs.is_empty() {
+            let joined = self
+                .pattern_packs
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            overrides.push((config_env::PATTERN_PACKS, joined));
+        }
 
-        Ok(GatewayConfig {
-            host: self.host,
-            port: self.port,
-            backend_url: self.backend_url.trim_end_matches('/').to_string(),
-            backend_api_key,
-            anonymizer: redact_core::AnonymizerConfig {
-                strategy,
-                ..Default::default()
-            },
-            enable_tracing: self.enable_tracing,
-            connect_timeout_secs: self.connect_timeout_secs,
-            request_timeout_secs: self.request_timeout_secs,
-            max_upstream_body_bytes: self.max_upstream_body_bytes,
-        })
+        for (key, value) in overrides {
+            // SAFETY: configuration is resolved before any worker thread is
+            // spawned, so no other thread can be reading the environment.
+            unsafe { std::env::set_var(key, value) };
+        }
+
+        ResolvedConfig::load().context("could not resolve configuration")
     }
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "redact_gateway=info,tower_http=info".into()),
-        )
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let config = match cli.resolve() {
+        Ok(config) => config,
+        Err(err) => {
+            // Telemetry is not up yet, so report the failure plainly.
+            eprintln!("error: {err:#}");
+            std::process::exit(2);
+        }
+    };
 
-    let config = Cli::parse().into_config()?;
-    GatewayServer::new(config).run().await
+    let telemetry = Arc::new(
+        redact_gateway::telemetry::init(&config.telemetry)
+            .context("could not initialize telemetry")?,
+    );
+    telemetry
+        .init_tracing_subscriber()
+        .context("could not install the tracing subscriber")?;
+
+    match cli.command.unwrap_or(Command::Serve) {
+        Command::Serve => serve(config, telemetry).await,
+        Command::ValidateConfig => {
+            config.validate()?;
+            println!(
+                "configuration is valid: {} profiles, default `{}`, source `{}`",
+                config.policy.profiles.len(),
+                config.policy.default_profile,
+                config.source.as_str()
+            );
+            Ok(())
+        }
+        Command::PrintConfig => {
+            println!("{}", serde_json::to_string_pretty(&config.summary())?);
+            Ok(())
+        }
+        Command::PrintPolicy => {
+            println!("{}", serde_norway::to_string(config.policy.as_ref())?);
+            Ok(())
+        }
+    }
 }
+
+async fn serve(
+    config: ResolvedConfig,
+    telemetry: Arc<redact_gateway::telemetry::Telemetry>,
+) -> Result<()> {
+    info!(telemetry = %telemetry.summary(), "telemetry configured");
+
+    let server = GatewayServer::with_telemetry(config, telemetry).await?;
+    spawn_reload_watcher(server.config_handle());
+    server.run().await
+}
+
+/// Reload configuration when the process receives `SIGHUP`.
+#[cfg(unix)]
+fn spawn_reload_watcher(handle: redact_gateway::ConfigHandle) {
+    tokio::spawn(async move {
+        let mut hangup = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        {
+            Ok(signal) => signal,
+            Err(err) => {
+                warn!(error = %err, "could not listen for SIGHUP; configuration reload is disabled");
+                return;
+            }
+        };
+        while hangup.recv().await.is_some() {
+            if let Err(err) = reload_config(&handle) {
+                warn!(error = %err, "configuration reload failed");
+            }
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn spawn_reload_watcher(_handle: redact_gateway::ConfigHandle) {}

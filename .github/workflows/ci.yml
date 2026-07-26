@@ -166,3 +166,40 @@ jobs:
 
       - name: Build with MSRV
         run: cargo build --workspace --all-features
+
+  # Independent of the OS/Rust matrix so it does not multiply CI time.
+  gateway-examples:
+    name: Gateway example configs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: gateway-examples
+
+      - name: Build redact-gateway
+        run: cargo build -p redact-gateway
+
+      - name: Validate example configurations
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          examples=(crates/redact-gateway/examples/*.yaml)
+          if [ ${#examples[@]} -eq 0 ]; then
+            echo "ERROR: no example YAML files found"
+            exit 1
+          fi
+          for f in "${examples[@]}"; do
+            echo "=== validate-config $f ==="
+            cargo run -q -p redact-gateway -- --config "$f" --config-source file validate-config
+          done
+
+      - name: Build Dockerfile.gateway
+        run: docker build -f Dockerfile.gateway -t redact-gateway:ci .
