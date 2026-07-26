@@ -270,7 +270,8 @@ async fn buffered_stream_preserves_provider_extension_fields() {
     assert_eq!(first["system_fingerprint"], "fp_abc");
     assert_eq!(first["service_tier"], "default");
     assert_eq!(first["provider_ext"]["foo"], 1);
-    assert_eq!(first["choices"][0]["logprobs"]["content"][0]["token"], "hi");
+    // Raw token logprobs can reconstruct redacted content and are stripped.
+    assert!(first["choices"][0]["logprobs"].is_null());
 }
 
 #[tokio::test]
