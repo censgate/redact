@@ -154,7 +154,7 @@ impl TokenMapStore for Kv2Store {
 
         for attempt in 1..=PUT_CAS_ATTEMPTS {
             let (existing, cas) = self.read_for_cas(&path).await?;
-            let merged = merge_mappings(existing, mappings);
+            let merged = merge_mappings(existing, mappings)?;
             let payload = StoredSession {
                 mappings: merged,
                 expires_at: Utc::now() + chrono::Duration::seconds(self.ttl_secs as i64),

@@ -82,6 +82,31 @@ async fn blocked_entities_in_model_answers_are_refused() {
 }
 
 #[tokio::test]
+async fn blocked_entities_in_provider_error_messages_are_refused() {
+    let upstream = mock_json_upstream_status(
+        500,
+        json!({
+            "error": {
+                "message": "upstream saw AKIAIOSFODNN7EXAMPLE",
+                "type": "server_error"
+            }
+        }),
+    )
+    .await;
+    let router = router_for(config_for(&upstream)).await;
+
+    let response = post_json(router, "/v1/chat/completions", chat_request("hello")).await;
+
+    assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response.json()["error"]["type"], "policy_violation");
+    assert!(
+        !response.body.contains("AKIAIOSFODNN7EXAMPLE"),
+        "blocked secret leaked: {}",
+        response.body
+    );
+}
+
+#[tokio::test]
 async fn blocked_entities_are_refused_and_never_forwarded() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(config_for(&upstream)).await;

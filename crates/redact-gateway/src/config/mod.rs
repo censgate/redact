@@ -805,6 +805,9 @@ impl ResolvedConfig {
         {
             changed.push("provider.forward_client_authorization");
         }
+        if self.provider.name != next.provider.name {
+            changed.push("provider.name");
+        }
         if self.packs.paths != next.packs.paths {
             changed.push("packs.paths");
         }

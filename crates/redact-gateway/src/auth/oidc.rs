@@ -28,12 +28,16 @@ const SUPPORTED_ALGS: &[Algorithm] = &[
     Algorithm::ES384,
 ];
 
+/// Minimum gap between forced JWKS refreshes triggered by unknown `kid`s.
+const FORCE_REFRESH_MIN_INTERVAL: Duration = Duration::from_secs(5);
+
 /// Cached JWKS document and discovery metadata.
 #[derive(Default)]
 struct JwksState {
     jwks: Option<JwkSet>,
     jwks_uri: Option<String>,
     fetched_at: Option<Instant>,
+    last_force_refresh: Option<Instant>,
 }
 
 /// OAuth 2.0 / OIDC resource-server authenticator.
@@ -83,9 +87,22 @@ impl OidcAuthenticator {
             .filter(|s| !s.is_empty())
             .ok_or_else(|| AuthError::Unavailable("oidc issuer is not configured".to_string()))?;
 
+        let audience = settings
+            .audience
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if audience.is_none() && !settings.allow_missing_audience {
+            return Err(AuthError::Unavailable(
+                "oidc audience is not configured; set auth.oidc.audience or \
+                 allow_missing_audience: true (unsafe)"
+                    .to_string(),
+            ));
+        }
+
         Ok(Self {
             issuer,
-            audience: settings.audience.clone(),
+            audience,
             configured_jwks_url: settings.jwks_url.clone(),
             required_scopes: settings.required_scopes.clone(),
             tenant_claim: settings.tenant_claim.clone(),
@@ -178,8 +195,22 @@ impl OidcAuthenticator {
             return Ok(jwk);
         }
 
-        // Key rotation: force one refresh on kid miss before rejecting.
-        self.ensure_jwks(true).await?;
+        // Key rotation: force one refresh on kid miss, but coalesce bursts of
+        // unknown-kid traffic so unauthenticated callers cannot amplify fetches.
+        let allow_force = {
+            let state = self.state.read().await;
+            state
+                .last_force_refresh
+                .map(|t| t.elapsed() >= FORCE_REFRESH_MIN_INTERVAL)
+                .unwrap_or(true)
+        };
+        if allow_force {
+            self.ensure_jwks(true).await?;
+            {
+                let mut state = self.state.write().await;
+                state.last_force_refresh = Some(Instant::now());
+            }
+        }
         self.lookup_cached(kid).await.ok_or_else(|| {
             AuthError::Invalid(match kid {
                 Some(k) => format!("no jwk for kid `{k}`"),

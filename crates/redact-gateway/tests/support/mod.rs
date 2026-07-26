@@ -128,6 +128,31 @@ pub async fn mock_json_upstream(response: Value) -> MockUpstream {
     MockUpstream { addr, captured }
 }
 
+/// Mock upstream that answers chat completions with an explicit HTTP status.
+pub async fn mock_json_upstream_status(status: u16, response: Value) -> MockUpstream {
+    let captured: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+    let sink = captured.clone();
+    let status_code = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post({
+            let sink = sink.clone();
+            move |Json(body): Json<Value>| {
+                let sink = sink.clone();
+                let response = response.clone();
+                async move {
+                    *sink.lock().unwrap() = Some(body);
+                    (status_code, Json(response)).into_response()
+                }
+            }
+        }),
+    );
+
+    let addr = spawn(router).await;
+    MockUpstream { addr, captured }
+}
+
 /// Mock upstream that returns a different JSON body for each successive request.
 pub async fn mock_json_upstream_sequence(responses: Vec<Value>) -> MockUpstream {
     assert!(

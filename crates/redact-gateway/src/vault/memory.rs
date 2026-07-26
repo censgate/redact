@@ -115,7 +115,7 @@ impl TokenMapStore for MemoryStore {
             .remove(&key)
             .map(|entry| entry.mappings)
             .unwrap_or_default();
-        let merged = merge_mappings(existing, mappings);
+        let merged = merge_mappings(existing, mappings)?;
         guard.insert(
             key,
             SessionEntry {

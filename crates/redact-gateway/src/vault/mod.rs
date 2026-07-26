@@ -33,6 +33,10 @@ pub enum TokenMapError {
     #[error("token map operation failed: {0}")]
     Backend(String),
 
+    /// Two writers minted the same token label for different plaintexts.
+    #[error("token map conflict: {0}")]
+    Conflict(String),
+
     /// Tokenization persistence is intentionally disabled.
     #[error("token map is disabled")]
     Disabled,
@@ -132,14 +136,14 @@ pub fn session_path(prefix: &str, tenant: &str, session: &str) -> String {
 
 /// Merge `incoming` into `existing`.
 ///
-/// The first writer to mint a token label owns it: when the same token appears
-/// in both sides with different sealed values, the existing mapping is kept.
-/// Silent "incoming wins" would let a concurrent allocator steal an index and
-/// make restore return the wrong plaintext.
+/// The first writer to mint a token label owns it. When the same token appears
+/// with a different sealed value, return [`TokenMapError::Conflict`] so the
+/// losing request fails closed instead of persisting a local mapping that can
+/// never be resumed correctly.
 pub(crate) fn merge_mappings(
     existing: Vec<TokenMapping>,
     incoming: &[TokenMapping],
-) -> Vec<TokenMapping> {
+) -> Result<Vec<TokenMapping>, TokenMapError> {
     let mut by_token = std::collections::HashMap::with_capacity(existing.len() + incoming.len());
     for mapping in existing {
         by_token.insert(mapping.token.clone(), mapping);
@@ -147,16 +151,18 @@ pub(crate) fn merge_mappings(
     for mapping in incoming {
         match by_token.get(&mapping.token) {
             Some(prior) if prior.sealed_value != mapping.sealed_value => {
-                // Keep the incumbent. The colliding mint is dropped; the
-                // caller that minted it still restored within its own request
-                // via the in-memory session, but later resumes see the first writer.
+                return Err(TokenMapError::Conflict(format!(
+                    "token label {} was minted concurrently for a different value",
+                    mapping.token
+                )));
             }
+            Some(prior) if prior.sealed_value == mapping.sealed_value => {}
             _ => {
                 by_token.insert(mapping.token.clone(), mapping.clone());
             }
         }
     }
-    by_token.into_values().collect()
+    Ok(by_token.into_values().collect())
 }
 
 fn sanitize_path_segment(raw: &str) -> String {
@@ -225,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_keeps_existing_mapping_on_token_collision() {
+    fn merge_rejects_token_collision_with_different_sealed_values() {
         let existing = vec![TokenMapping {
             token: "[EMAIL_ADDRESS_1]".into(),
             entity_type: "EMAIL_ADDRESS".into(),
@@ -238,7 +244,25 @@ mod tests {
             sealed_value: "seal-b".into(),
             created_at: chrono::Utc::now(),
         }];
-        let merged = merge_mappings(existing, &incoming);
+        let err = merge_mappings(existing, &incoming).unwrap_err();
+        assert!(matches!(err, TokenMapError::Conflict(_)), "{err:?}");
+    }
+
+    #[test]
+    fn merge_accepts_identical_sealed_values_for_same_token() {
+        let existing = vec![TokenMapping {
+            token: "[EMAIL_ADDRESS_1]".into(),
+            entity_type: "EMAIL_ADDRESS".into(),
+            sealed_value: "seal-a".into(),
+            created_at: chrono::Utc::now(),
+        }];
+        let incoming = [TokenMapping {
+            token: "[EMAIL_ADDRESS_1]".into(),
+            entity_type: "EMAIL_ADDRESS".into(),
+            sealed_value: "seal-a".into(),
+            created_at: chrono::Utc::now(),
+        }];
+        let merged = merge_mappings(existing, &incoming).unwrap();
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].sealed_value, "seal-a");
     }

@@ -420,7 +420,11 @@ impl RequestScope {
                     elapsed,
                     Some("token_map_error"),
                 );
-                if self.profile.fail_closed {
+                // Token-label collisions are integrity failures: never keep the
+                // local mapping for restore when persistence rejected it.
+                if matches!(err, crate::vault::TokenMapError::Conflict(_))
+                    || self.profile.fail_closed
+                {
                     return Err(GatewayError::DependencyUnavailable(format!(
                         "token map write failed: {err}"
                     )));
@@ -866,9 +870,23 @@ async fn stream_chat(
 
     if response.status >= 400 {
         // Provider errors arrive as JSON even when the request asked for SSE.
-        let error_body = serde_json::from_str::<Value>(&response.body).unwrap_or_else(
+        let mut error_body = serde_json::from_str::<Value>(&response.body).unwrap_or_else(
             |_| json!({"error": {"message": response.body, "type": "provider_error"}}),
         );
+        let response_outcome = redact_response_payload(state, scope, &mut error_body)?;
+        if response_outcome.is_blocked() {
+            let error = blocked_error(&response_outcome);
+            state.audit.emit(AuditEvent::from_outcome(
+                &response_outcome,
+                AuditContext {
+                    outcome: Some(AuditOutcome::Blocked),
+                    error_type: Some(error.telemetry_error_type().to_string()),
+                    provider_status: Some(response.status),
+                    ..scope.audit_context(semconv::event::POLICY_BLOCK, "chat.completions.stream")
+                },
+            ));
+            return Err(error);
+        }
         return Ok((
             StatusCode::from_u16(response.status).unwrap_or(StatusCode::BAD_GATEWAY),
             Json(error_body),
@@ -1199,15 +1217,37 @@ pub struct RedactResponse {
     pub content_sha256: String,
 }
 
+/// Resolve the policy profile for a request.
+///
+/// A credential-supplied profile always wins so callers cannot widen the policy
+/// their credential was issued for. Otherwise the request-selected name is used
+/// (body field or, on proxy surfaces, the profile header when enabled).
+fn resolve_profile(
+    config: &ResolvedConfig,
+    auth: &AuthContext,
+    request_profile: Option<&str>,
+) -> Result<Arc<Profile>, GatewayError> {
+    let name = auth
+        .profile
+        .as_deref()
+        .or(request_profile)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    config
+        .policy
+        .profile(name)
+        .map_err(|e| GatewayError::InvalidRequest(e.to_string()))
+}
+
 async fn redact_endpoint(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
     Json(request): Json<RedactRequest>,
 ) -> Response {
     let config = state.config();
-    let profile = match config.policy.profile(request.profile.as_deref()) {
+    let profile = match resolve_profile(&config, &auth, request.profile.as_deref()) {
         Ok(profile) => profile,
-        Err(err) => return GatewayError::InvalidRequest(err.to_string()).into_response(),
+        Err(err) => return err.into_response(),
     };
 
     let session_id = request
@@ -1348,12 +1388,13 @@ async fn restore_endpoint(
 
 async fn compliance_check(
     State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
     Json(request): Json<RedactRequest>,
 ) -> Response {
     let config = state.config();
-    let profile = match config.policy.profile(request.profile.as_deref()) {
+    let profile = match resolve_profile(&config, &auth, request.profile.as_deref()) {
         Ok(profile) => profile,
-        Err(err) => return GatewayError::InvalidRequest(err.to_string()).into_response(),
+        Err(err) => return err.into_response(),
     };
 
     // A check reports what policy would do. Tokens are minted into a throwaway
@@ -1460,5 +1501,29 @@ pub fn compliance_headers(
 fn insert_number(headers: &mut HeaderMap, name: &'static str, value: usize) {
     if let Ok(value) = HeaderValue::from_str(&value.to_string()) {
         headers.insert(HeaderName::from_static(name), value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::AuthContext;
+    use crate::config::ResolvedConfig;
+
+    #[test]
+    fn credential_profile_wins_over_request_profile() {
+        let config = ResolvedConfig::default();
+        let mut auth = AuthContext::anonymous();
+        auth.profile = Some("strict".into());
+        let profile = resolve_profile(&config, &auth, Some("permissive")).unwrap();
+        assert_eq!(profile.name, "strict");
+    }
+
+    #[test]
+    fn request_profile_applies_when_credential_has_none() {
+        let config = ResolvedConfig::default();
+        let auth = AuthContext::anonymous();
+        let profile = resolve_profile(&config, &auth, Some("secrets_only")).unwrap();
+        assert_eq!(profile.name, "secrets_only");
     }
 }

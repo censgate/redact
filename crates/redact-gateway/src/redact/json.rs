@@ -66,6 +66,17 @@ pub fn redact_chat_response(
 ) -> Result<(), RedactError> {
     let scan = ctx.profile().scan.clone();
 
+    // Provider error payloads are OpenAI-shaped JSON even when the request
+    // asked for SSE. Scan the message so blocked secrets cannot leak out.
+    if let Some(error) = body.get_mut("error") {
+        if error.is_string() {
+            redact_string_field(ctx, Some(error))?;
+        } else {
+            redact_string_field(ctx, error.get_mut("message"))?;
+            redact_string_field(ctx, error.get_mut("param"))?;
+        }
+    }
+
     if let Some(choices) = body.get_mut("choices").and_then(Value::as_array_mut) {
         for choice in choices.iter_mut() {
             if scan.response_messages {
