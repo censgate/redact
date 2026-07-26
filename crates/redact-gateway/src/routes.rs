@@ -1116,13 +1116,10 @@ async fn proxy_json_surface(
     scope.persist_tokens(&state).await?;
     let mut response = call_provider(&state, &scope, path, body).await?;
 
-    // Embedding vectors carry no text, so only completion-style bodies are
-    // scanned on the way back.
-    let response_outcome = if is_embeddings {
-        RedactionOutcome::default()
-    } else {
-        redact_response_payload(&state, &scope, &mut response.body)?
-    };
+    // Always scan the response: successful embedding vectors have no text
+    // fields of interest, but provider error JSON (`error.message`) can carry
+    // blocked secrets on any surface — including embeddings.
+    let response_outcome = redact_response_payload(&state, &scope, &mut response.body)?;
 
     if response_outcome.is_blocked() {
         let error = blocked_error(&response_outcome);
