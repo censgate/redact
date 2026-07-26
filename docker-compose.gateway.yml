@@ -75,7 +75,8 @@ services:
   ollama:
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      # Loopback only — local provider, not an edge service.
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama-data:/root/.ollama
 
@@ -88,12 +89,13 @@ services:
       - ./deploy/otel-collector.yaml:/etc/otelcol/config.yaml:ro
       - otel-audit:/var/lib/otelcol/audit
     ports:
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP
+      - "127.0.0.1:4317:4317" # OTLP gRPC
+      - "127.0.0.1:4318:4318" # OTLP HTTP
 
   # OpenBao (Vault-compatible) in dev mode for the vault_kv2 token map backend.
   # Disabled by default — enable with: --profile vault
   # Then set CENSGATE_VAULT_BACKEND=vault_kv2 when starting the gateway.
+  # Dev root token is intentionally weak; bind to loopback only.
   openbao:
     profiles: ["vault"]
     image: openbao/openbao:latest
@@ -101,7 +103,7 @@ services:
     environment:
       BAO_DEV_ROOT_TOKEN_ID: dev-only-token
     ports:
-      - "8200:8200"
+      - "127.0.0.1:8200:8200"
 
 volumes:
   ollama-data:

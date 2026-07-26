@@ -30,7 +30,7 @@ async fn api_key_accepts_configured_key() {
     assert_eq!(ctx.tenant, "default");
     let subject = ctx.subject.expect("subject");
     assert!(subject.starts_with("key:"));
-    assert_eq!(subject.len(), 12);
+    assert_eq!(subject.len(), 68); // "key:" + sha256 hex
 }
 
 #[tokio::test]
@@ -311,6 +311,7 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
             profile_claim: Some("profile".to_string()),
             jwks_refresh_secs: 300,
             leeway_secs: 60,
+            allow_missing_audience: false,
         }
     }
 
@@ -336,6 +337,22 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
         assert_eq!(ctx.profile.as_deref(), Some("strict"));
         assert!(ctx.scopes.iter().any(|s| s == "gateway.read"));
         assert!(auth.ready().await);
+    }
+
+    #[tokio::test]
+    async fn oidc_rejects_missing_subject() {
+        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let mock = spawn_mock_issuer(vec![jwk]).await;
+        let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
+
+        let mut claims = base_claims(&mock.issuer());
+        claims.sub = String::new();
+        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let err = auth
+            .authenticate(&bearer_headers(&token))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AuthError::Invalid(_)), "{err:?}");
     }
 
     #[tokio::test]

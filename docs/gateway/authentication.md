@@ -55,7 +55,7 @@ or
 x-api-key: key-one
 ```
 
-Subject id in audit/telemetry is a non-secret digest prefix (`key:<8 hex>`), never the key itself. Startup fails if mode is `api_key` with an empty key list.
+Subject id in audit/telemetry is `key:` plus the full SHA-256 hex of the key (never the key itself). Startup fails if mode is `api_key` with an empty key list.
 
 ## OIDC mode
 
@@ -63,8 +63,9 @@ The gateway validates:
 
 - Signature against JWKS (RS256/384/512, ES256/384; `alg: none` rejected)
 - `iss` against the configured issuer
+- Non-empty `sub` (required — subjectless tokens are rejected)
 - `exp` (with `leeway_secs` clock skew)
-- Optional `aud`
+- `aud` against the configured audience (required unless `allow_missing_audience: true`)
 - Optional required scopes (all must be present)
 
 JWKS is cached and refreshed every `jwks_refresh_secs` (default 300). On a `kid` miss the cache is force-refreshed once so key rotation does not require downtime. When `jwks_url` is omitted, the gateway discovers it from `{issuer}/.well-known/openid-configuration`.

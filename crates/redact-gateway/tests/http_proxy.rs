@@ -65,6 +65,23 @@ async fn model_answers_are_redacted_before_they_reach_the_caller() {
 }
 
 #[tokio::test]
+async fn blocked_entities_in_model_answers_are_refused() {
+    // Response-side block must not return the credential to the caller.
+    let upstream = mock_json_upstream(chat_response("here is AKIAIOSFODNN7EXAMPLE for you")).await;
+    let router = router_for(config_for(&upstream)).await;
+
+    let response = post_json(router, "/v1/chat/completions", chat_request("hello")).await;
+
+    assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(response.json()["error"]["type"], "policy_violation");
+    let body = response.body;
+    assert!(
+        !body.contains("AKIAIOSFODNN7EXAMPLE"),
+        "blocked secret leaked in error body: {body}"
+    );
+}
+
+#[tokio::test]
 async fn blocked_entities_are_refused_and_never_forwarded() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(config_for(&upstream)).await;

@@ -58,7 +58,7 @@ Chunks that do not carry those fields (role announcements, `finish_reason`, `usa
 
 Content and tool-argument fragments are coalesced per stream for detection. The redacted string lands on the **first** chunk that carried text for that stream; later fragments become empty strings. Clients therefore receive fewer content deltas than the provider sent. That is inherent to buffered mode (which already waits for the whole upstream body).
 
-Every choice is redacted, including when `n > 1`. Incremental responses add header `x-censgate-stream-mode: incremental`. Compliance headers on incremental streams report request-side counts; response totals complete as the stream drains (telemetry still records outcomes).
+Every choice is redacted in **buffered** mode, including when `n > 1`. Incremental mode redacts `choices[0].delta.content` (plus the hold-back window) and is intended for single-choice chat UIs; use buffered mode when `n > 1`, tool-call argument streams, or response-side `block` must fail closed before any bytes reach the client. Incremental responses add header `x-censgate-stream-mode: incremental`. Compliance headers on incremental streams report request-side counts; response totals complete as the stream drains (telemetry still records outcomes).
 
 ## Example
 

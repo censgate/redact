@@ -84,7 +84,7 @@ The Deployment:
 - Sets OTLP exporter env vars toward a collector service
 - Uses HTTP liveness (`/livez`) and readiness (`/readyz`) probes
 - Runs non-root with a read-only root filesystem and dropped capabilities
-- Defaults to two replicas (pair with `vault_kv2` + shared `CENSGATE_TOKEN_DEK` when using tokenize)
+- Defaults to **one** replica. Scale out only after configuring `vault_kv2` and a shared `CENSGATE_TOKEN_DEK`
 
 ## Hardening checklist
 

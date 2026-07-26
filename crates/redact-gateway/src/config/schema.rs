@@ -167,6 +167,8 @@ pub struct OidcDocument {
     pub jwks_refresh_secs: Option<u64>,
     /// Allowed clock skew in seconds.
     pub leeway_secs: Option<u64>,
+    /// Allow omitting audience (disables `aud` validation). Unsafe.
+    pub allow_missing_audience: Option<bool>,
 }
 
 /// Audit section.
@@ -332,6 +334,10 @@ impl GatewayDocument {
                     oidc.jwks_refresh_secs,
                 );
                 apply_opt(&mut config.auth.oidc.leeway_secs, oidc.leeway_secs);
+                apply_opt(
+                    &mut config.auth.oidc.allow_missing_audience,
+                    oidc.allow_missing_audience,
+                );
             }
         }
 

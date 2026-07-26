@@ -91,8 +91,10 @@ impl Kv2Store {
         match kv2::read::<StoredSession>(&self.client, &self.mount, path).await {
             Ok(entry) => {
                 if entry.expires_at <= Utc::now() {
-                    // Best-effort purge; absence is what callers observe.
-                    let _ = kv2::delete_latest(&self.client, &self.mount, path).await;
+                    // Treat as absent without calling delete_latest: a concurrent
+                    // put can CAS-write a fresh version between this read and a
+                    // delete, and delete_latest would then wipe the new data.
+                    // The next put overwrites expired payloads via CAS.
                     Ok(None)
                 } else {
                     Ok(Some(entry))

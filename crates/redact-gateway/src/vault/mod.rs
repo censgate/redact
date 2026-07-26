@@ -130,7 +130,12 @@ pub fn session_path(prefix: &str, tenant: &str, session: &str) -> String {
     )
 }
 
-/// Merge `incoming` into `existing`, with later tokens winning on collision.
+/// Merge `incoming` into `existing`.
+///
+/// The first writer to mint a token label owns it: when the same token appears
+/// in both sides with different sealed values, the existing mapping is kept.
+/// Silent "incoming wins" would let a concurrent allocator steal an index and
+/// make restore return the wrong plaintext.
 pub(crate) fn merge_mappings(
     existing: Vec<TokenMapping>,
     incoming: &[TokenMapping],
@@ -140,7 +145,16 @@ pub(crate) fn merge_mappings(
         by_token.insert(mapping.token.clone(), mapping);
     }
     for mapping in incoming {
-        by_token.insert(mapping.token.clone(), mapping.clone());
+        match by_token.get(&mapping.token) {
+            Some(prior) if prior.sealed_value != mapping.sealed_value => {
+                // Keep the incumbent. The colliding mint is dropped; the
+                // caller that minted it still restored within its own request
+                // via the in-memory session, but later resumes see the first writer.
+            }
+            _ => {
+                by_token.insert(mapping.token.clone(), mapping.clone());
+            }
+        }
     }
     by_token.into_values().collect()
 }
@@ -208,6 +222,25 @@ mod tests {
         assert!(escaped.contains("%0A"));
         assert!(!escaped.contains('\0'));
         assert!(!escaped.contains('\n'));
+    }
+
+    #[test]
+    fn merge_keeps_existing_mapping_on_token_collision() {
+        let existing = vec![TokenMapping {
+            token: "[EMAIL_ADDRESS_1]".into(),
+            entity_type: "EMAIL_ADDRESS".into(),
+            sealed_value: "seal-a".into(),
+            created_at: chrono::Utc::now(),
+        }];
+        let incoming = [TokenMapping {
+            token: "[EMAIL_ADDRESS_1]".into(),
+            entity_type: "EMAIL_ADDRESS".into(),
+            sealed_value: "seal-b".into(),
+            created_at: chrono::Utc::now(),
+        }];
+        let merged = merge_mappings(existing, &incoming);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].sealed_value, "seal-a");
     }
 
     #[tokio::test]

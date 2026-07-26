@@ -332,6 +332,13 @@ impl Profile {
                 )));
             }
         }
+        if !self.packs.is_empty() {
+            return Err(PolicyError::Invalid(format!(
+                "profile `{}` sets packs: {:?}, but per-profile pack filtering is not supported yet; \
+                 leave packs empty (all loaded packs apply) or omit the field",
+                self.name, self.packs
+            )));
+        }
         Ok(())
     }
 }

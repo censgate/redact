@@ -111,6 +111,8 @@ pub const OIDC_PROFILE_CLAIM: &str = "CENSGATE_OIDC_PROFILE_CLAIM";
 pub const OIDC_JWKS_REFRESH_SECS: &str = "CENSGATE_OIDC_JWKS_REFRESH_SECS";
 /// Allowed clock skew in seconds.
 pub const OIDC_LEEWAY_SECS: &str = "CENSGATE_OIDC_LEEWAY_SECS";
+/// Allow omitting OIDC audience (unsafe).
+pub const OIDC_ALLOW_MISSING_AUDIENCE: &str = "CENSGATE_OIDC_ALLOW_MISSING_AUDIENCE";
 /// Audit sink selection.
 pub const AUDIT_EXPORT: &str = "CENSGATE_AUDIT_EXPORT";
 /// Audit file path for the `file` sink.
@@ -335,6 +337,9 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     }
     if let Some(value) = first(&[OIDC_LEEWAY_SECS]) {
         config.auth.oidc.leeway_secs = parse(OIDC_LEEWAY_SECS, &value)?;
+    }
+    if let Some(value) = first(&[OIDC_ALLOW_MISSING_AUDIENCE]) {
+        config.auth.oidc.allow_missing_audience = parse_bool(OIDC_ALLOW_MISSING_AUDIENCE, &value)?;
     }
 
     if let Some(value) = first(&[AUDIT_EXPORT]) {

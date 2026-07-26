@@ -313,12 +313,29 @@ pub fn reload_config(handle: &ConfigHandle) -> Result<Arc<ResolvedConfig>> {
                      keeps its current values until it is restarted"
                 );
             }
+            // Install the effective snapshot so hot-path readers (forward flag,
+            // /readyz auth mode) cannot disagree with frozen subsystems.
+            let effective = current.effective_for_reload(next);
+            if let Err(err) = effective.validate() {
+                warn!(
+                    error = %err,
+                    "effective reloaded configuration failed validation; keeping the last good configuration"
+                );
+                if let Some(span) = &span {
+                    crate::telemetry::spans::finish_config_reload(
+                        span,
+                        "failed",
+                        Some("config_error"),
+                    );
+                }
+                return Err(err.into());
+            }
             info!(
-                source = next.source.as_str(),
-                profiles = next.policy.profiles.len(),
+                source = effective.source.as_str(),
+                profiles = effective.policy.profiles.len(),
                 "configuration reloaded"
             );
-            handle.store(next);
+            handle.store(effective);
             if let Some(span) = &span {
                 crate::telemetry::spans::finish_config_reload(span, "reloaded", None);
             }

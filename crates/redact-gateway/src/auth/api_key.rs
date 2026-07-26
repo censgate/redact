@@ -18,7 +18,7 @@ static X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 #[derive(Clone)]
 struct KeyRecord {
     digest: [u8; 32],
-    /// First 8 hex chars of the digest, prefixed with `key:`.
+    /// Full SHA-256 digest hex, prefixed with `key:` (collision-resistant).
     subject: String,
 }
 
@@ -64,7 +64,8 @@ impl ApiKeyAuthenticator {
                 let digest = Sha256::digest(key.as_bytes());
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(&digest);
-                let subject = format!("key:{}", hex_prefix(&arr));
+                // Full digest hex so distinct keys never collide as subjects.
+                let subject = format!("key:{}", hex_digest(&arr));
                 KeyRecord {
                     digest: arr,
                     subject,
@@ -122,10 +123,10 @@ impl Authenticator for ApiKeyAuthenticator {
     }
 }
 
-fn hex_prefix(digest: &[u8; 32]) -> String {
+fn hex_digest(digest: &[u8; 32]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(8);
-    for &byte in digest.iter().take(4) {
+    let mut out = String::with_capacity(64);
+    for &byte in digest {
         out.push(HEX[(byte >> 4) as usize] as char);
         out.push(HEX[(byte & 0xf) as usize] as char);
     }
@@ -156,7 +157,7 @@ mod tests {
             .unwrap();
         assert_eq!(ctx.mode, "api_key");
         assert!(ctx.subject.as_ref().unwrap().starts_with("key:"));
-        assert_eq!(ctx.subject.as_ref().unwrap().len(), 12); // "key:" + 8 hex
+        assert_eq!(ctx.subject.as_ref().unwrap().len(), 68); // "key:" + 64 hex
     }
 
     #[tokio::test]

@@ -203,7 +203,7 @@ async fn ready(State(state): State<AppState>) -> Response {
         "status": if ready { "ok" } else { "degraded" },
         "provider": config.provider.base_url,
         "token_map": {"backend": config.vault.backend.as_str(), "ready": token_map_ready},
-        "auth": {"mode": config.auth.mode.as_str(), "ready": auth_ready},
+        "auth": {"mode": state.auth.mode(), "ready": auth_ready},
         "audit": config.audit.export.as_str(),
     });
 
@@ -622,6 +622,19 @@ async fn chat_completions_inner(
 
     let mut response = call_provider(&state, &scope, "/v1/chat/completions", body).await?;
     let response_outcome = redact_response_payload(&state, &scope, &mut response.body)?;
+    if response_outcome.is_blocked() {
+        let error = blocked_error(&response_outcome);
+        state.audit.emit(AuditEvent::from_outcome(
+            &response_outcome,
+            AuditContext {
+                outcome: Some(AuditOutcome::Blocked),
+                error_type: Some(error.telemetry_error_type().to_string()),
+                provider_status: Some(response.status),
+                ..scope.audit_context(semconv::event::POLICY_BLOCK, "chat.completions")
+            },
+        ));
+        return Err(error);
+    }
     let restore = restore_response_payload(&state, &scope, &mut response.body, &lookup);
 
     state.audit.emit(AuditEvent::from_outcome(
@@ -888,6 +901,20 @@ async fn stream_chat(
         );
     }
 
+    if response_outcome.is_blocked() {
+        let error = blocked_error(&response_outcome);
+        state.audit.emit(AuditEvent::from_outcome(
+            &response_outcome,
+            AuditContext {
+                outcome: Some(AuditOutcome::Blocked),
+                error_type: Some(error.telemetry_error_type().to_string()),
+                provider_status: Some(response.status),
+                ..scope.audit_context(semconv::event::POLICY_BLOCK, "chat.completions.stream")
+            },
+        ));
+        return Err(error);
+    }
+
     state.audit.emit(AuditEvent::from_outcome(
         &response_outcome,
         AuditContext {
@@ -1079,6 +1106,20 @@ async fn proxy_json_surface(
         redact_response_payload(&state, &scope, &mut response.body)?
     };
 
+    if response_outcome.is_blocked() {
+        let error = blocked_error(&response_outcome);
+        state.audit.emit(AuditEvent::from_outcome(
+            &response_outcome,
+            AuditContext {
+                outcome: Some(AuditOutcome::Blocked),
+                error_type: Some(error.telemetry_error_type().to_string()),
+                provider_status: Some(response.status),
+                ..scope.audit_context(semconv::event::POLICY_BLOCK, action)
+            },
+        ));
+        return Err(error);
+    }
+
     let lookup = scope.restore_lookup(&state.dek);
     let restore = restore_response_payload(&state, &scope, &mut response.body, &lookup);
 
@@ -1176,7 +1217,30 @@ async fn redact_endpoint(
         Some(subject) => subject_bound_session_key(&session_id, subject),
         None => session_id.clone(),
     };
-    let mut session = TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone());
+    // Resume prior mappings so sequential /v1/redact calls with one session
+    // continue the counter instead of reminting `[ENTITY_1]` and clobbering.
+    let mut session = if state.tokens.backend_name() != "off" {
+        match state.tokens.get(&auth.tenant, &token_map_session).await {
+            Ok(existing) => TokenSession::resume(
+                session_id.clone(),
+                &auth.tenant,
+                state.dek.clone(),
+                existing,
+            ),
+            Err(err) if profile.fail_closed => {
+                return GatewayError::DependencyUnavailable(format!(
+                    "token map read failed: {err}"
+                ))
+                .into_response();
+            }
+            Err(err) => {
+                warn!(error = %err, "token map read failed; starting a fresh session");
+                TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
+            }
+        }
+    } else {
+        TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
+    };
     let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
     let text = match ctx.redact(&request.text) {
         Ok(text) => text,

@@ -55,18 +55,18 @@ On Unix, the binary listens for `SIGHUP` and reloads configuration from the same
 
 [`ResolvedConfig::restart_required_changes`](../../crates/redact-gateway/src/config/mod.rs) decides which differences a reload can apply. Changed restart-required fields are logged by name; the running process keeps its current values for those fields until you restart.
 
-| Applies on SIGHUP | Requires restart |
-|-------------------|------------------|
+| Applies on SIGHUP | Requires restart (retained from the pre-reload snapshot) |
+|-------------------|----------------------------------------------------------|
 | Policy profiles (`policy` / `policy_file` / `CENSGATE_POLICY_FILE` / `CENSGATE_DEFAULT_PROFILE`) | Bind host and port (`server.host`, `server.port`) |
 | Everything under `redaction` (stream mode, hold-back, session/profile headers, `allow_profile_header`) | HTTP request trace layer (`server.enable_http_trace`) |
-| `server.metrics_endpoint` | Provider client settings (`provider.base_url`, `provider.api_key`, connect/request timeouts, `max_body_bytes`) |
-| `provider.forward_client_authorization` | Pattern packs (`packs.paths`, `packs.disable_builtin`) |
-| `telemetry.operations` | All token map settings (`vault.*`, including the sealing key) |
-| `telemetry.genai_attributes` | All auth settings (`auth.mode`, `auth.api_keys`, `auth.oidc.*`) |
-| `audit.include_entity_types` | Audit sink and queue (`audit.export`, `audit.file_path`, `audit.queue_capacity`) |
+| `server.metrics_endpoint` | Provider client settings (`provider.base_url`, `provider.api_key`, timeouts, `max_body_bytes`, `forward_client_authorization`, `name`) |
+| `telemetry.operations` | Pattern packs (`packs.paths`, `packs.disable_builtin`) |
+| `telemetry.genai_attributes` | All token map settings (`vault.*`, including the sealing key) |
+| `audit.include_entity_types` | All auth settings (`auth.mode`, `auth.api_keys`, `auth.oidc.*`) |
+| | Audit sink and queue (`audit.export`, `audit.file_path`, `audit.queue_capacity`) |
 | | Telemetry span filter (`telemetry.filter`) |
 
-Treat sealing-key rotation and token-map address changes as a rolling restart when you need a hard cutover.
+Reload installs an **effective** snapshot: hot fields from the new document, startup-only fields forced from the running process. That keeps `/readyz` auth mode and `forward_client_authorization` aligned with the frozen authenticator and provider client. Treat sealing-key rotation and token-map address changes as a rolling restart when you need a hard cutover.
 
 ## YAML schema
 
@@ -114,13 +114,14 @@ auth:
   api_keys: []
   oidc:
     issuer: null
-    audience: null
+    audience: null                 # required for oidc unless allow_missing_audience
     jwks_url: null
     required_scopes: []
     tenant_claim: null
     profile_claim: null
     jwks_refresh_secs: 300
     leeway_secs: 60
+    allow_missing_audience: false  # unsafe opt-out
 
 audit:
   export: "off"                    # off | stdout | file | otlp
@@ -199,7 +200,8 @@ Each setting has exactly one environment name under the `CENSGATE_` prefix. The 
 | `CENSGATE_API_KEYS` | unset | Static API keys |
 | `CENSGATE_OIDC_ENABLED` | unset | Legacy: `true` → OIDC mode |
 | `CENSGATE_OIDC_ISSUER` | unset | Issuer URL |
-| `CENSGATE_OIDC_AUDIENCE` | unset | Expected audience |
+| `CENSGATE_OIDC_AUDIENCE` | unset | Expected audience (required for `auth.mode=oidc` unless allow-missing is set) |
+| `CENSGATE_OIDC_ALLOW_MISSING_AUDIENCE` | `false` | Unsafe: allow OIDC without `aud` validation |
 | `CENSGATE_OIDC_JWKS_URL` | unset | Explicit JWKS |
 | `CENSGATE_OIDC_REQUIRED_SCOPES` | unset | Required scopes |
 | `CENSGATE_OIDC_TENANT_CLAIM` | unset | Tenant claim |

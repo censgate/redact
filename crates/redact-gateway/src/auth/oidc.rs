@@ -220,7 +220,9 @@ impl OidcAuthenticator {
         validation.validate_exp = true;
         validation.validate_nbf = true;
         validation.set_issuer(&[&self.issuer]);
-        validation.set_required_spec_claims(&["exp", "iss"]);
+        // `sub` is required so authenticated callers always receive a stable
+        // subject for token-map partitioning.
+        validation.set_required_spec_claims(&["exp", "iss", "sub"]);
 
         if let Some(aud) = &self.audience {
             validation.set_audience(&[aud]);
@@ -229,6 +231,7 @@ impl OidcAuthenticator {
             required.insert("aud".to_string());
             validation.required_spec_claims = required;
         } else {
+            // Only reachable when allow_missing_audience was explicitly set.
             validation.validate_aud = false;
         }
 
@@ -246,17 +249,23 @@ impl OidcAuthenticator {
             }
         }
 
+        let subject = claims
+            .sub
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                AuthError::Invalid("token is missing a non-empty subject (sub) claim".to_string())
+            })?;
+
         let tenant = self.resolve_tenant(&claims);
         let profile = self.resolve_profile(&claims);
 
-        if let Some(ref sub) = claims.sub {
-            debug!(subject = %sub, tenant = %tenant, "oidc authentication succeeded");
-        } else {
-            debug!(tenant = %tenant, "oidc authentication succeeded");
-        }
+        debug!(subject = %subject, tenant = %tenant, "oidc authentication succeeded");
 
         Ok(AuthContext {
-            subject: claims.sub,
+            subject: Some(subject),
             tenant,
             profile,
             scopes,

@@ -469,6 +469,11 @@ pub struct OidcSettings {
     pub jwks_refresh_secs: u64,
     /// Allowed clock skew when validating time-based claims, in seconds.
     pub leeway_secs: u64,
+    /// Allow omitting `audience` (disables `aud` validation). Unsafe: any JWT
+    /// from the configured issuer then authenticates, including tokens minted
+    /// for other applications. Prefer setting `audience`.
+    #[serde(default)]
+    pub allow_missing_audience: bool,
 }
 
 /// Inbound authentication settings.
@@ -628,6 +633,22 @@ impl ResolvedConfig {
                 "auth mode is oidc but no issuer is configured".to_string(),
             ));
         }
+        if self.auth.mode == AuthMode::Oidc
+            && self
+                .auth
+                .oidc
+                .audience
+                .as_deref()
+                .map(str::trim)
+                .is_none_or(str::is_empty)
+            && !self.auth.oidc.allow_missing_audience
+        {
+            return Err(ConfigError::Invalid(
+                "auth mode is oidc but no audience is configured; set auth.oidc.audience or \
+                 explicitly set auth.oidc.allow_missing_audience: true (unsafe)"
+                    .to_string(),
+            ));
+        }
         if self.vault.backend == VaultBackend::VaultKv2 && self.vault.address.is_none() {
             return Err(ConfigError::Invalid(
                 "token map backend is vault_kv2 but no address is configured".to_string(),
@@ -718,6 +739,36 @@ impl ResolvedConfig {
         }
     }
 
+    /// Build the configuration that a reload may actually install.
+    ///
+    /// Startup-built subsystems (listener, provider client, packs, token map,
+    /// authenticator, audit sink) keep the values from `self`. Hot fields from
+    /// `next` (policy, redaction, telemetry detail, …) are retained. The result
+    /// is what handlers will observe, so `/readyz` and `forward_client_authorization`
+    /// cannot disagree with the frozen authenticator.
+    pub fn effective_for_reload(&self, mut next: ResolvedConfig) -> ResolvedConfig {
+        next.server.host = self.server.host.clone();
+        next.server.port = self.server.port;
+        next.server.enable_http_trace = self.server.enable_http_trace;
+        next.provider.base_url = self.provider.base_url.clone();
+        next.provider.api_key = self.provider.api_key.clone();
+        next.provider.connect_timeout_secs = self.provider.connect_timeout_secs;
+        next.provider.request_timeout_secs = self.provider.request_timeout_secs;
+        next.provider.max_body_bytes = self.provider.max_body_bytes;
+        next.provider.forward_client_authorization = self.provider.forward_client_authorization;
+        next.provider.name = self.provider.name.clone();
+        next.packs = self.packs.clone();
+        next.vault = self.vault.clone();
+        next.auth = self.auth.clone();
+        next.audit.export = self.audit.export;
+        next.audit.file_path = self.audit.file_path.clone();
+        next.audit.queue_capacity = self.audit.queue_capacity;
+        next.telemetry.filter = self.telemetry.filter.clone();
+        // Provenance fields (source, config_path, policy_path) stay from `next`
+        // so operators can see which document produced the hot fields.
+        next
+    }
+
     /// Settings that a reload cannot apply, because they are consumed once at
     /// startup to build a listener, a client, or a subsystem.
     ///
@@ -749,6 +800,10 @@ impl ResolvedConfig {
         }
         if self.provider.max_body_bytes != next.provider.max_body_bytes {
             changed.push("provider.max_body_bytes");
+        }
+        if self.provider.forward_client_authorization != next.provider.forward_client_authorization
+        {
+            changed.push("provider.forward_client_authorization");
         }
         if self.packs.paths != next.packs.paths {
             changed.push("packs.paths");
@@ -785,6 +840,7 @@ impl ResolvedConfig {
             || self.auth.oidc.profile_claim != next.auth.oidc.profile_claim
             || self.auth.oidc.jwks_refresh_secs != next.auth.oidc.jwks_refresh_secs
             || self.auth.oidc.leeway_secs != next.auth.oidc.leeway_secs
+            || self.auth.oidc.allow_missing_audience != next.auth.oidc.allow_missing_audience
         {
             changed.push("auth.oidc.*");
         }
@@ -1019,6 +1075,33 @@ mod tests {
         hot.telemetry.operations = TraceLevel::Detailed;
         hot.server.metrics_endpoint = false;
         assert!(current.restart_required_changes(&hot).is_empty());
+
+        let mut forward = ResolvedConfig::default();
+        forward.provider.forward_client_authorization = true;
+        assert_eq!(
+            current.restart_required_changes(&forward),
+            vec!["provider.forward_client_authorization"]
+        );
+    }
+
+    #[test]
+    fn effective_reload_retains_startup_auth_and_forward_flag() {
+        let mut current = ResolvedConfig::default();
+        current.auth.mode = AuthMode::ApiKey;
+        current.auth.api_keys = vec!["gateway-secret".into()];
+        current.provider.forward_client_authorization = false;
+
+        let mut next = ResolvedConfig::default();
+        next.auth.mode = AuthMode::None;
+        next.provider.forward_client_authorization = true;
+        next.redaction.allow_profile_header = true;
+
+        let effective = current.effective_for_reload(next);
+        assert_eq!(effective.auth.mode, AuthMode::ApiKey);
+        assert!(!effective.provider.forward_client_authorization);
+        assert!(effective.redaction.allow_profile_header);
+        // Mixed snapshot must still validate: frozen api_key + hot forward=false.
+        assert!(effective.validate().is_ok());
     }
 
     #[test]
