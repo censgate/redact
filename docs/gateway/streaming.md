@@ -54,7 +54,7 @@ Buffered mode preserves the upstream chunk **sequence** and every JSON field on 
 - `choices[i].delta.content`
 - `choices[i].delta.tool_calls[j].function.arguments`
 
-Chunks that do not carry those fields (role announcements, `finish_reason`, `usage`, `system_fingerprint`, `logprobs`, `service_tier`, provider extensions, and any other unknown fields) keep all fields intact. Re-serialization via `serde_json` may reorder object keys; field **presence and values** are what this guarantee covers.
+Chunks that do not carry those fields (role announcements, `finish_reason`, `usage`, `system_fingerprint`, `service_tier`, provider extensions, and any other unknown fields) keep all fields intact. `logprobs` on each choice is set to `null` because raw token logprobs can reconstruct redacted content. Re-serialization via `serde_json` may reorder object keys; field **presence and values** are what this guarantee covers.
 
 Content and tool-argument fragments are coalesced per stream for detection. The redacted string lands on the **first** chunk that carried text for that stream; later fragments become empty strings. Clients therefore receive fewer content deltas than the provider sent. That is inherent to buffered mode (which already waits for the whole upstream body).
 

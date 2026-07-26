@@ -89,6 +89,10 @@ pub fn redact_chat_response(
                 }
                 // Legacy completions place the text directly on the choice.
                 redact_string_field(ctx, choice.get_mut("text"))?;
+                // Raw token logprobs can reconstruct redacted content; drop them.
+                if let Some(logprobs) = choice.get_mut("logprobs") {
+                    *logprobs = Value::Null;
+                }
             }
             if scan.response_tool_calls {
                 if let Some(message) = choice.get_mut("message") {

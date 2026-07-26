@@ -124,6 +124,8 @@ pub fn transform_buffered_sse<E>(
 
     apply_coalesced_content(&mut chunks, &content_first, &redacted_content);
     apply_coalesced_arguments(&mut chunks, &arguments_first, &redacted_arguments);
+    // Raw token logprobs can reconstruct redacted content; drop them.
+    strip_logprobs(&mut chunks);
 
     let mut out = String::new();
     for chunk in &chunks {
@@ -137,6 +139,24 @@ pub fn transform_buffered_sse<E>(
         sse: out,
         chunks: chunks.len(),
     })
+}
+
+fn strip_logprobs(chunks: &mut [Value]) {
+    for chunk in chunks.iter_mut() {
+        let Some(choices) = chunk.get_mut("choices").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for choice in choices.iter_mut() {
+            if let Some(logprobs) = choice.get_mut("logprobs") {
+                *logprobs = Value::Null;
+            }
+            if let Some(delta) = choice.get_mut("delta") {
+                if let Some(logprobs) = delta.get_mut("logprobs") {
+                    *logprobs = Value::Null;
+                }
+            }
+        }
+    }
 }
 
 fn apply_coalesced_content(
