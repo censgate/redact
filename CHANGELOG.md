@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Publish `redact-gateway` to crates.io (was incorrectly `publish = false` in the
+  0.9.0 tag). Release automation now publishes it after `redact-cli`.
+
 ## [0.9.0] - 2026-07-27
 
 ### Added

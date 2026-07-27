@@ -42,8 +42,12 @@ redact --version
 `redact-gateway` embeds `redact-core` and sits between your app and a model provider. Start with local redaction (no provider), then point an OpenAI SDK at the gateway.
 
 ```bash
-# Local redaction without a model provider
+# Install from crates.io
+cargo install redact-gateway
 export OTEL_SDK_DISABLED=true
+redact-gateway --host 127.0.0.1
+
+# Or run from a source checkout
 cargo run -p redact-gateway -- --host 127.0.0.1
 
 curl -s http://127.0.0.1:8080/v1/redact \
@@ -51,7 +55,7 @@ curl -s http://127.0.0.1:8080/v1/redact \
   -d '{"text":"Email me at alice@example.com"}'
 ```
 
-Full walkthrough (Ollama chat, OpenAI SDK, policy profiles): [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md). Docker image: `ghcr.io/censgate/redact-gateway:latest`.
+Full walkthrough (Ollama chat, OpenAI SDK, policy profiles): [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md). Docker image: `ghcr.io/censgate/redact-gateway:latest`. Crates.io: [`redact-gateway`](https://crates.io/crates/redact-gateway).
 
 ### Analyze Text for PII
 
@@ -206,7 +210,8 @@ Cloudflare Workers AI). Inline WASM NER remains a deferred roadmap item.
 ### Using Cargo (Recommended)
 
 ```bash
-cargo install redact-cli
+cargo install redact-gateway   # OpenAI-compatible privacy gateway
+cargo install redact-cli       # CLI for analyze / anonymize
 ```
 
 ### From Source

@@ -1,0 +1,49 @@
+name: Publish Crates
+
+# Publish selected workspace crates to crates.io from an arbitrary git ref.
+# Used to ship crates that were missed by a tag release (e.g. redact-gateway 0.9.0)
+# and for ad-hoc republish attempts when continue-on-error hid a failure.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to publish from (branch, tag, or SHA)'
+        required: true
+        type: string
+        default: 'main'
+      packages:
+        description: 'Space-separated crate names (e.g. redact-gateway)'
+        required: true
+        type: string
+        default: 'redact-gateway'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.packages }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish packages
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          for pkg in ${{ inputs.packages }}; do
+            echo "=== Publishing $pkg ==="
+            cargo publish --token "$CARGO_REGISTRY_TOKEN" -p "$pkg"
+            echo "Waiting for crates.io index..."
+            sleep 45
+          done
