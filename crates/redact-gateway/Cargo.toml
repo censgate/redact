@@ -26,7 +26,7 @@ oidc = ["dep:jsonwebtoken"]
 prometheus = ["dep:opentelemetry-prometheus", "dep:prometheus"]
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.8.3" }
+redact-core = { path = "../redact-core", version = "0.9.0" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }

@@ -6,11 +6,11 @@
 [![Tests](https://github.com/censgate/redact/workflows/CI/badge.svg)](https://github.com/censgate/redact/actions)
 [![Crates.io](https://img.shields.io/crates/v/redact-core.svg)](https://crates.io/crates/redact-core)
 
-**High-performance PII detection and anonymization engine**
+**High-performance PII detection, anonymization, and AI privacy gateway**
 
-A production-ready, Rust-based solution designed as a drop-in replacement for Microsoft Presidio.
+A production-ready Rust engine — drop-in Presidio replacement for detection and anonymization, plus an OpenAI-compatible gateway that redacts prompts and model answers in flight. Pattern detection covers 54 entity types (including secrets and credentials); WebAssembly ships the same pattern engine for browsers and edge runtimes.
 
-[Quick Start](#quick-start) · [Documentation](#documentation) · [Examples](#examples) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [Privacy Gateway](#privacy-gateway) · [Documentation](#documentation) · [Examples](#examples) · [Contributing](#contributing)
 
 </div>
 
@@ -20,9 +20,9 @@ A production-ready, Rust-based solution designed as a drop-in replacement for Mi
 
 - **High Performance** — 10-100x faster than Python-based solutions with sub-millisecond inference
 - **Memory Safe** — Rust's borrow checker eliminates entire classes of security vulnerabilities
-- **Production Ready** — 54 pattern-based entity types with validation, plus transformer-based NER
-- **Multi-Platform** — Native server, CLI, and WebAssembly (pattern-only) support
-- **AI Privacy Gateway** — OpenAI-compatible proxy that redacts prompts and model answers in flight, with policy profiles, reversible tokenization, and OpenTelemetry
+- **Production Ready** — 54 pattern-based entity types with validation (including secrets/credentials), plus transformer-based NER
+- **AI Privacy Gateway** — OpenAI-compatible proxy (`redact-gateway`) with policy profiles, reversible tokenization, API key/OIDC auth, OpenTelemetry, and buffered/incremental streaming redaction
+- **Multi-Platform** — REST API, CLI, WebAssembly (pattern-only), and privacy gateway
 - **ML-Powered** — Full ONNX Runtime integration for transformer models (BERT, RoBERTa, DistilBERT)
 - **Lightweight** — ~20-50MB memory footprint vs ~300MB for Presidio
 - **Extensible** — Plugin architecture for custom recognizers and anonymization strategies
@@ -35,6 +35,22 @@ A production-ready, Rust-based solution designed as a drop-in replacement for Mi
 cargo install redact-cli
 redact --version
 ```
+
+### Privacy Gateway (OpenAI-compatible proxy)
+
+`redact-gateway` embeds `redact-core` and sits between your app and a model provider. Start with local redaction (no provider), then point an OpenAI SDK at the gateway.
+
+```bash
+# Local redaction without a model provider
+export OTEL_SDK_DISABLED=true
+cargo run -p redact-gateway -- --host 127.0.0.1
+
+curl -s http://127.0.0.1:8080/v1/redact \
+  -H 'content-type: application/json' \
+  -d '{"text":"Email me at alice@example.com"}'
+```
+
+Full walkthrough (Ollama chat, OpenAI SDK, policy profiles): [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md). Docker image: `ghcr.io/censgate/redact-gateway:latest`.
 
 ### Analyze Text for PII
 
@@ -278,8 +294,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-redact-core = "0.8.2"
-redact-ner = "0.8.2"  # Optional: for ML-based NER
+redact-core = "0.9.0"
+redact-ner = "0.9.0"  # Optional: for ML-based NER
 ```
 
 ### Basic Pattern Detection
@@ -687,7 +703,7 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 #### v0.8.2
 
 - [x] Complete Rust rewrite (replacing Go v0.1.0-v0.4.1)
-- [x] 36 pattern-based entity types with checksum validation
+- [x] Pattern-based entity types with checksum validation
 - [x] Full ONNX NER integration (PERSON, ORGANIZATION, LOCATION)
 - [x] 4 anonymization strategies (replace, mask, hash, encrypt)
 - [x] REST API service
@@ -696,17 +712,16 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [x] Full Docker image with embedded NER model (`ghcr.io/censgate/redact:full`)
 - [x] Comprehensive test suite (~75% coverage)
 - [x] Entity overlap resolution with specificity scoring
+- [x] Publish crates to crates.io
 
-#### Unreleased
+#### v0.9.0
 
 - [x] 18 secret/credential entity types (54 pattern-based total) — Phase 1 of #101
 - [x] `redact-gateway`: policy profiles, reversible tokenization, OIDC and API key auth,
-      OpenTelemetry traces/metrics/logs, runtime pattern packs, container and Kubernetes assets
-
-#### v0.9.0 (Planned)
-
-- [x] Publish crates to crates.io
-- [x] WebAssembly bindings — pattern engine (browser + Cloudflare Workers)
+      OpenTelemetry traces/metrics/logs, runtime pattern packs, streaming redaction,
+      container and Kubernetes assets (`ghcr.io/censgate/redact-gateway`)
+- [x] CLI: `--fail-on-detect` and multi-file `-i` / `--file` analyze
+- [x] WebAssembly bindings — real pattern engine (browser + Cloudflare Workers)
 - [ ] Streaming API for large texts
 - [ ] Enhanced documentation
 - [ ] WebAssembly + inline NER — deferred; ONNX model + runtime do not fit
