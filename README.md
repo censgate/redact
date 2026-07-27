@@ -4,11 +4,12 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Tests](https://github.com/censgate/redact/workflows/CI/badge.svg)](https://github.com/censgate/redact/actions)
+[![Crates.io](https://img.shields.io/crates/v/redact-gateway.svg)](https://crates.io/crates/redact-gateway)
 [![Crates.io](https://img.shields.io/crates/v/redact-core.svg)](https://crates.io/crates/redact-core)
 
-**High-performance PII detection, anonymization, and AI privacy gateway**
+**OpenAI-compatible AI privacy gateway**
 
-A production-ready Rust engine — drop-in Presidio replacement for detection and anonymization, plus an OpenAI-compatible gateway that redacts prompts and model answers in flight. Pattern detection covers 54 entity types (including secrets and credentials); WebAssembly ships the same pattern engine for browsers and edge runtimes.
+Redact sits between your application and a model provider: it redacts prompts on the way out and model answers on the way back — with policy profiles, reversible tokenization, auth, and OpenTelemetry. Under the hood, a high-performance Rust detection engine (54 pattern entity types including secrets, plus optional ONNX NER) powers the gateway, CLI, REST API, and WebAssembly builds.
 
 [Quick Start](#quick-start) · [Privacy Gateway](#privacy-gateway) · [Documentation](#documentation) · [Examples](#examples) · [Contributing](#contributing)
 
@@ -18,11 +19,12 @@ A production-ready Rust engine — drop-in Presidio replacement for detection an
 
 ## Features
 
+- **AI Privacy Gateway** — OpenAI-compatible proxy (`redact-gateway`) with policy profiles, reversible tokenization, API key/OIDC auth, OpenTelemetry, and buffered/incremental streaming redaction
+- **Engine-Powered** — In-process `redact-core` detection and anonymization (drop-in Presidio-class accuracy at Rust speed)
+- **Production Ready** — 54 pattern-based entity types with validation (including secrets/credentials), plus transformer-based NER
 - **High Performance** — 10-100x faster than Python-based solutions with sub-millisecond inference
 - **Memory Safe** — Rust's borrow checker eliminates entire classes of security vulnerabilities
-- **Production Ready** — 54 pattern-based entity types with validation (including secrets/credentials), plus transformer-based NER
-- **AI Privacy Gateway** — OpenAI-compatible proxy (`redact-gateway`) with policy profiles, reversible tokenization, API key/OIDC auth, OpenTelemetry, and buffered/incremental streaming redaction
-- **Multi-Platform** — REST API, CLI, WebAssembly (pattern-only), and privacy gateway
+- **Multi-Platform** — Privacy gateway, REST API, CLI, and WebAssembly (pattern-only)
 - **ML-Powered** — Full ONNX Runtime integration for transformer models (BERT, RoBERTa, DistilBERT)
 - **Lightweight** — ~20-50MB memory footprint vs ~300MB for Presidio
 - **Extensible** — Plugin architecture for custom recognizers and anonymization strategies
@@ -41,8 +43,12 @@ redact --version
 `redact-gateway` embeds `redact-core` and sits between your app and a model provider. Start with local redaction (no provider), then point an OpenAI SDK at the gateway.
 
 ```bash
-# Local redaction without a model provider
+# Install from crates.io
+cargo install redact-gateway
 export OTEL_SDK_DISABLED=true
+redact-gateway --host 127.0.0.1
+
+# Or run from a source checkout
 cargo run -p redact-gateway -- --host 127.0.0.1
 
 curl -s http://127.0.0.1:8080/v1/redact \
@@ -50,7 +56,7 @@ curl -s http://127.0.0.1:8080/v1/redact \
   -d '{"text":"Email me at alice@example.com"}'
 ```
 
-Full walkthrough (Ollama chat, OpenAI SDK, policy profiles): [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md). Docker image: `ghcr.io/censgate/redact-gateway:latest`.
+Full walkthrough (Ollama chat, OpenAI SDK, policy profiles): [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md). Docker image: `ghcr.io/censgate/redact-gateway:latest`. Crates.io: [`redact-gateway`](https://crates.io/crates/redact-gateway).
 
 ### Analyze Text for PII
 
@@ -205,7 +211,8 @@ Cloudflare Workers AI). Inline WASM NER remains a deferred roadmap item.
 ### Using Cargo (Recommended)
 
 ```bash
-cargo install redact-cli
+cargo install redact-gateway   # OpenAI-compatible privacy gateway
+cargo install redact-cli       # CLI for analyze / anonymize
 ```
 
 ### From Source
@@ -647,21 +654,21 @@ See [docs/benchmarks/](/censgate/redact/blob/main/docs/benchmarks) for methodolo
 ```
 redact/
 ├── crates/
-│   ├── redact-core/      # Core detection & anonymization engine
-│   ├── redact-ner/       # ONNX NER integration
-│   ├── redact-api/       # REST API service (Axum)
+│   ├── redact-gateway/   # OpenAI-compatible privacy gateway (crates.io: redact-gateway)
+│   ├── redact-core/      # Detection & anonymization engine that powers the gateway
+│   ├── redact-ner/       # ONNX NER integration (optional engine add-on)
+│   ├── redact-api/       # REST API service (Axum) over the same engine
 │   ├── redact-cli/       # Command-line tool
-│   ├── redact-wasm/      # WebAssembly bindings
-│   └── redact-gateway/   # OpenAI-compatible privacy gateway (embeds redact-core)
-├── patterns/             # PII detection patterns (GDPR, HIPAA, CCPA)
-├── deploy/               # Gateway Collector config and Kubernetes manifests
-├── scripts/              # Utility scripts (model export)
-├── examples/             # Usage examples
+│   └── redact-wasm/      # WebAssembly bindings (pattern engine)
 ├── docs/
 │   ├── gateway/          # Gateway operator documentation
 │   └── benchmarks/       # Benchmark methodology and results
+├── deploy/               # Gateway Collector config and Kubernetes manifests
 ├── Dockerfile.gateway
-└── docker-compose.gateway.yml
+├── docker-compose.gateway.yml
+├── patterns/             # PII detection patterns (GDPR, HIPAA, CCPA)
+├── scripts/              # Utility scripts (model export)
+└── examples/             # Usage examples
 ```
 
 ## Testing
