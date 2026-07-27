@@ -1,7 +1,7 @@
 # Pattern-Default Precision & Quality Harness
 
 **Date:** 2026-07-27  
-**Status:** Draft for review  
+**Status:** Approved — wave 1 implemented on `coder-pattern-precision-quality-spec-5276`  
 **Owner:** Censgate / redact-core  
 **Related:** anon-pii comparison (`tcheuD/anon-pii` shared-family diagnostic); Approach 1 (validator hardening first)
 

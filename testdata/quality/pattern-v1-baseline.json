@@ -1,0 +1,7 @@
+{
+  "corpus_sha256": "aa154b701af5b1008053082c4388db99a9e043278e955e56503a67112c5649bf",
+  "max_fp_overall": 0,
+  "max_fp_negative_tier": 0,
+  "min_precision_ppm": 1000000,
+  "require_contract_exact": true
+}

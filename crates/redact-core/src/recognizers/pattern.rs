@@ -2,7 +2,10 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-use super::{validation::validate_entity, Recognizer, RecognizerResult};
+use super::{
+    validation::{precision_gate, validate_entity},
+    Recognizer, RecognizerResult,
+};
 use crate::types::EntityType;
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -643,6 +646,9 @@ impl Recognizer for PatternRecognizer {
                         // This can reduce or zero out the score for invalid matches
                         let validation_factor = validate_entity(entity_type, matched_text);
                         score *= validation_factor;
+
+                        // Surrounding-text precision gate (order IDs, commit SHA1, junk domains)
+                        score *= precision_gate(entity_type, text, start, end, matched_text);
 
                         if score >= self.min_score {
                             results.push(
