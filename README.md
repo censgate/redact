@@ -4,6 +4,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Tests](https://github.com/censgate/redact/workflows/CI/badge.svg)](https://github.com/censgate/redact/actions)
+[![Crates.io](https://img.shields.io/crates/v/redact-gateway.svg)](https://crates.io/crates/redact-gateway)
 [![Crates.io](https://img.shields.io/crates/v/redact-core.svg)](https://crates.io/crates/redact-core)
 
 **OpenAI-compatible AI privacy gateway**
@@ -653,7 +654,7 @@ See [docs/benchmarks/](/censgate/redact/blob/main/docs/benchmarks) for methodolo
 ```
 redact/
 ├── crates/
-│   ├── redact-gateway/   # OpenAI-compatible privacy gateway (primary product surface)
+│   ├── redact-gateway/   # OpenAI-compatible privacy gateway (crates.io: redact-gateway)
 │   ├── redact-core/      # Detection & anonymization engine that powers the gateway
 │   ├── redact-ner/       # ONNX NER integration (optional engine add-on)
 │   ├── redact-api/       # REST API service (Axum) over the same engine
