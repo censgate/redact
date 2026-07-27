@@ -3,6 +3,10 @@ name: Publish Crates
 # Publish selected workspace crates to crates.io from an arbitrary git ref.
 # Used to ship crates that were missed by a tag release (e.g. redact-gateway 0.9.0)
 # and for ad-hoc republish attempts when continue-on-error hid a failure.
+#
+# Triggers:
+#   - workflow_dispatch (ref + packages inputs)
+#   - push tag publish-crate/<crate-name>  (publishes that crate from the tagged commit)
 on:
   workflow_dispatch:
     inputs:
@@ -16,19 +20,41 @@ on:
         required: true
         type: string
         default: 'redact-gateway'
+  push:
+    tags:
+      - 'publish-crate/**'
 
 permissions:
   contents: read
 
 jobs:
   publish:
-    name: Publish ${{ inputs.packages }}
+    name: Publish crates
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve packages and ref
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+            echo "packages=${{ inputs.packages }}" >> "$GITHUB_OUTPUT"
+          else
+            # Tag: publish-crate/redact-gateway → package redact-gateway
+            TAG="${GITHUB_REF_NAME}"
+            PKG="${TAG#publish-crate/}"
+            if [ -z "$PKG" ] || [ "$PKG" = "$TAG" ]; then
+              echo "Invalid publish-crate tag: $TAG" >&2
+              exit 1
+            fi
+            echo "ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "packages=$PKG" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ steps.resolve.outputs.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -41,7 +67,8 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
-          for pkg in ${{ inputs.packages }}; do
+          echo "Publishing from ref=${{ steps.resolve.outputs.ref }}: ${{ steps.resolve.outputs.packages }}"
+          for pkg in ${{ steps.resolve.outputs.packages }}; do
             echo "=== Publishing $pkg ==="
             cargo publish --token "$CARGO_REGISTRY_TOKEN" -p "$pkg"
             echo "Waiting for crates.io index..."
