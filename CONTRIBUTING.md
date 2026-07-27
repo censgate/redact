@@ -201,7 +201,7 @@ Preferred path (GitHub Actions):
 4. Merge the PR — **Create Release Tag** creates `vX.Y.Z` and dispatches **Release**
 5. The **Release** workflow will:
    - Build binaries for all platforms (`redact` and `redact-gateway`)
-   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`)
+   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`, `redact-gateway`)
    - Create a GitHub release
    - Build and push Docker images:
      - default (`Dockerfile`) as `:latest`, `:X.Y.Z`, etc.

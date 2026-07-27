@@ -20,13 +20,23 @@ Further reading:
 | Docker, Compose, Kubernetes | [docs/gateway/deployment.md](../../docs/gateway/deployment.md) |
 | Streaming modes | [docs/gateway/streaming.md](../../docs/gateway/streaming.md) |
 
-## Quick start
-
-The fastest path needs **no model provider**: build, run, and call `/v1/redact`. Full walkthrough: [getting-started.md](../../docs/gateway/getting-started.md).
+## Install
 
 ```bash
-# From the repository root
+cargo install redact-gateway
+```
+
+Crates.io: [`redact-gateway`](https://crates.io/crates/redact-gateway).
+
+## Quick start
+
+The fastest path needs **no model provider**: install or build, run, and call `/v1/redact`. Full walkthrough: [getting-started.md](../../docs/gateway/getting-started.md).
+
+```bash
 export OTEL_SDK_DISABLED=true
+redact-gateway --host 127.0.0.1
+
+# Or from a source checkout
 cargo run -p redact-gateway -- --host 127.0.0.1
 
 # Redact without calling a provider
