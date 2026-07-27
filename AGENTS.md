@@ -10,7 +10,7 @@ Concise guidance for AI agents working with the Redact codebase.
 - Pattern-based detection (54 entity types via regex, including secrets/credentials)
 - ML-powered NER using ONNX Runtime (BERT, RoBERTa, DistilBERT)
 - Multiple anonymization strategies (replace, mask, hash, encrypt)
-- Multi-platform: REST API, CLI, WebAssembly
+- Multi-platform: REST API, CLI, WebAssembly, privacy gateway (`redact-gateway`)
 
 ## Crate Architecture
 

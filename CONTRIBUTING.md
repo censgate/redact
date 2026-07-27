@@ -193,16 +193,24 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ## Release Process
 
-1. Update version in `Cargo.toml` (workspace and relevant crates)
-2. Update `CHANGELOG.md` with release notes
-3. Create a git tag: `git tag -a v1.2.3 -m "Release v1.2.3"`
-4. Push tag: `git push origin v1.2.3`
-5. GitHub Actions will automatically:
-   - Run CI tests
-   - Build binaries for all platforms
-   - Publish crates to crates.io
-   - Create GitHub release
-   - Build and push Docker images: default (`Dockerfile`) as `:latest`, `:X.Y.Z`, etc.; full image (`Dockerfile.ner`, pattern + ONNX NER) as `:full`, `:X.Y.Z-full`, etc.
+Preferred path (GitHub Actions):
+
+1. Update `CHANGELOG.md` and docs on a `release/vX.Y.Z` branch (or merge docs to `main` first)
+2. Bump versions in the workspace `Cargo.toml` and inter-crate dependency pins (`redact-ner`, `redact-api`, `redact-cli`, `redact-gateway`), or dispatch **Prepare Release** with the target version
+3. Open a PR from `release/vX.Y.Z` → `main` and wait for **CI** to pass
+4. Merge the PR — **Create Release Tag** creates `vX.Y.Z` and dispatches **Release**
+5. The **Release** workflow will:
+   - Build binaries for all platforms (`redact` and `redact-gateway`)
+   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`)
+   - Create a GitHub release
+   - Build and push Docker images:
+     - default (`Dockerfile`) as `:latest`, `:X.Y.Z`, etc.
+     - full image (`Dockerfile.ner`, pattern + ONNX NER) as `:full`, `:X.Y.Z-full`, etc.
+     - gateway (`Dockerfile.gateway`) as `ghcr.io/<org>/redact-gateway:latest`, `:X.Y.Z`, etc.
+
+The NER base layer (`ghcr.io/<org>/redact-ner-base`) is built separately via the **NER Base Image** workflow and is not republished on every release.
+
+Manual fallback: bump versions, update the changelog, then `git tag -a vX.Y.Z -m "Release vX.Y.Z"` and `git push origin vX.Y.Z`.
 
 ## Project Structure
 
@@ -213,10 +221,14 @@ redact/
 │   ├── redact-ner/          # NER with ONNX Runtime
 │   ├── redact-api/          # REST API server
 │   ├── redact-cli/          # CLI tool
-│   └── redact-wasm/         # WASM bindings
+│   ├── redact-wasm/         # WASM bindings
+│   └── redact-gateway/      # OpenAI-compatible privacy gateway
+├── deploy/                  # Gateway Collector config and Kubernetes manifests
 ├── scripts/                 # Utility scripts
 ├── examples/                # Usage examples
-├── docs/                    # Documentation
+├── docs/
+│   ├── gateway/             # Gateway operator documentation
+│   └── benchmarks/          # Benchmark methodology and results
 └── .github/workflows/       # CI/CD pipelines
 ```
 
@@ -232,7 +244,7 @@ redact/
 
 ### Medium Priority
 
-- [ ] WASM implementation completion
+- [ ] WASM + inline NER (deferred; see README hybrid architecture)
 - [ ] Mobile FFI bindings
 - [ ] Additional anonymization strategies
 - [ ] Multi-language pattern support

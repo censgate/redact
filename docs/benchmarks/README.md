@@ -64,7 +64,7 @@ Benchmarks include:
 
 ## Latest Results (2026-04-18)
 
-The **current** release is **[v0.8.2](https://github.com/censgate/redact/releases/tag/v0.8.2)**. Full report: [results-20260418-175909.md](results-20260418-175909.md).
+The **current** release is **[v0.9.0](https://github.com/censgate/redact/releases/tag/v0.9.0)**. The latest published REST API comparison report remains [results-20260418-175909.md](results-20260418-175909.md) (captured against v0.8.2); re-run `./scripts/benchmark-comparison.sh` for fresh numbers.
 
 ### Latency (concurrency=1)
 

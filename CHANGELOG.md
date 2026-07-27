@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-27
+
 ### Added
 
 - `redact-gateway`: policy profiles with per-entity actions (`allow`, `block`,
@@ -117,6 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump `rand` to 0.9.3 to fix GHSA-cq8v-f236-94qc (unsoundness UB when custom logger accesses ThreadRng during reseeding)
   - Updated transitive dependencies in `quinn-proto` and `tokenizers` that also depended on `rand 0.9.2`
 
+## [0.8.3] - 2026-04-19
+
+### Changed
+
+- Docs: crates.io metadata, benchmarks, and release documentation updates (#54).
+
 ## [0.8.2] - 2026-04-17
 
 ### Fixed
@@ -181,4 +189,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.8.2 or later.
+Those versions are no longer maintained. Please upgrade to v0.9.0 or later.
