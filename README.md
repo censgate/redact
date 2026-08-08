@@ -301,8 +301,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-redact-core = "0.9.0"
-redact-ner = "0.9.0"  # Optional: for ML-based NER
+redact-core = "0.9.1"
+redact-ner = "0.9.1"  # Optional: for ML-based NER
 ```
 
 ### Basic Pattern Detection
@@ -734,6 +734,14 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [ ] WebAssembly + inline NER — deferred; ONNX model + runtime do not fit
       Cloudflare Workers limits. Use the hybrid architecture in the
       [WebAssembly](#webassembly) section for name-based detection.
+
+#### v0.9.1
+
+- [x] Docker images: pin Rust builders to `rust:1.93-slim-bookworm` so binaries
+      match `gcr.io/distroless/cc-debian12` (fixes `GLIBC_2.38 not found` on
+      published gateway/API images; #114)
+- [x] CI/release guards: Dockerfile builder/runtime Debian pairing check and
+      gateway/API image smoke tests before publish
 
 ## Contributing
 

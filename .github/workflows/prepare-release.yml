@@ -56,6 +56,19 @@ jobs:
             sed -i "s/\(redact-core = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$VERSION/" "$f"
             sed -i "s/\(redact-ner = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$VERSION/" "$f"
           done
+          # Keep published docs in sync with the release version.
+          sed -i \
+            -e "s/^redact-core = \"[^\"]*\"/redact-core = \"$VERSION\"/" \
+            -e "s/^redact-ner = \"[^\"]*\"/redact-ner = \"$VERSION\"/" \
+            README.md
+          sed -i -E \
+            "s|The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*|The **current** release is **[v${VERSION}](https://github.com/censgate/redact/releases/tag/v${VERSION})**|" \
+            docs/benchmarks/README.md
+          if grep -q "Please upgrade to v" CHANGELOG.md; then
+            sed -i -E \
+              "s/Please upgrade to v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)? or later\./Please upgrade to v${VERSION} or later./" \
+              CHANGELOG.md
+          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
