@@ -9,7 +9,8 @@
 #
 
 # Stage 1: Build
-FROM --platform=$BUILDPLATFORM rust:1.93-slim AS builder
+# Pin to bookworm so the linked glibc matches the distroless cc-debian12 runtime.
+FROM --platform=$BUILDPLATFORM rust:1.93-slim-bookworm AS builder
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM

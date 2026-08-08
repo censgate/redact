@@ -255,7 +255,7 @@ Entities detected: EMAIL_ADDRESS, PHONE_NUMBER, US_SSN
 
 ## Environment Details
 
-- **Redact:** Docker container (rust:1.93-slim base)
+- **Redact:** Docker container (rust:1.93-slim-bookworm base)
 - **Presidio:** Docker container (mcr.microsoft.com/presidio-analyzer:latest)
 - **Benchmark tool:** oha v$("$OHABIN" --version 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")
 

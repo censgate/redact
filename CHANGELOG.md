@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docker images: pin Rust builders to `rust:1.93-slim-bookworm` so binaries
+  match `gcr.io/distroless/cc-debian12` glibc (fixes
+  `GLIBC_2.38 not found` on `redact-gateway` / API images; #114).
+- CI/release: reject floating `rust:*-slim` builders and enforce that the
+  builder's Debian release matches the distroless runtime; smoke-test
+  gateway (`--version`) and slim API (`/healthz`) before publish.
 - Publish `redact-gateway` to crates.io (was incorrectly `publish = false` in the
   0.9.0 tag). Release automation now publishes it after `redact-cli`.
 
