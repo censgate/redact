@@ -195,8 +195,11 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 Preferred path (GitHub Actions):
 
-1. Update `CHANGELOG.md` and docs on a `release/vX.Y.Z` branch (or merge docs to `main` first)
-2. Bump versions in the workspace `Cargo.toml` and inter-crate dependency pins (`redact-ner`, `redact-api`, `redact-cli`, `redact-gateway`), or dispatch **Prepare Release** with the target version
+1. Update `CHANGELOG.md` release notes on a `release/vX.Y.Z` branch (or merge notes to `main` first)
+2. Bump versions via **Prepare Release** (preferred) or `./scripts/update-version.sh X.Y.Z`.
+   Both update workspace/`Cargo.toml` pins **and** documentation version pins
+   (`README.md` library examples, `docs/benchmarks/README.md` current-release link,
+   CHANGELOG unsupported-version upgrade hint), plus `redact-gateway` crate deps.
 3. Open a PR from `release/vX.Y.Z` → `main` and wait for **CI** to pass
 4. Merge the PR — **Create Release Tag** creates `vX.Y.Z` and dispatches **Release**
 5. The **Release** workflow will:
@@ -210,7 +213,7 @@ Preferred path (GitHub Actions):
 
 The NER base layer (`ghcr.io/<org>/redact-ner-base`) is built separately via the **NER Base Image** workflow and is not republished on every release.
 
-Manual fallback: bump versions, update the changelog, then `git tag -a vX.Y.Z -m "Release vX.Y.Z"` and `git push origin vX.Y.Z`.
+Manual fallback: `./scripts/update-version.sh X.Y.Z`, review the diff (Cargo + docs), then `git tag -a vX.Y.Z -m "Release vX.Y.Z"` and `git push origin vX.Y.Z`.
 
 ## Project Structure
 

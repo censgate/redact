@@ -37,6 +37,9 @@ show_usage() {
     echo "  - crates/redact-ner/Cargo.toml (redact-core dependency)"
     echo "  - crates/redact-api/Cargo.toml (redact-core, redact-ner dependencies)"
     echo "  - crates/redact-cli/Cargo.toml (redact-core, redact-ner dependencies)"
+    echo "  - crates/redact-gateway/Cargo.toml (redact-core dependency)"
+    echo "  - README.md (library Cargo.toml example versions)"
+    echo "  - docs/benchmarks/README.md (current release link)"
     echo "  - CHANGELOG.md (adds new version entry)"
 }
 
@@ -141,6 +144,43 @@ update_changelog() {
     print_success "Added $new_version entry to CHANGELOG.md"
 }
 
+update_doc_versions() {
+    local new_version=$1
+    local dry_run=$2
+
+    print_status "Updating documentation version pins to $new_version"
+
+    if [[ $dry_run == "true" ]]; then
+        echo "  Would update README.md library Cargo.toml examples"
+        echo "  Would update docs/benchmarks/README.md current release link"
+        echo "  Would update CHANGELOG.md unsupported-version upgrade hint"
+        return
+    fi
+
+    # README library usage example
+    sed -i.bak \
+        -e "s/^redact-core = \"[^\"]*\"/redact-core = \"$new_version\"/" \
+        -e "s/^redact-ner = \"[^\"]*\"/redact-ner = \"$new_version\"/" \
+        README.md
+    rm -f README.md.bak
+
+    # Benchmarks "current release" pointer
+    sed -i.bak -E \
+        "s|The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*|The **current** release is **[v${new_version}](https://github.com/censgate/redact/releases/tag/v${new_version})**|" \
+        docs/benchmarks/README.md
+    rm -f docs/benchmarks/README.md.bak
+
+    # Unsupported Go-era versions hint at bottom of CHANGELOG
+    if grep -q "Please upgrade to v" CHANGELOG.md; then
+        sed -i.bak -E \
+            "s/Please upgrade to v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)? or later\./Please upgrade to v${new_version} or later./" \
+            CHANGELOG.md
+        rm -f CHANGELOG.md.bak
+    fi
+
+    print_success "Updated documentation version pins to $new_version"
+}
+
 verify_build() {
     local dry_run=$1
     
@@ -230,6 +270,8 @@ main() {
     update_crate_dependency "crates/redact-api/Cargo.toml" "redact-ner" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-core" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-ner" "$new_version" "$dry_run"
+    update_crate_dependency "crates/redact-gateway/Cargo.toml" "redact-core" "$new_version" "$dry_run"
+    update_doc_versions "$new_version" "$dry_run"
     update_changelog "$new_version" "$dry_run"
     
     echo ""
