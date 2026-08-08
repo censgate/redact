@@ -80,6 +80,6 @@ The **current** release is **[v0.9.0](https://github.com/censgate/redact/release
 |--------|---------------|-------------------|---------|
 | Requests/sec | 19,416 | 170 | **114x** |
 
-**Environment:** Darwin arm64, Docker containers (builder: `rust:1.93-slim`; Redact runtime uses distroless). Benchmark tool: oha v1.10.0
+**Environment:** Darwin arm64, Docker containers (builder: `rust:1.93-slim-bookworm`; Redact runtime uses distroless). Benchmark tool: oha v1.10.0
 
 Results vary by hardware. Run `./scripts/benchmark-comparison.sh` to benchmark on your system.

@@ -234,6 +234,39 @@ jobs:
           TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
+      - name: Build API image for smoke test (amd64 only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: redact-api:smoke-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test API image
+        run: |
+          set -euo pipefail
+          docker run -d --name api-smoke -p 8080:8080 redact-api:smoke-test
+          cleanup() { docker rm -f api-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          echo "Waiting for API to become healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
+              echo "API ready after ${i}s"
+              curl -sf http://localhost:8080/healthz | python3 -m json.tool
+              exit 0
+            fi
+            if ! docker ps -q -f name=api-smoke | grep -q .; then
+              echo "ERROR: API container exited early"
+              docker logs api-smoke || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "ERROR: API failed to become healthy within 30s"
+          docker logs api-smoke || true
+          exit 1
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
@@ -386,6 +419,19 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository }}-gateway"
           TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Build gateway image for smoke test (amd64 only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.gateway
+          load: true
+          tags: redact-gateway:smoke-test
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
+
+      - name: Smoke test gateway image
+        run: docker run --rm redact-gateway:smoke-test --version
 
       - name: Build and push gateway image
         uses: docker/build-push-action@v5
