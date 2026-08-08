@@ -25,22 +25,17 @@ fail() {
   exit 1
 }
 
-check_file() {
+# Strip optional --platform=... and AS/as stage name from a FROM line.
+parse_image() {
+  sed -E 's/^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?//; s/[[:space:]]+[Aa][Ss][[:space:]].*$//' <<<"$1"
+}
+
+# Validate one rust builder image against the expected distroless Debian major.
+check_builder_image() {
   local file="$1"
-  local builder_line runtime_line builder_image runtime_image
-  local codename debian_major expected
-
-  [[ -f "$file" ]] || fail "missing Dockerfile: $file"
-
-  builder_line="$(grep -E '^FROM[[:space:]]' "$file" | grep -E 'rust:' | tail -n1 || true)"
-  runtime_line="$(grep -E '^FROM[[:space:]]' "$file" | grep -E 'distroless/cc-debian' | tail -n1 || true)"
-
-  [[ -n "$builder_line" ]] || fail "$file: no rust builder FROM line found"
-  [[ -n "$runtime_line" ]] || fail "$file: no distroless/cc-debian runtime FROM line found"
-
-  # Strip optional --platform=... and AS stage name
-  builder_image="$(sed -E 's/^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?//; s/[[:space:]]+AS[[:space:]].*$//' <<<"$builder_line")"
-  runtime_image="$(sed -E 's/^FROM[[:space:]]+(--platform=[^[:space:]]+[[:space:]]+)?//; s/[[:space:]]+AS[[:space:]].*$//' <<<"$runtime_line")"
+  local builder_image="$2"
+  local expected="$3"
+  local codename
 
   if [[ "$builder_image" =~ ^rust:([0-9]+\.[0-9]+(\.[0-9]+)?)-slim$ ]]; then
     fail "$file: floating builder '$builder_image' (use an explicit Debian codename, e.g. rust:${BASH_REMATCH[1]}-slim-bookworm)"
@@ -54,20 +49,43 @@ check_file() {
     fail "$file: builder '$builder_image' must include an explicit Debian codename (-bookworm/-trixie/-bullseye)"
   fi
 
-  expected="$(expected_debian_major "$codename")" \
+  local builder_expected
+  builder_expected="$(expected_debian_major "$codename")" \
     || fail "$file: unsupported builder Debian codename '$codename'"
+
+  if [[ "$builder_expected" != "$expected" ]]; then
+    fail "$file: builder '$builder_image' (codename $codename) expects distroless/cc-debian${builder_expected}, runtime requires debian${expected}"
+  fi
+}
+
+check_file() {
+  local file="$1"
+  local runtime_line runtime_image debian_major expected
+  local -a builder_lines=()
+  local builder_line builder_image
+
+  [[ -f "$file" ]] || fail "missing Dockerfile: $file"
+
+  mapfile -t builder_lines < <(grep -E '^FROM[[:space:]]' "$file" | grep -E 'rust:' || true)
+  runtime_line="$(grep -E '^FROM[[:space:]]' "$file" | grep -E 'distroless/cc-debian' | tail -n1 || true)"
+
+  [[ ${#builder_lines[@]} -gt 0 ]] || fail "$file: no rust builder FROM line found"
+  [[ -n "$runtime_line" ]] || fail "$file: no distroless/cc-debian runtime FROM line found"
+
+  runtime_image="$(parse_image "$runtime_line")"
 
   if [[ "$runtime_image" =~ distroless/cc-debian([0-9]+) ]]; then
     debian_major="${BASH_REMATCH[1]}"
   else
     fail "$file: could not parse distroless Debian major from '$runtime_image'"
   fi
+  expected="$debian_major"
 
-  if [[ "$debian_major" != "$expected" ]]; then
-    fail "$file: builder codename '$codename' expects distroless/cc-debian${expected}, found '$runtime_image'"
-  fi
-
-  echo "OK: $(basename "$file") builder=$builder_image runtime=$runtime_image"
+  for builder_line in "${builder_lines[@]}"; do
+    builder_image="$(parse_image "$builder_line")"
+    check_builder_image "$file" "$builder_image" "$expected"
+    echo "OK: $(basename "$file") builder=$builder_image runtime=$runtime_image"
+  done
 }
 
 main() {
