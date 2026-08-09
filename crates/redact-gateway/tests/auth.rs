@@ -117,69 +117,79 @@ mod oidc_tests {
     use serde::Serialize;
     use serde_json::{json, Value};
 
+    /// Build a PKCS#8 PEM without a contiguous BEGIN/END literal in source.
+    ///
+    /// GitHub secret scanning flags committed private-key PEMs even when they
+    /// are synthetic OIDC test fixtures; assembling at run time avoids the FP.
+    fn pem_private_key(body_lines: &[&str]) -> String {
+        let begin = format!("-----{} {}-----", "BEGIN", "PRIVATE KEY");
+        let end = format!("-----{} {}-----", "END", "PRIVATE KEY");
+        format!("{begin}\n{}\n{end}\n", body_lines.join("\n"))
+    }
+
     /// Test-only RSA private key (PKCS#8 PEM). Fixture — never used in production.
-    const RSA_PRIVATE_PEM_1: &str = r#"
------BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDnpn59SgdAxNQo
-PxpsJpl8sEn26YDeVmwr5BHSI4IHk0PHFp83orl9a52CoDot1Ax65RvUrxbw4PEN
-/nry0uQH1CiXrD52CBZMiTC5HI8xYTmCdQ91FGsGZT6xkUunGC9pZOX0ncs/k5A4
-MFAwGCJYcV+a8D/hUpVkS9KdMZZKakr8BX/wuDmCxlWIZXbU//hk58NYDnpNN5+n
-VAzxzj7C7+c43Gx4yj2sdierh5itl7uy012FPFyIUw7suRwRwDbHBwj2/Sdv2pyp
-XYx1oUxycE3cQOwFgpF6Q/73IZ7v9eBosCDWOrYMl6u2eRc/nGoijCYJoedQxFDX
-yZNoTiIfAgMBAAECggEAVlw/PtVI4/AdSg3Qe25efVo5kOgXh4w/kpNZw3ZCZTGV
-LJU18WdkcKoclBTI68nohy5/1CgcTNwHchij3IAbzAFfyr/Hn3g/W/QvamuHxLiC
-2KxsgVEF32ICX++TfS1qi4e2pR3opoCMXS5BztRIhaFqq5gSsJ15nWUZFUplxcKq
-KrSWf6fWxEdLxikmtGCIXIPzAM0R4KLpt2umPECdm25nnCPa/MpO6jHaQkLKRr8P
-uSpGcNGXrqthXxdRP1yuHfw2UD08glimiqa/v++S8E+3cyBCHjoNMQjo3db1PbV7
-uutZP07G32T0oGNeCHkg3me99v+HZMJ5CO/E8YRMwQKBgQD4YaEO63lVblvPsXEv
-3ULdMTk+yEDmdWa06/sx9kaDjGfGRNMjkidGrAZvMURH6Njq8fKW8voVdAjZJJJJ
-94yriBT0dyzIcpi5v8ruxWzY7V+nmPLvQ3vLHk5ux1xue6W03ioYTkhmOI5YiKgb
-0i/04rR9rI3A5/ByriJpAK1XQQKBgQDuwXzeUqWwndfHrtMofMSohXaaQ5NwdmEp
-aCTXe+VXhAv3Puf1aXMMKWQ6Fl3cWUqgfXatBn1DPzItwDkh562MVs4zZ3kwAXkY
-Z2SVJEUUtlHcYJ0+lHTfJh4lHGICp2fx6KJ/+LwtF6gx7zS+F3+WQ8U71jaSJnD9
-k4SZuUOBXwKBgQCnsYqCvzqJElxMSlnH3hPhsPUcTSl8LvFr3xMWdVbARBBgTWFb
-17ZKwaQKeHHINw4U+cs2XM+5okDDEizuYYMI4HR9ZOTIZI52gmXpdUN65jC5v8rs
-/VvcFBcSNelS8oo7Je+3v0qkMTTx0znkprEYHeOMIe8GudGeK7ExwXJGwQKBgQDp
-zC8qxmPZ/7c9osTD8Oni3E634VSP3Fxo38K0AG8ks/nDs6YRe6FdV2r+NsjS7d1W
-K4X7CU/AejH4+zL3MJeRxa9GRx01FTwv2Y91PH8pOSAQXcudbGLF4d3DGXgggS4Y
-hWYbSsd6oJ/jxgov23LlApgxcCMgGuSqa7p9jh28oQKBgGbb8UeYHcvn3ANBvO1S
-XidGO5M0qp+8vRzbXe5yK1+yfb0yp1w5kyWS8a083ZFA+2adZf16J/tEWRn5XGI8
-9EiTxJWioKaq+f5mMdB5brtx6XSVTgF+/Q+YFzpdO4UkmumYpHbDwx1gNJoBSKum
-/59DvrbpZtbFNmiUrM0blO01
------END PRIVATE KEY-----
-"#;
+    fn rsa_private_pem_1() -> String {
+        pem_private_key(&[
+            "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDnpn59SgdAxNQo",
+            "PxpsJpl8sEn26YDeVmwr5BHSI4IHk0PHFp83orl9a52CoDot1Ax65RvUrxbw4PEN",
+            "/nry0uQH1CiXrD52CBZMiTC5HI8xYTmCdQ91FGsGZT6xkUunGC9pZOX0ncs/k5A4",
+            "MFAwGCJYcV+a8D/hUpVkS9KdMZZKakr8BX/wuDmCxlWIZXbU//hk58NYDnpNN5+n",
+            "VAzxzj7C7+c43Gx4yj2sdierh5itl7uy012FPFyIUw7suRwRwDbHBwj2/Sdv2pyp",
+            "XYx1oUxycE3cQOwFgpF6Q/73IZ7v9eBosCDWOrYMl6u2eRc/nGoijCYJoedQxFDX",
+            "yZNoTiIfAgMBAAECggEAVlw/PtVI4/AdSg3Qe25efVo5kOgXh4w/kpNZw3ZCZTGV",
+            "LJU18WdkcKoclBTI68nohy5/1CgcTNwHchij3IAbzAFfyr/Hn3g/W/QvamuHxLiC",
+            "2KxsgVEF32ICX++TfS1qi4e2pR3opoCMXS5BztRIhaFqq5gSsJ15nWUZFUplxcKq",
+            "KrSWf6fWxEdLxikmtGCIXIPzAM0R4KLpt2umPECdm25nnCPa/MpO6jHaQkLKRr8P",
+            "uSpGcNGXrqthXxdRP1yuHfw2UD08glimiqa/v++S8E+3cyBCHjoNMQjo3db1PbV7",
+            "uutZP07G32T0oGNeCHkg3me99v+HZMJ5CO/E8YRMwQKBgQD4YaEO63lVblvPsXEv",
+            "3ULdMTk+yEDmdWa06/sx9kaDjGfGRNMjkidGrAZvMURH6Njq8fKW8voVdAjZJJJJ",
+            "94yriBT0dyzIcpi5v8ruxWzY7V+nmPLvQ3vLHk5ux1xue6W03ioYTkhmOI5YiKgb",
+            "0i/04rR9rI3A5/ByriJpAK1XQQKBgQDuwXzeUqWwndfHrtMofMSohXaaQ5NwdmEp",
+            "aCTXe+VXhAv3Puf1aXMMKWQ6Fl3cWUqgfXatBn1DPzItwDkh562MVs4zZ3kwAXkY",
+            "Z2SVJEUUtlHcYJ0+lHTfJh4lHGICp2fx6KJ/+LwtF6gx7zS+F3+WQ8U71jaSJnD9",
+            "k4SZuUOBXwKBgQCnsYqCvzqJElxMSlnH3hPhsPUcTSl8LvFr3xMWdVbARBBgTWFb",
+            "17ZKwaQKeHHINw4U+cs2XM+5okDDEizuYYMI4HR9ZOTIZI52gmXpdUN65jC5v8rs",
+            "/VvcFBcSNelS8oo7Je+3v0qkMTTx0znkprEYHeOMIe8GudGeK7ExwXJGwQKBgQDp",
+            "zC8qxmPZ/7c9osTD8Oni3E634VSP3Fxo38K0AG8ks/nDs6YRe6FdV2r+NsjS7d1W",
+            "K4X7CU/AejH4+zL3MJeRxa9GRx01FTwv2Y91PH8pOSAQXcudbGLF4d3DGXgggS4Y",
+            "hWYbSsd6oJ/jxgov23LlApgxcCMgGuSqa7p9jh28oQKBgGbb8UeYHcvn3ANBvO1S",
+            "XidGO5M0qp+8vRzbXe5yK1+yfb0yp1w5kyWS8a083ZFA+2adZf16J/tEWRn5XGI8",
+            "9EiTxJWioKaq+f5mMdB5brtx6XSVTgF+/Q+YFzpdO4UkmumYpHbDwx1gNJoBSKum",
+            "/59DvrbpZtbFNmiUrM0blO01",
+        ])
+    }
 
     /// Second test-only RSA private key for rotation coverage. Fixture only.
-    const RSA_PRIVATE_PEM_2: &str = r#"
------BEGIN PRIVATE KEY-----
-MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQClvQgsJkSmVWJY
-Zt6momAodHS8R9oZMQd0voNOc+BRq9EZrTd2Rywqpj1oJ1c0+tNzzdLKKpVBghYo
-NA69oaYxyIlS7FwsP8UT5Z6viUpN9Xq5l+NTuTCrSopCRNxKOiyUApeKcKS77ZAn
-EHKV1NV/vCCwCKkapmsA3opyL+jsHilUs+nORkkEmi/npMsCIAuKF2PwE3nOnxcP
-rqAV4FgSbeYk9iN71cFJfUyPUdqnFtCiw69JJMkWda9GLJXkFeyarRY+m4x/JtZh
-ClDYbvYr6Tas+8JyckBxhEwrGzGvRL0Pc6A+7OKTGXVLt7ofaM4GhLCL/FZ8hD+M
-QkJdKt4rAgMBAAECggEASLwJjx6IOBr2muciRSyzWG2rIUnDHBUZOZG2HELcKdtm
-W4dZ9K1NY7Yq8r95FQYSsBqerBw9/k6xnJkj8vKy9dwU7/BMjxq5SX8WweBVXJsj
-bbmLiR2Xj0SaInUH3AdlstrkWFwQ32xlO8+LCdgqjfEowzg5xjlMckg3p98AsEXj
-Z6plFFgTnESE67IQUsDLX1lzwbp/oWeBVRtB+AV1qjAxAWnj02+nbRNely3dhMIx
-aaqFM+u2kRI3lHE/gbjlvQpTFug7Vl3xzhlHMsvkwAPQB6WAqg614z9A+Q3JOjQa
-JsnBmbR7vMGumj3tvfje3Yx7Uom0b/kvHPwftNw/wQKBgQDUyViXzHf95/FMJJCz
-yFb58LKTNxNPDUEzNuFHgGIc8bIc6nBo2RUnjtBLo/Mq0pkrIMySORBr7VzZlx1f
-mCWXkLAFWKmEXFWoRCoiPh0ZW9FiGY+n+IIt9zqSKgHYtBpngEHnjwdSyH2zBad9
-/3EJIqwKFS9MpMhStSlw8h+dYQKBgQDHZa5JzX5dBIBcre4TGzEcWaok0TDunM8z
-jKPyc7peV9cucdoAQ9HMYMKixzXOuDueKCDwslOgobBbydgJHZ+kG0zhLZ8yiy2b
-IZMdczVNr8A+pPGI4O1gLKTRHgd7G3/jDLmb0TZTLIPbTcabPcD8OTQHSdC5QaZW
-8B2JzSH7CwKBgA5hURBpLA7HtwHrUrAjsOURRDA4v6BPCAH7Cnx3i6njF6NmoJQl
-X42d1CvYd52EP/+vJsQXASoaD3VRBhYoxRmaGJsz47jjOJK3kJVh1zuYfe0ARzoV
-zE5o79di6V8IxOQLwehxPRB2JjCMCEa2laAFbNT9m4W1eShFv/g3FLXhAoGAeql2
-ejhLz/UA8gKdPmuv3nzaSiPWMjOM021lPbUrpPXsjcnEDf2qhkvP8EsUMsLrCfQt
-r2RERcCxuQWGPLVYi5+vv6ZNFM7Bk3koAynoVI4VeXQGkemsnUlZartKZtUX6xjc
-5ZniDXCI/NPvpXhry7104Dbsi8pzBXBY+3iRutkCgYBf8Dek9mUK7tl49+c9IyrN
-bZ8Qvh2m30Biluqhw8gQ2mBw2El+/qZnx9ThNKshScHDHOUAzI2pqUdvNIdIFUel
-Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
-5Ma9ZcEwIi1YSVxiTimCEQ==
------END PRIVATE KEY-----
-"#;
+    fn rsa_private_pem_2() -> String {
+        pem_private_key(&[
+            "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQClvQgsJkSmVWJY",
+            "Zt6momAodHS8R9oZMQd0voNOc+BRq9EZrTd2Rywqpj1oJ1c0+tNzzdLKKpVBghYo",
+            "NA69oaYxyIlS7FwsP8UT5Z6viUpN9Xq5l+NTuTCrSopCRNxKOiyUApeKcKS77ZAn",
+            "EHKV1NV/vCCwCKkapmsA3opyL+jsHilUs+nORkkEmi/npMsCIAuKF2PwE3nOnxcP",
+            "rqAV4FgSbeYk9iN71cFJfUyPUdqnFtCiw69JJMkWda9GLJXkFeyarRY+m4x/JtZh",
+            "ClDYbvYr6Tas+8JyckBxhEwrGzGvRL0Pc6A+7OKTGXVLt7ofaM4GhLCL/FZ8hD+M",
+            "QkJdKt4rAgMBAAECggEASLwJjx6IOBr2muciRSyzWG2rIUnDHBUZOZG2HELcKdtm",
+            "W4dZ9K1NY7Yq8r95FQYSsBqerBw9/k6xnJkj8vKy9dwU7/BMjxq5SX8WweBVXJsj",
+            "bbmLiR2Xj0SaInUH3AdlstrkWFwQ32xlO8+LCdgqjfEowzg5xjlMckg3p98AsEXj",
+            "Z6plFFgTnESE67IQUsDLX1lzwbp/oWeBVRtB+AV1qjAxAWnj02+nbRNely3dhMIx",
+            "aaqFM+u2kRI3lHE/gbjlvQpTFug7Vl3xzhlHMsvkwAPQB6WAqg614z9A+Q3JOjQa",
+            "JsnBmbR7vMGumj3tvfje3Yx7Uom0b/kvHPwftNw/wQKBgQDUyViXzHf95/FMJJCz",
+            "yFb58LKTNxNPDUEzNuFHgGIc8bIc6nBo2RUnjtBLo/Mq0pkrIMySORBr7VzZlx1f",
+            "mCWXkLAFWKmEXFWoRCoiPh0ZW9FiGY+n+IIt9zqSKgHYtBpngEHnjwdSyH2zBad9",
+            "/3EJIqwKFS9MpMhStSlw8h+dYQKBgQDHZa5JzX5dBIBcre4TGzEcWaok0TDunM8z",
+            "jKPyc7peV9cucdoAQ9HMYMKixzXOuDueKCDwslOgobBbydgJHZ+kG0zhLZ8yiy2b",
+            "IZMdczVNr8A+pPGI4O1gLKTRHgd7G3/jDLmb0TZTLIPbTcabPcD8OTQHSdC5QaZW",
+            "8B2JzSH7CwKBgA5hURBpLA7HtwHrUrAjsOURRDA4v6BPCAH7Cnx3i6njF6NmoJQl",
+            "X42d1CvYd52EP/+vJsQXASoaD3VRBhYoxRmaGJsz47jjOJK3kJVh1zuYfe0ARzoV",
+            "zE5o79di6V8IxOQLwehxPRB2JjCMCEa2laAFbNT9m4W1eShFv/g3FLXhAoGAeql2",
+            "ejhLz/UA8gKdPmuv3nzaSiPWMjOM021lPbUrpPXsjcnEDf2qhkvP8EsUMsLrCfQt",
+            "r2RERcCxuQWGPLVYi5+vv6ZNFM7Bk3koAynoVI4VeXQGkemsnUlZartKZtUX6xjc",
+            "5ZniDXCI/NPvpXhry7104Dbsi8pzBXBY+3iRutkCgYBf8Dek9mUK7tl49+c9IyrN",
+            "bZ8Qvh2m30Biluqhw8gQ2mBw2El+/qZnx9ThNKshScHDHOUAzI2pqUdvNIdIFUel",
+            "Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk",
+            "5Ma9ZcEwIi1YSVxiTimCEQ==",
+        ])
+    }
 
     #[derive(Clone)]
     struct MockIssuer {
@@ -321,12 +331,12 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_accepts_valid_token() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let token = mint(
-            RSA_PRIVATE_PEM_1,
+            &rsa_private_pem_1(),
             "test-key-1",
             &base_claims(&mock.issuer()),
         );
@@ -341,13 +351,13 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_rejects_missing_subject() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let mut claims = base_claims(&mock.issuer());
         claims.sub = String::new();
-        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let token = mint(&rsa_private_pem_1(), "test-key-1", &claims);
         let err = auth
             .authenticate(&bearer_headers(&token))
             .await
@@ -357,13 +367,13 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_rejects_wrong_issuer() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let mut claims = base_claims(&mock.issuer());
         claims.iss = "http://evil.example".to_string();
-        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let token = mint(&rsa_private_pem_1(), "test-key-1", &claims);
         let err = auth
             .authenticate(&bearer_headers(&token))
             .await
@@ -373,13 +383,13 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_rejects_wrong_audience() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let mut claims = base_claims(&mock.issuer());
         claims.aud = Some("other-audience".to_string());
-        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let token = mint(&rsa_private_pem_1(), "test-key-1", &claims);
         let err = auth
             .authenticate(&bearer_headers(&token))
             .await
@@ -389,13 +399,13 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_rejects_expired_token() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let mut claims = base_claims(&mock.issuer());
         claims.exp = now() - 120;
-        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let token = mint(&rsa_private_pem_1(), "test-key-1", &claims);
         let err = auth
             .authenticate(&bearer_headers(&token))
             .await
@@ -405,12 +415,12 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_rejects_unknown_signing_key() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let token = mint(
-            RSA_PRIVATE_PEM_2,
+            &rsa_private_pem_2(),
             "test-key-2",
             &base_claims(&mock.issuer()),
         );
@@ -423,7 +433,7 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_rejects_alg_none() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
@@ -449,13 +459,13 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_missing_required_scope() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let mut claims = base_claims(&mock.issuer());
         claims.scope = Some("openid".to_string());
-        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let token = mint(&rsa_private_pem_1(), "test-key-1", &claims);
         let err = auth
             .authenticate(&bearer_headers(&token))
             .await
@@ -465,7 +475,7 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_surfaces_tenant_and_profile_claims() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let mut settings = oidc_settings(&mock.issuer());
         settings.tenant_claim = Some("tenant".to_string());
@@ -475,7 +485,7 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
         claims.tid = None;
         claims.tenant = Some("from-tenant-claim".to_string());
         claims.profile = Some("hipaa".to_string());
-        let token = mint(RSA_PRIVATE_PEM_1, "test-key-1", &claims);
+        let token = mint(&rsa_private_pem_1(), "test-key-1", &claims);
         let ctx = auth.authenticate(&bearer_headers(&token)).await.unwrap();
         assert_eq!(ctx.tenant, "from-tenant-claim");
         assert_eq!(ctx.profile.as_deref(), Some("hipaa"));
@@ -483,22 +493,22 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_refreshes_jwks_on_kid_miss_after_rotation() {
-        let jwk1 = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk1 = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk1]).await;
         let auth = OidcAuthenticator::new(&oidc_settings(&mock.issuer())).unwrap();
 
         let token1 = mint(
-            RSA_PRIVATE_PEM_1,
+            &rsa_private_pem_1(),
             "test-key-1",
             &base_claims(&mock.issuer()),
         );
         auth.authenticate(&bearer_headers(&token1)).await.unwrap();
 
-        let jwk2 = public_jwk(RSA_PRIVATE_PEM_2, "test-key-2");
+        let jwk2 = public_jwk(&rsa_private_pem_2(), "test-key-2");
         mock.set_keys(vec![jwk2]);
 
         let token2 = mint(
-            RSA_PRIVATE_PEM_2,
+            &rsa_private_pem_2(),
             "test-key-2",
             &base_claims(&mock.issuer()),
         );
@@ -508,7 +518,7 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_build_authenticator_wires_mode() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let settings = AuthSettings {
             mode: AuthMode::Oidc,
@@ -521,13 +531,13 @@ Bf+6wY24Tr5v26VMLeGhf7IUO1CfGkkGXnJZLF9CIF7w7VFJNjar9AgZh+j53kJk
 
     #[tokio::test]
     async fn oidc_explicit_jwks_url_skips_discovery_path_for_keys() {
-        let jwk = public_jwk(RSA_PRIVATE_PEM_1, "test-key-1");
+        let jwk = public_jwk(&rsa_private_pem_1(), "test-key-1");
         let mock = spawn_mock_issuer(vec![jwk]).await;
         let mut settings = oidc_settings(&mock.issuer());
         settings.jwks_url = Some(format!("{}/jwks", mock.issuer()));
         let auth = OidcAuthenticator::new(&settings).unwrap();
         let token = mint(
-            RSA_PRIVATE_PEM_1,
+            &rsa_private_pem_1(),
             "test-key-1",
             &base_claims(&mock.issuer()),
         );

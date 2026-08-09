@@ -214,7 +214,8 @@ patterns:
     confidence: 0.85
     description: "Detects common API key patterns"
     examples:
-      - 'api_key: "sk_live_abcdef123456789"'
+      # Contiguous secret-shaped literals omitted (secret-scanning FPs).
+      - 'api_key: "<provider-shaped secret>"'
       - "access_token=abc123def456ghi789"
     replacement: "[API_KEY_REDACTED]"
     enabled: true

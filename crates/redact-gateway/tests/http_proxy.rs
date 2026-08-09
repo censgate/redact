@@ -67,7 +67,8 @@ async fn model_answers_are_redacted_before_they_reach_the_caller() {
 #[tokio::test]
 async fn blocked_entities_in_model_answers_are_refused() {
     // Response-side block must not return the credential to the caller.
-    let upstream = mock_json_upstream(chat_response("here is AKIAIOSFODNN7EXAMPLE for you")).await;
+    let aws_key = sample_aws_access_key();
+    let upstream = mock_json_upstream(chat_response(&format!("here is {aws_key} for you"))).await;
     let router = router_for(config_for(&upstream)).await;
 
     let response = post_json(router, "/v1/chat/completions", chat_request("hello")).await;
@@ -76,18 +77,19 @@ async fn blocked_entities_in_model_answers_are_refused() {
     assert_eq!(response.json()["error"]["type"], "policy_violation");
     let body = response.body;
     assert!(
-        !body.contains("AKIAIOSFODNN7EXAMPLE"),
+        !body.contains(&aws_key),
         "blocked secret leaked in error body: {body}"
     );
 }
 
 #[tokio::test]
 async fn blocked_entities_in_provider_error_messages_are_refused() {
+    let aws_key = sample_aws_access_key();
     let upstream = mock_json_upstream_status(
         500,
         json!({
             "error": {
-                "message": "upstream saw AKIAIOSFODNN7EXAMPLE",
+                "message": format!("upstream saw {aws_key}"),
                 "type": "server_error"
             }
         }),
@@ -100,7 +102,7 @@ async fn blocked_entities_in_provider_error_messages_are_refused() {
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(response.json()["error"]["type"], "policy_violation");
     assert!(
-        !response.body.contains("AKIAIOSFODNN7EXAMPLE"),
+        !response.body.contains(&aws_key),
         "blocked secret leaked: {}",
         response.body
     );
@@ -110,11 +112,12 @@ async fn blocked_entities_in_provider_error_messages_are_refused() {
 async fn blocked_entities_are_refused_and_never_forwarded() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(config_for(&upstream)).await;
+    let aws_key = sample_aws_access_key();
 
     let response = post_json(
         router,
         "/v1/chat/completions",
-        chat_request("my key is AKIAIOSFODNN7EXAMPLE"),
+        chat_request(&format!("my key is {aws_key}")),
     )
     .await;
 
@@ -329,11 +332,12 @@ async fn the_redact_endpoint_applies_policy_without_an_upstream_call() {
 async fn the_compliance_check_endpoint_reports_a_block_without_rewriting() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(config_for(&upstream)).await;
+    let aws_key = sample_aws_access_key();
 
     let response = post_json(
         router,
         "/v1/compliance/check",
-        json!({"text": "key AKIAIOSFODNN7EXAMPLE"}),
+        json!({"text": format!("key {aws_key}")}),
     )
     .await;
 

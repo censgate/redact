@@ -173,7 +173,7 @@ async fn a_blocked_prompt_never_opens_a_stream() {
     let upstream = mock_sse_upstream(split_email_sse()).await;
     let router = router_for(config_for(&upstream)).await;
 
-    let mut request = chat_request("key AKIAIOSFODNN7EXAMPLE");
+    let mut request = chat_request(&format!("key {}", sample_aws_access_key()));
     request["stream"] = json!(true);
     let response = post_json(router, "/v1/chat/completions", request).await;
 

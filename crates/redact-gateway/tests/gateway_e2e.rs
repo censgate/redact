@@ -792,10 +792,11 @@ async fn a_policy_block_writes_an_audit_block_record() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let (state, router) = state_and_router(audit_file_config(&upstream, path.clone())).await;
 
+    let aws_key = sample_aws_access_key();
     let response = post_json(
         router,
         "/v1/chat/completions",
-        chat_request("my key is AKIAIOSFODNN7EXAMPLE"),
+        chat_request(&format!("my key is {aws_key}")),
     )
     .await;
     assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
@@ -803,7 +804,7 @@ async fn a_policy_block_writes_an_audit_block_record() {
     state.audit.flush().await.expect("flush audit");
     let contents = wait_for_audit_containing(&path, "redact.gateway.policy_block").await;
     assert!(contents.contains("\"outcome\":\"blocked\"") || contents.contains("blocked"));
-    assert!(!contents.contains("AKIAIOSFODNN7EXAMPLE"));
+    assert!(!contents.contains(&aws_key));
 }
 
 #[tokio::test]

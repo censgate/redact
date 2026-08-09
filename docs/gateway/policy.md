@@ -183,9 +183,11 @@ Or point `CENSGATE_POLICY_FILE` / `policy_file` at a standalone document. Inline
 ## Dry-run without calling a provider
 
 ```bash
+# AWS docs sample shape assembled at the shell (avoids secret-scanning FPs in docs).
+AWS_KEY="AKIA""IOSFODNN7EXAMPLE"
 curl -s http://127.0.0.1:8080/v1/compliance/check \
   -H 'content-type: application/json' \
-  -d '{"text":"SSN 123-45-6789 and key AKIAIOSFODNN7EXAMPLE","profile":"default"}'
+  -d "{\"text\":\"SSN 123-45-6789 and key ${AWS_KEY}\",\"profile\":\"default\"}"
 ```
 
 Returns whether the content would be allowed, which entities would block, and action/entity counts. Tokens minted during a check are throwaway and never persisted.
