@@ -701,6 +701,8 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [Gateway Documentation](/censgate/redact/blob/main/docs/gateway) — Configuration, policy, tokenization, auth, telemetry, audit, streaming, deployment
 - [Test Coverage](/censgate/redact/blob/main/TEST_COVERAGE.md) — Testing details
 - [Contributing Guide](/censgate/redact/blob/main/CONTRIBUTING.md) — How to contribute
+- [Project scope](/censgate/redact/blob/main/docs/PROJECT_SCOPE.md) — What this repository accepts
+- [Contributor License Agreement](/censgate/redact/blob/main/CLA.md) — Individual and Corporate CLA
 - [Examples](/censgate/redact/blob/main/examples) — Code examples
 
 ## Roadmap
@@ -745,7 +747,13 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](/censgate/redact/blob/main/CONTRIBUTING.md) for guidelines.
+We welcome contributions. Please read:
+
+- [CONTRIBUTING.md](/censgate/redact/blob/main/CONTRIBUTING.md) — build, test, and review process
+- [docs/PROJECT_SCOPE.md](/censgate/redact/blob/main/docs/PROJECT_SCOPE.md) — what this repository accepts
+- [CLA.md](/censgate/redact/blob/main/CLA.md) — Individual and Corporate Contributor License Agreement (required)
+
+Sign every commit with the Developer Certificate of Origin (`git commit -s`). The CLA bot will ask first-time human contributors to sign the CLA on the pull request.
 
 ```bash
 # Fork and clone
@@ -760,8 +768,8 @@ cargo test --workspace
 cargo clippy --all-targets --all-features
 cargo fmt --all
 
-# Commit and push
-git commit -m "feat: add amazing feature"
+# Commit (DCO sign-off) and push
+git commit -s -m "feat: add amazing feature"
 git push origin feature/my-new-feature
 ```
 
