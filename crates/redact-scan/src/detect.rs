@@ -72,6 +72,18 @@ pub fn parse_entity_type(s: &str) -> Option<EntityType> {
     Some(EntityType::from(t.to_string()))
 }
 
+/// True when `--fail-on` should exit 1.
+pub fn fail_on_matches(spec: &str, findings: &[crate::report::Finding]) -> bool {
+    if spec.eq_ignore_ascii_case("any") {
+        return !findings.is_empty();
+    }
+    let wanted = parse_entity_type(spec);
+    match wanted {
+        None => !findings.is_empty(),
+        Some(ty) => findings.iter().any(|f| f.entity_type == ty),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +100,26 @@ mod tests {
         assert!(label.starts_with("builtin@"));
         let n: usize = label.rsplit('@').next().unwrap().parse().unwrap();
         assert!(n > 0);
+    }
+
+    #[test]
+    fn fail_on_any_and_typed() {
+        use crate::layers::ScanLayer;
+        use crate::report::{EvidenceClass, Finding};
+        let f = Finding {
+            table: "public.t".into(),
+            column: "c".into(),
+            json_path: None,
+            entity_type: EntityType::EmailAddress,
+            layer: ScanLayer::Sample,
+            match_count: 1,
+            sampled_rows: 10,
+            confidence: 0.9,
+            evidence_class: EvidenceClass::TableSample,
+        };
+        assert!(fail_on_matches("any", std::slice::from_ref(&f)));
+        assert!(fail_on_matches("EMAIL_ADDRESS", std::slice::from_ref(&f)));
+        assert!(!fail_on_matches("US_SSN", std::slice::from_ref(&f)));
+        assert!(!fail_on_matches("any", &[]));
     }
 }

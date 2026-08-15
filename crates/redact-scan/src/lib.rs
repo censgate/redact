@@ -7,6 +7,8 @@
 //! Prefer a replica or staging database. Reports list locations and counts
 //! only — never sample values.
 
+/// Rule-of-three helper for negative samples.
+pub mod bound;
 /// Canonical JSON hashing for [`ScanReport::content_hash`].
 pub mod canonical;
 /// Layer 0 catalog metadata.
@@ -17,12 +19,20 @@ pub mod cli;
 pub mod detect;
 /// Scrubbed scanner errors.
 pub mod error;
+/// Human-readable table output.
+pub mod format;
+/// Identifier quoting.
+pub mod ident;
+/// Layer 2 JSON path sampling.
+pub mod json_scan;
 /// Discovery layer identifiers (`0`, `0.5`, `1`, `2`).
 pub mod layers;
 /// Value-free report types.
 pub mod report;
 /// Read-only session and privilege checks.
 pub mod safety;
+/// Layer 1 table sampling.
+pub mod sample;
 /// Scan orchestration.
 pub mod scan;
 /// Name and type heuristics.
@@ -31,6 +41,8 @@ pub mod score;
 pub mod scrub;
 /// Layer 0.5 planner statistics.
 pub mod stats;
+/// Optional HTTP POST of the report JSON.
+pub mod upload;
 
 pub use error::ScanError;
 pub use report::{Finding, ScanReport};
