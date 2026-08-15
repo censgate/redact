@@ -7,16 +7,16 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// SHA-256 hex of RFC 8785-style canonical JSON with `content_hash` omitted.
+/// SHA-256 hex of canonical JSON with `content_hash` omitted.
 ///
-/// Object keys are sorted; insignificant whitespace is omitted.
+/// Object keys are sorted recursively; `serde_json` compact encoding is used
+/// (no insignificant whitespace). This is not a full RFC 8785 implementation.
 pub fn content_hash<T: Serialize>(report: &T) -> Result<String> {
     let mut value = serde_json::to_value(report)?;
     if let Value::Object(map) = &mut value {
         map.remove("content_hash");
     }
-    let canonical = canonicalize(&value)?;
-    Ok(hex_sha256(canonical.as_bytes()))
+    Ok(hex_sha256(canonicalize(&value).as_bytes()))
 }
 
 pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
@@ -26,8 +26,8 @@ pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
-fn canonicalize(value: &Value) -> Result<String> {
-    Ok(canonical_value(value).to_string())
+fn canonicalize(value: &Value) -> String {
+    canonical_value(value).to_string()
 }
 
 fn canonical_value(value: &Value) -> Value {

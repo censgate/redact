@@ -90,7 +90,7 @@ impl fmt::Debug for Cli {
             .field("statement_timeout", &self.statement_timeout)
             .field("format", &self.format)
             .field("out", &self.out)
-            .field("report_url", &self.report_url)
+            .field("report_url", &self.report_url.as_deref().map(scrub))
             .field("api_key", &self.api_key.as_ref().map(|_| "***"))
             .field(
                 "report_headers",
@@ -198,10 +198,13 @@ mod tests {
             "postgres://alice:s3cret-pass@localhost/app",
             "--api-key",
             "tok_live_secret",
+            "--report-url",
+            "https://hook:hook-pass@example.test/ingest",
         ]);
         let shown = format!("{cli:?}");
         assert!(!shown.contains("s3cret-pass"));
         assert!(!shown.contains("tok_live_secret"));
+        assert!(!shown.contains("hook-pass"));
         assert!(shown.contains("***"));
     }
 }

@@ -20,6 +20,7 @@ fn new_scrubs_percent_encoded_password() {
     let debug = format!("{err:?}");
     assert!(!shown.contains("p%40ssword"));
     assert!(!shown.contains("p@ssword"));
+    assert!(!shown.contains("ssword"));
     assert!(!debug.contains("p@ssword"));
 }
 

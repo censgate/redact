@@ -26,8 +26,11 @@ pub fn percent_decode(input: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(v) = u8::from_str_radix(&input[i + 1..i + 3], 16) {
-                out.push(v);
+            let h1 = bytes[i + 1];
+            let h2 = bytes[i + 2];
+            if h1.is_ascii_hexdigit() && h2.is_ascii_hexdigit() {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).expect("ascii hex");
+                out.push(u8::from_str_radix(hex, 16).expect("ascii hex"));
                 i += 3;
                 continue;
             }
@@ -64,10 +67,17 @@ fn scrub_patterns(input: &str) -> String {
 /// Redact credentials from any string that may appear in logs or errors.
 ///
 /// Handles `user:pass@`, `password=`, and percent-encoded variants
-/// (`user%3Apass`, `password%3D…`, `%40` in passwords) by decoding first.
+/// (`user%3Apass`, `password%3D…`, `%40` in passwords). Patterns run on the
+/// raw string first so an encoded `@` inside a password cannot split userinfo
+/// after decode; then the result is decoded and scrubbed again.
 pub fn scrub(input: &str) -> String {
-    let decoded = fully_percent_decode(input);
-    scrub_patterns(&decoded)
+    let raw = scrub_patterns(input);
+    let decoded = fully_percent_decode(&raw);
+    if decoded == raw {
+        raw
+    } else {
+        scrub_patterns(&decoded)
+    }
 }
 
 /// If `secret` is non-empty and appears in `input`, replace every occurrence.
@@ -107,9 +117,25 @@ mod tests {
     #[test]
     fn scrubs_percent_encoded_password_in_url() {
         let s = scrub("postgres://alice:p%40ssword@db.example/app");
-        assert!(!s.contains("p%40ssword"));
-        assert!(!s.contains("p@ssword"));
-        assert!(s.contains("alice:***@"));
+        assert!(!s.contains("p%40ssword"), "{s}");
+        assert!(!s.contains("p@ssword"), "{s}");
+        assert!(!s.contains("ssword"), "{s}");
+        assert!(s.contains("alice:***@"), "{s}");
+    }
+
+    #[test]
+    fn scrubs_password_with_encoded_reserved_bytes() {
+        let s = scrub("postgres://alice:a%26b%2Fc%3Fd@db.example/app");
+        assert!(!s.contains("a%26b"), "{s}");
+        assert!(!s.contains("a&b"), "{s}");
+        assert!(s.contains("alice:***@"), "{s}");
+    }
+
+    #[test]
+    fn percent_decode_leaves_invalid_and_unicode_sequences() {
+        assert_eq!(percent_decode("%€"), "%€");
+        assert_eq!(percent_decode("%ZZ"), "%ZZ");
+        assert_eq!(percent_decode("ok%20x"), "ok x");
     }
 
     #[test]
