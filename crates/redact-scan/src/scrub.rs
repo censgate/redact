@@ -47,6 +47,18 @@ fn fully_percent_decode(input: &str) -> String {
     current
 }
 
+fn scrub_decode_rounds(input: &str) -> String {
+    let mut current = scrub_patterns(input);
+    for _ in 0..3 {
+        let next = percent_decode(&current);
+        if next == current {
+            break;
+        }
+        current = scrub_patterns(&next);
+    }
+    current
+}
+
 /// Redact `user:password@` using the last `@` in the URL authority.
 ///
 /// That last `@` is the host delimiter (RFC 3986). Encoded `@` / `:` inside
@@ -106,15 +118,10 @@ fn scrub_patterns(input: &str) -> String {
 /// Handles `user:pass@`, `password=`, and percent-encoded variants
 /// (`user%3Apass`, `password%3D…`, `%40` / `%26` inside passwords).
 /// Patterns run on the raw string first so encoded reserved bytes stay
-/// inside the credential; then the result is decoded and scrubbed again.
+/// inside the credential; then each percent-decode pass is scrubbed again
+/// (nested `%25` encodings included).
 pub fn scrub(input: &str) -> String {
-    let raw = scrub_patterns(input);
-    let decoded = fully_percent_decode(&raw);
-    if decoded == raw {
-        raw
-    } else {
-        scrub_patterns(&decoded)
-    }
+    scrub_decode_rounds(input)
 }
 
 /// If `secret` is non-empty and appears in `input`, replace every occurrence.
@@ -195,6 +202,14 @@ mod tests {
     fn leaves_username_only_url() {
         let s = scrub("postgres://alice@db.example/app");
         assert_eq!(s, "postgres://alice@db.example/app");
+    }
+
+    #[test]
+    fn scrubs_double_encoded_query_password() {
+        let s = scrub("login failed password%253Dpa%2526ss");
+        assert!(!s.contains("pa%26ss"), "{s}");
+        assert!(!s.contains("pa&ss"), "{s}");
+        assert!(s.contains("password=***"), "{s}");
     }
 
     #[test]
