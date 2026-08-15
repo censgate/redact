@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `redact-scan`: new workspace crate and `redact-scan` binary for read-only
+  Postgres PII discovery. Report types, credential scrubber, CLI preflight,
+  a read-only safety session (refuse superuser and write grants), and
+  layers 0 / 0.5 / 1 / 2 (catalog, `pg_stats`, bounded `TABLESAMPLE`,
+  JSON paths). Optional `--report-url` POSTs the report JSON; `--fail-on`
+  exits 1 on matching findings. Reports contain locations and counts
+  only — never sample values. See `docs/scanning-model.md`.
+
 ### Changed
 
 - Release: GitHub Release publication waits for all three image jobs and a
@@ -18,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `continue-on-error` publish steps.
 - Release: a no-checkout stranger-path job installs from crates.io and pulls
   the published gateway image the way a consumer would.
+
+### Fixed
+
+- `redact-scan`: upgrade `testcontainers-modules` so CI `cargo audit` is not
+  failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
+  tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
+  only by unused optional `sqlx-mysql` — this crate enables Postgres only.
 
 ## [0.9.1] - 2026-08-08
 
