@@ -38,6 +38,7 @@ show_usage() {
     echo "  - crates/redact-api/Cargo.toml (redact-core, redact-ner dependencies)"
     echo "  - crates/redact-cli/Cargo.toml (redact-core, redact-ner dependencies)"
     echo "  - crates/redact-gateway/Cargo.toml (redact-core dependency)"
+    echo "  - crates/redact-scan/Cargo.toml (redact-core dependency)"
     echo "  - README.md (library Cargo.toml example versions)"
     echo "  - docs/benchmarks/README.md (current release link)"
     echo "  - CHANGELOG.md (adds new version entry)"
@@ -271,6 +272,7 @@ main() {
     update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-core" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-ner" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-gateway/Cargo.toml" "redact-core" "$new_version" "$dry_run"
+    update_crate_dependency "crates/redact-scan/Cargo.toml" "redact-core" "$new_version" "$dry_run"
     update_doc_versions "$new_version" "$dry_run"
     update_changelog "$new_version" "$dry_run"
     

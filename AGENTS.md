@@ -22,6 +22,7 @@ crates/
 ├── redact-cli/     # Command-line interface (Clap)
 ├── redact-wasm/    # WebAssembly bindings
 ├── redact-gateway/ # OpenAI-compatible privacy gateway (embeds redact-core)
+├── redact-scan/    # Read-only Postgres PII discovery scanner
 └── redact-verify/  # Independent ledger pack verifier (no redact-core)
 ```
 
@@ -33,6 +34,8 @@ redact-api ──────► redact-core
 redact-cli ──────► redact-core
 redact-wasm ─────► redact-core
 redact-gateway ─► redact-core
+redact-scan ────► redact-core
+redact-verify     (no redact-core)
 ```
 
 ### Critical Components
@@ -48,6 +51,10 @@ redact-gateway ─► redact-core
 - `tokenizer_wrapper.rs` - HuggingFace tokenizer integration
 - Uses `ort` crate for ONNX inference
 - Supports quantized int8 models for efficiency
+
+**redact-scan** (`crates/redact-scan/`)
+- Read-only Postgres PII discovery (`redact-scan` binary)
+- Workspace `sqlx` is for this crate only — never add it to `redact-core` (wasm)
 
 ## Development Commands
 

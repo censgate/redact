@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, feature/*]
+    branches: [main, develop, feature/*, coder*]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, feature/*, coder*]
 
 permissions:
   contents: read
@@ -282,3 +282,24 @@ jobs:
           echo "ERROR: API failed to become healthy within 30s"
           docker logs api-smoke || true
           exit 1
+
+  redact-scan-integration:
+    name: redact-scan Postgres integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: redact-scan-integration
+
+      - name: Run gated Postgres tests
+        env:
+          REDACT_SCAN_INTEGRATION: "1"
+        run: cargo test -p redact-scan --test postgres -- --nocapture
