@@ -22,7 +22,8 @@ crates/
 ├── redact-cli/     # Command-line interface (Clap)
 ├── redact-wasm/    # WebAssembly bindings
 ├── redact-gateway/ # OpenAI-compatible privacy gateway (embeds redact-core)
-└── redact-scan/    # Read-only Postgres PII discovery scanner
+├── redact-scan/    # Read-only Postgres PII discovery scanner
+└── redact-verify/  # Independent ledger pack verifier (no redact-core)
 ```
 
 ### Crate Dependencies
@@ -34,6 +35,7 @@ redact-cli ──────► redact-core
 redact-wasm ─────► redact-core
 redact-gateway ─► redact-core
 redact-scan ────► redact-core
+redact-verify     (no redact-core)
 ```
 
 ### Critical Components

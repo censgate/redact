@@ -1,0 +1,54 @@
+{
+  "empty_path_rule": "empty path only if tree_size==1 and leaf==root",
+  "leaves": [
+    {
+      "kind": "tip",
+      "chain_id": "acme/local/default/e0",
+      "seq": 1,
+      "tip_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data_hex": "7b5740167382e01f1189493ee718533a6fd43b1599bf8960936b69d12ab308bf"
+    },
+    {
+      "kind": "tip",
+      "chain_id": "acme/local/default/e0",
+      "seq": 2,
+      "tip_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "data_hex": "83a5601f2658641f7d782b0809ce122f06ec1a74a80874687abd6a6cd061396f"
+    },
+    {
+      "kind": "pack",
+      "pack_id": "11111111-1111-1111-1111-111111111111",
+      "body_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "data_hex": "50330310dba29eb0d8372fe171e824ad21d3db8610356221e1b22ea8cddef98c"
+    }
+  ],
+  "note": "Shared Go/Rust RFC 6962 + leaf-formula vectors. Path length leaks approximate leaf count (no padding).",
+  "proofs": [
+    {
+      "index": 0,
+      "tree_size": 3,
+      "path": [
+        "a5d63c88938da9c1da25b605e3efa496c1b0cf90cd5656d945729238d8da4853",
+        "40a1e192114034483627a7f1b63565bd3e4919cbcbdc9cb6f13ae663cf47696b"
+      ]
+    },
+    {
+      "index": 1,
+      "tree_size": 3,
+      "path": [
+        "4f4f9194acf069cc154697d1fe9f8358d8f41125d5e64a23aa9f47f7f471ec18",
+        "40a1e192114034483627a7f1b63565bd3e4919cbcbdc9cb6f13ae663cf47696b"
+      ]
+    },
+    {
+      "index": 2,
+      "tree_size": 3,
+      "path": [
+        "dabac75f8762a61083498be5a2c43f3e32c83740be611b56e45911329001f2cd"
+      ]
+    }
+  ],
+  "root_digest_hex": "3461447e6ed3b993598c3aeede7c78739cc9da0b63d8a64e65e5ff41f5a81e66",
+  "root_hex": "51e93a903cae3b1547307261ea8aae818e8210c37b29536c16269b35e100e1e1",
+  "root_preimage": "anchor-root|v1|51e93a903cae3b1547307261ea8aae818e8210c37b29536c16269b35e100e1e1"
+}

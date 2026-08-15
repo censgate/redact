@@ -7,6 +7,7 @@ members = [
     "crates/redact-cli",
     "crates/redact-gateway",
     "crates/redact-scan",
+    "crates/redact-verify",
 ]
 resolver = "2"
 
@@ -39,12 +40,12 @@ tokio = { version = "1.50", features = ["full"] }
 # Web framework
 axum = { version = "0.8", features = ["json", "tracing"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["trace", "cors"] }
+tower-http = { version = "0.7", features = ["trace", "cors"] }
 
 # ONNX Runtime
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic", "half"] }
 ndarray = "0.17"
-tokenizers = "0.22"
+tokenizers = "0.23"
 
 # WASM support
 wasm-bindgen = "0.2"
@@ -55,7 +56,7 @@ web-sys = "0.3"
 # Cryptography
 sha2 = "0.11"
 blake3 = "1.8"
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 pbkdf2 = { version = "0.13.0-rc.10", features = ["hmac", "sha2"] }
 rand = "0.10"
 

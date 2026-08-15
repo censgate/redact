@@ -91,11 +91,11 @@ impl EncryptAnonymizer {
 
         // Generate cryptographically secure random nonce
         let nonce_bytes: [u8; 12] = rng.random();
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         // Encrypt
         let ciphertext = cipher
-            .encrypt(nonce, value.as_bytes())
+            .encrypt(&nonce, value.as_bytes())
             .map_err(|e| anyhow!("Encryption failed: {}", e))?;
 
         // Combine salt + nonce + ciphertext
@@ -114,10 +114,10 @@ impl EncryptAnonymizer {
         let mut rng = rand::rng();
         let nonce_bytes: [u8; 12] = rng.random();
         let cipher = Aes256Gcm::new(dek.into());
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = cipher
-            .encrypt(nonce, value.as_bytes())
+            .encrypt(&nonce, value.as_bytes())
             .map_err(|e| anyhow!("Encryption failed: {}", e))?;
 
         let mut envelope = Vec::with_capacity(DEK_ENVELOPE_MIN_LEN + ciphertext.len());
@@ -141,14 +141,16 @@ impl EncryptAnonymizer {
             ));
         }
 
-        let nonce_bytes = &envelope[1..13];
+        let nonce_bytes: [u8; 12] = envelope[1..13]
+            .try_into()
+            .map_err(|_| anyhow!("Invalid nonce length"))?;
         let ciphertext = &envelope[13..];
 
         let cipher = Aes256Gcm::new(dek.into());
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         let plaintext = cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|e| anyhow!("Decryption failed: {}", e))?;
 
         String::from_utf8(plaintext).map_err(|e| anyhow!("Invalid UTF-8: {}", e))
@@ -163,17 +165,19 @@ impl EncryptAnonymizer {
 
         // Extract components
         let salt = &encrypted[0..16];
-        let nonce_bytes = &encrypted[16..28];
+        let nonce_bytes: [u8; 12] = encrypted[16..28]
+            .try_into()
+            .map_err(|_| anyhow!("Invalid nonce length"))?;
         let ciphertext = &encrypted[28..];
 
         // Derive key
         let key_bytes = self.derive_key(password, salt);
         let cipher = Aes256Gcm::new((&key_bytes).into());
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::from(nonce_bytes);
 
         // Decrypt
         let plaintext = cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|e| anyhow!("Decryption failed: {}", e))?;
 
         String::from_utf8(plaintext).map_err(|e| anyhow!("Invalid UTF-8: {}", e))
