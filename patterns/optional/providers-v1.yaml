@@ -1,0 +1,200 @@
+# Optional long-tail provider prefixes (Phase 2 of #101).
+#
+# Not on the Docker / compose / Kubernetes default pack path
+# (`/app/patterns/compliance:/app/patterns/pii`). The loader also skips
+# directories named `optional/` and `quarantine/` when walking a tree.
+# Not compiled into WASM.
+#
+# Rules are length-closed prefix or structured shapes adapted from
+# gitleaks (MIT), config/gitleaks.toml at
+# 09242ce9c8a60d9b051fc2d166f9e849b88c7ac0.
+# Named-prefix rules do not use the generic entropy scorer.
+# The single `entropy: generic` rule must expose capture group 1 (the
+# value) and goes through evaluate_generic_candidate. Rules that consume
+# a trailing delimiter set `value_group: 1`; other pack rules keep the
+# full match so structural groups (MAC, phone, IBAN) are not truncated.
+version: "1.0"
+name: "providers-v1"
+framework: "optional-providers"
+jurisdiction: "Global"
+description: "Opt-in prefixed provider tokens not compiled into redact-core"
+last_updated: "2026-08-15"
+
+patterns:
+  - id: "opt_adobe_client_secret"
+    name: "Adobe client secret"
+    entity_type: "ADOBE_CLIENT_SECRET"
+    regex: '\bp8e-[a-zA-Z0-9]{32}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_age_secret_key"
+    name: "age secret key"
+    entity_type: "AGE_SECRET_KEY"
+    regex: '\bAGE-SECRET-KEY-1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}\b'
+    confidence: 0.98
+    enabled: true
+
+  - id: "opt_airtable_pat"
+    name: "Airtable personal access token"
+    entity_type: "AIRTABLE_PAT"
+    regex: '\bpat[A-Za-z0-9]{14}\.[a-f0-9]{64}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_azure_ad_client_secret"
+    name: "Azure AD client secret"
+    entity_type: "AZURE_AD_CLIENT_SECRET"
+    regex: '\b[a-zA-Z0-9_~.]{3}[0-9]Q~[a-zA-Z0-9_~.-]{31,34}\b'
+    confidence: 0.90
+    enabled: true
+
+  - id: "opt_cloudflare_origin_ca_key"
+    name: "Cloudflare Origin CA key"
+    entity_type: "CLOUDFLARE_ORIGIN_CA_KEY"
+    regex: '\bv1\.0-[a-f0-9]{24}-[a-f0-9]{146}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_doppler_api_token"
+    name: "Doppler API token"
+    entity_type: "DOPPLER_API_TOKEN"
+    regex: '\bdp\.pt\.[a-zA-Z0-9]{43}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_duffel_api_token"
+    name: "Duffel API token"
+    entity_type: "DUFFEL_API_TOKEN"
+    regex: '\bduffel_(?:test|live)_[a-zA-Z0-9_\-=]{43}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_dynatrace_api_token"
+    name: "Dynatrace API token"
+    entity_type: "DYNATRACE_API_TOKEN"
+    regex: '\bdt0c01\.[a-zA-Z0-9]{24}\.[a-zA-Z0-9]{64}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_easypost_api_token"
+    name: "EasyPost API token"
+    entity_type: "EASYPOST_API_TOKEN"
+    regex: '\bEZA[KT][a-zA-Z0-9]{54}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_flyio_access_token"
+    name: "Fly.io access token"
+    entity_type: "FLYIO_ACCESS_TOKEN"
+    regex: '\bfo1_[A-Za-z0-9_-]{43}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_frameio_api_token"
+    name: "Frame.io API token"
+    entity_type: "FRAMEIO_API_TOKEN"
+    regex: '\bfio-u-[a-zA-Z0-9\-_=]{64}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_grafana_cloud_token"
+    name: "Grafana Cloud API token"
+    entity_type: "GRAFANA_CLOUD_TOKEN"
+    regex: '\b(glc_[A-Za-z0-9+/]{32,400}={0,2})(?:\s|$|[^A-Za-z0-9+/=])'
+    value_group: 1
+    confidence: 0.90
+    enabled: true
+
+  - id: "opt_heroku_api_key_v2"
+    name: "Heroku API key v2"
+    entity_type: "HEROKU_API_KEY"
+    regex: '\bHRKU-AA[0-9a-zA-Z_-]{58}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_infracost_api_token"
+    name: "Infracost API token"
+    entity_type: "INFRACOST_API_TOKEN"
+    regex: '\bico-[a-zA-Z0-9]{32}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_linear_api_key"
+    name: "Linear API key"
+    entity_type: "LINEAR_API_KEY"
+    regex: '\blin_api_[a-zA-Z0-9]{40}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_new_relic_user_api_key"
+    name: "New Relic user API key"
+    entity_type: "NEW_RELIC_USER_API_KEY"
+    regex: '\bNRAK-[A-Z0-9]{27}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_planetscale_api_token"
+    name: "PlanetScale API token"
+    entity_type: "PLANETSCALE_API_TOKEN"
+    regex: '\bpscale_tkn_[\w=.-]{32,64}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_postman_api_token"
+    name: "Postman API token"
+    entity_type: "POSTMAN_API_TOKEN"
+    regex: '\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_prefect_api_token"
+    name: "Prefect API token"
+    entity_type: "PREFECT_API_TOKEN"
+    regex: '\bpnu_[a-zA-Z0-9]{36}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_pulumi_api_token"
+    name: "Pulumi API token"
+    entity_type: "PULUMI_API_TOKEN"
+    regex: '\bpul-[a-f0-9]{40}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_sentry_user_token"
+    name: "Sentry user token"
+    entity_type: "SENTRY_USER_TOKEN"
+    regex: '\bsntryu_[a-f0-9]{64}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_shopify_access_token"
+    name: "Shopify access token"
+    entity_type: "SHOPIFY_ACCESS_TOKEN"
+    regex: '\bshpat_[a-fA-F0-9]{32}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_shippo_api_token"
+    name: "Shippo API token"
+    entity_type: "SHIPPO_API_TOKEN"
+    regex: '\bshippo_(?:live|test)_[a-fA-F0-9]{40}\b'
+    confidence: 0.95
+    enabled: true
+
+  - id: "opt_square_access_token"
+    name: "Square access token"
+    entity_type: "SQUARE_ACCESS_TOKEN"
+    regex: '\b(?:EAAA|sq0atp-)[A-Za-z0-9_-]{22,60}\b'
+    confidence: 0.90
+    enabled: true
+
+  - id: "opt_generic_assignment"
+    name: "Entropy-gated assignment (opt-in)"
+    entity_type: "GENERIC_SECRET"
+    entropy: generic
+    regex: '(?i)(?:api_key|client_secret|access_token)\s*[:=]\s*([A-Za-z0-9+/=_-]{20,128})'
+    confidence: 0.70
+    description: "Value-only capture group 1; shared evaluate_generic_candidate gate"
+    enabled: true

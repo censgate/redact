@@ -7,7 +7,7 @@
 //! ## Scope
 //!
 //! These bindings expose the **pattern-based** detection and anonymization from
-//! [`redact_core`]: the 54 regex entity types (email, phone, SSN, credit cards,
+//! [`redact_core`]: the compiled regex entity types (email, phone, SSN, credit cards,
 //! IBAN, UK identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates,
 //! secrets and credentials, ...).
 //! No ML model is loaded, so the module stays small (~1-3 MB) and fits browser
@@ -43,11 +43,11 @@
 
 use redact_core::{
     anonymizers::{AnonymizationStrategy, AnonymizerConfig},
-    AnalyzerEngine,
+    AnalyzerEngine, EntityType,
 };
 use wasm_bindgen::prelude::*;
 
-/// PII detection and anonymization engine (pattern-based, 54 entity types).
+/// PII detection and anonymization engine (pattern-based, including secrets).
 #[wasm_bindgen]
 pub struct RedactEngine {
     engine: AnalyzerEngine,
@@ -72,6 +72,44 @@ impl RedactEngine {
                 r#"{"error":"failed to serialize analysis result"}"#.to_string()
             }),
             Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+        }
+    }
+
+    /// Analyze `text` for the entity types in `entities_json` (JSON string array).
+    pub fn analyze_with_entities(&self, text: &str, entities_json: &str) -> String {
+        match parse_entity_list(entities_json) {
+            Ok(types) => match self.engine.analyze_with_entities(text, &types, Some("en")) {
+                Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| {
+                    r#"{"error":"failed to serialize analysis result"}"#.to_string()
+                }),
+                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+            },
+            Err(msg) => serde_json::json!({ "error": msg }).to_string(),
+        }
+    }
+
+    /// Analyze `text` with the listed entity types disabled (`entities_json` is a JSON array).
+    pub fn analyze_excluding(&self, text: &str, entities_json: &str) -> String {
+        match parse_entity_list(entities_json) {
+            Ok(disabled) => {
+                let keep: Vec<EntityType> = engine_entity_types(&self.engine)
+                    .into_iter()
+                    .filter(|t| !disabled.contains(t))
+                    .collect();
+                if keep.is_empty() {
+                    return serde_json::json!({
+                        "error": "analyze_excluding removed every entity type"
+                    })
+                    .to_string();
+                }
+                match self.engine.analyze_with_entities(text, &keep, Some("en")) {
+                    Ok(result) => serde_json::to_string(&result).unwrap_or_else(|_| {
+                        r#"{"error":"failed to serialize analysis result"}"#.to_string()
+                    }),
+                    Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+                }
+            }
+            Err(msg) => serde_json::json!({ "error": msg }).to_string(),
         }
     }
 
@@ -144,7 +182,12 @@ impl RedactEngine {
     /// Useful for callers to know which entities are available in the WASM build
     /// (versus NER-only types like `PERSON`/`ORGANIZATION`/`LOCATION`).
     pub fn supported_entities(&self) -> String {
-        serde_json::to_string(SUPPORTED_ENTITY_TYPES).unwrap_or_else(|_| "[]".to_string())
+        let mut labels: Vec<String> = engine_entity_types(&self.engine)
+            .into_iter()
+            .map(|t| t.as_str().to_string())
+            .collect();
+        labels.sort();
+        serde_json::to_string(&labels).unwrap_or_else(|_| "[]".to_string())
     }
 }
 
@@ -157,6 +200,32 @@ impl RedactEngine {
             Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
         }
     }
+}
+
+fn engine_entity_types(engine: &AnalyzerEngine) -> Vec<EntityType> {
+    let mut types = Vec::new();
+    for recognizer in engine.recognizer_registry().recognizers() {
+        for entity in recognizer.supported_entities() {
+            if !types.contains(entity) {
+                types.push(entity.clone());
+            }
+        }
+    }
+    types
+}
+
+fn parse_entity_list(json: &str) -> Result<Vec<EntityType>, String> {
+    let labels: Vec<String> =
+        serde_json::from_str(json).map_err(|e| format!("invalid entity list: {e}"))?;
+    let mut types = Vec::with_capacity(labels.len());
+    for label in labels {
+        let parsed = EntityType::from(label.clone());
+        if matches!(parsed, EntityType::Custom(_)) {
+            return Err(format!("unknown entity type: {label}"));
+        }
+        types.push(parsed);
+    }
+    Ok(types)
 }
 
 fn parse_strategy(s: &str) -> Result<AnonymizationStrategy, String> {
@@ -177,49 +246,6 @@ impl Default for RedactEngine {
         Self::new()
     }
 }
-
-/// Entity types available in the WASM (pattern-only) build.
-///
-/// NER-only types (`PERSON`, `ORGANIZATION`, `LOCATION`) are intentionally absent;
-/// see the crate-level docs for the rationale and the hybrid alternative.
-static SUPPORTED_ENTITY_TYPES: &[&str] = &[
-    "EMAIL_ADDRESS",
-    "PHONE_NUMBER",
-    "IP_ADDRESS",
-    "URL",
-    "DOMAIN_NAME",
-    "CREDIT_CARD",
-    "IBAN_CODE",
-    "US_BANK_NUMBER",
-    "US_SSN",
-    "US_DRIVER_LICENSE",
-    "US_PASSPORT",
-    "US_ZIP_CODE",
-    "UK_NHS",
-    "UK_NINO",
-    "UK_POSTCODE",
-    "UK_DRIVER_LICENSE",
-    "UK_PASSPORT_NUMBER",
-    "UK_PHONE_NUMBER",
-    "UK_MOBILE_NUMBER",
-    "UK_SORT_CODE",
-    "UK_COMPANY_NUMBER",
-    "MEDICAL_LICENSE",
-    "MEDICAL_RECORD_NUMBER",
-    "PASSPORT_NUMBER",
-    "AGE",
-    "ISBN",
-    "PO_BOX",
-    "CRYPTO_WALLET",
-    "BTC_ADDRESS",
-    "ETH_ADDRESS",
-    "GUID",
-    "MAC_ADDRESS",
-    "MD5_HASH",
-    "SHA1_HASH",
-    "SHA256_HASH",
-    "DATE_TIME",
-];
 
 #[cfg(test)]
 mod tests {
@@ -357,16 +383,79 @@ mod tests {
     }
 
     #[test]
-    fn supported_entities_lists_36_types_and_excludes_ner_types() {
+    fn supported_entities_lists_pattern_types_and_excludes_ner_types() {
         let engine = RedactEngine::new();
         let json = engine.supported_entities();
         let parsed: Vec<String> = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.len(), 36);
         assert!(parsed.contains(&"EMAIL_ADDRESS".to_string()));
         assert!(parsed.contains(&"US_SSN".to_string()));
+        assert!(parsed.contains(&"GENERIC_SECRET".to_string()));
+        assert!(parsed.contains(&"AWS_ACCESS_KEY".to_string()));
         assert!(!parsed.contains(&"PERSON".to_string()));
         assert!(!parsed.contains(&"ORGANIZATION".to_string()));
         assert!(!parsed.contains(&"LOCATION".to_string()));
+        let mut sorted = parsed.clone();
+        sorted.sort();
+        assert_eq!(parsed, sorted);
+    }
+
+    #[test]
+    fn generic_secret_positive_includes_confidence() {
+        let engine = RedactEngine::new();
+        let secret = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let text = format!("api_key={secret}");
+        let json = engine.analyze(&text);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let hit = v["detected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["entity_type"] == "GENERIC_SECRET")
+            .expect("GENERIC_SECRET");
+        let score = hit["score"].as_f64().expect("confidence/score present");
+        assert!(
+            (0.60..=0.85).contains(&score),
+            "GENERIC_SECRET confidence must be in 0.60–0.85, got {score}"
+        );
+    }
+
+    #[test]
+    fn generic_secret_exclusion_password_stopword() {
+        let engine = RedactEngine::new();
+        let json = engine.analyze("password=password");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let types: Vec<&str> = v["detected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["entity_type"].as_str().unwrap())
+            .collect();
+        assert!(!types.contains(&"GENERIC_SECRET"));
+    }
+
+    #[test]
+    fn analyze_excluding_drops_generic_secret() {
+        let engine = RedactEngine::new();
+        let secret = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let text = format!("api_key={secret}");
+        let all = engine.analyze(&text);
+        let all_v: serde_json::Value = serde_json::from_str(&all).unwrap();
+        let types: Vec<&str> = all_v["detected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["entity_type"].as_str().unwrap())
+            .collect();
+        assert!(types.contains(&"GENERIC_SECRET") || types.contains(&"MD5_HASH"));
+        let filtered = engine.analyze_excluding(&text, r#"["GENERIC_SECRET"]"#);
+        let filtered_v: serde_json::Value = serde_json::from_str(&filtered).unwrap();
+        let filtered_types: Vec<&str> = filtered_v["detected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["entity_type"].as_str().unwrap())
+            .collect();
+        assert!(!filtered_types.contains(&"GENERIC_SECRET"));
     }
 
     #[test]

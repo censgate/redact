@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `GENERIC_SECRET`: charset-aware Shannon entropy over assignment-like values
+  (length-aware floor, segment keyword allow/deny, value-only spans). Independently
+  disableable via CLI `--disable`, WASM `analyze_excluding`, or gateway
+  `{ action: allow }`. See `docs/secrets-detection.md`. Phase 2 of #101.
+- Named secret types: `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`,
+  `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`,
+  `HTTP_BASIC_AUTH` (decode-validated). GitLab length-closed shapes and AWS
+  Bedrock under `AWS_ACCESS_KEY`. Compiled entity count is 61 (60 pattern +
+  `GENERIC_SECRET`).
+- Optional long-tail pack `patterns/optional/providers-v1.yaml` (gitleaks MIT,
+  pinned commit). Not on the Docker / compose / Kubernetes default path.
+- CLI `redact --format json list-entities` and host-only
+  `scripts/extract-facts.mjs` → `data/facts.json`.
 - `redact-scan`: new workspace crate and `redact-scan` binary for read-only
   Postgres PII discovery. Report types, credential scrubber, CLI preflight,
   a read-only safety session (refuse superuser and write grants), and
@@ -19,6 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `GENERIC_SECRET` rejects SCREAMING_SNAKE and path-shaped values instead of
+  scoring them as alphanumeric. HTTP Basic auth requires canonical base64
+  (decode + re-encode), so unused padding bits are rejected. AGE keeps its
+  full labelled span. AWS Bedrock and Grafana Cloud tokens use a trailing
+  delimiter instead of `\\b` after `=`. Pack `entropy: generic` requires
+  capture group 1 at analyze time. Non-entropy pack rules keep the full
+  match unless they set `value_group`. HTTP Basic matching is
+  case-insensitive.
+- Gateway default pack path is `/app/patterns/compliance:/app/patterns/pii`.
+  Noisy `credentials.yaml` rules are disabled; `optional/` and `quarantine/`
+  directories are not auto-discovered. Removed `api_key` → `PRIVATE_KEY` alias.
 - `redact-scan`: upgrade `testcontainers-modules` so CI `cargo audit` is not
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled

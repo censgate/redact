@@ -63,6 +63,15 @@ fn loads_all_shipped_repo_pattern_packs() {
         }),
         "aws key not detected: {hits:?}"
     );
+
+    let mac = "00:1B:44:11:3A:B7";
+    let mac_hits = recognizer.analyze(mac, "en").expect("analyze");
+    assert!(
+        mac_hits
+            .iter()
+            .any(|h| { h.entity_type == EntityType::MacAddress && &mac[h.start..h.end] == mac }),
+        "MAC pack rules must keep the full span, not group 1: {mac_hits:?}"
+    );
 }
 
 #[test]
@@ -173,5 +182,166 @@ fn recognizer_composes_with_analyzer_engine() {
             .any(|e| e.text.as_deref() == Some("alice@example.com")),
         "engine detections: {:?}",
         result.detected_entities
+    );
+}
+
+fn pack_noise_corpus() -> String {
+    // SHA-1 (40 hex), MD5 (32 hex), a short assignment, a generic hooks URL,
+    // and a Stripe publishable key. None of these should become secret types
+    // via the default pack path or a quarantined credentials.yaml.
+    let pk = format!("{}{}_{}", "pk", "_test", "a".repeat(24));
+    format!(
+        "sha1 {sha1} md5 {md5} api_key=not-a-secret hooks {hooks} stripe {pk}",
+        sha1 = "a".repeat(40),
+        md5 = "b".repeat(32),
+        hooks = "https://hooks.zapier.com/hooks/catch/123456/abcdef/",
+    )
+}
+
+fn assert_no_pack_secret_bombs(hits: &[redact_core::types::RecognizerResult], label: &str) {
+    let forbidden = hits.iter().filter(|h| {
+        matches!(
+            h.entity_type,
+            EntityType::PrivateKey | EntityType::SlackWebhook | EntityType::StripeApiKey
+        ) || matches!(
+            &h.entity_type,
+            EntityType::Custom(name)
+                if name.eq_ignore_ascii_case("AWS_SECRET_KEY")
+                    || name.eq_ignore_ascii_case("AZURE_KEY")
+                    || name.eq_ignore_ascii_case("API_KEY")
+                    || name.eq_ignore_ascii_case("GENERIC_API_KEY")
+        )
+    });
+    let leaked: Vec<_> = forbidden
+        .map(|h| format!("{:?} {:?}", h.entity_type, h.text))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "{label}: unexpected secret-shaped pack hits: {leaked:?} from {hits:?}"
+    );
+}
+
+#[test]
+fn default_compliance_pii_path_emits_no_secret_bombs() {
+    let patterns = repo_patterns_dir();
+    let paths = [patterns.join("compliance"), patterns.join("pii")];
+    let (recognizer, report) = load_packs(&paths).expect("default packs should load");
+    assert!(report.packs_loaded >= 2, "report: {report:?}");
+    let recognizer = recognizer.expect("default packs should yield a recognizer");
+
+    let hits = recognizer
+        .analyze(&pack_noise_corpus(), "en")
+        .expect("analyze");
+    assert_no_pack_secret_bombs(&hits, "default compliance:pii path");
+}
+
+#[test]
+fn explicit_credentials_yaml_emits_no_secret_bombs() {
+    let credentials = repo_patterns_dir().join("security/credentials.yaml");
+    let (recognizer, report) = load_packs(&[credentials]).expect("credentials.yaml should parse");
+    assert_eq!(report.patterns_skipped, 0, "errors: {:?}", report.errors);
+    // Disabled bombs must not compile. Prefix rules that remain (AWS AKIA,
+    // GitHub, Slack token, Google, JWT, PEM, DB URL) may still load.
+    let corpus = pack_noise_corpus();
+    match recognizer {
+        None => {}
+        Some(recognizer) => {
+            let hits = recognizer.analyze(&corpus, "en").expect("analyze");
+            assert_no_pack_secret_bombs(&hits, "explicit credentials.yaml");
+        }
+    }
+}
+
+#[test]
+fn optional_and_quarantine_dirs_are_not_auto_discovered() {
+    let tmp = tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("optional")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("quarantine")).unwrap();
+    std::fs::write(
+        tmp.path().join("optional/hidden.yaml"),
+        r#"
+name: hidden_optional
+patterns:
+  - id: "global_email"
+    regex: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    enabled: true
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("quarantine/hidden.yaml"),
+        r#"
+name: hidden_quarantine
+patterns:
+  - id: "global_email"
+    regex: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+    enabled: true
+"#,
+    )
+    .unwrap();
+
+    let (recognizer, report) = load_packs(&[tmp.path().to_path_buf()]).unwrap();
+    assert_eq!(
+        report.packs_loaded, 0,
+        "skipped dirs must not load: {report:?}"
+    );
+    assert!(recognizer.is_none());
+}
+
+#[test]
+fn optional_providers_v1_loads_explicitly_and_stays_off_the_tree_walk() {
+    let pack = repo_patterns_dir().join("optional/providers-v1.yaml");
+    let (recognizer, report) = load_packs(&[pack]).expect("explicit optional pack");
+    let recognizer = recognizer.expect("providers-v1 should compile");
+    assert_eq!(report.packs_loaded, 1);
+    assert_eq!(
+        report.patterns_skipped, 0,
+        "providers-v1 must compile: {:?}",
+        report.errors
+    );
+    assert!(
+        recognizer.pattern_count() <= 25,
+        "optional pack must stay at ≤25 rules, got {}",
+        recognizer.pattern_count()
+    );
+
+    let grafana = format!("glc_{}", "A".repeat(40));
+    let grafana_hits = recognizer.analyze(&grafana, "en").expect("analyze");
+    let grafana_hit = grafana_hits
+        .iter()
+        .find(|h| matches!(h.entity_type, EntityType::Custom(ref n) if n == "GRAFANA_CLOUD_TOKEN"))
+        .expect("grafana prefix");
+    assert_eq!(&grafana[grafana_hit.start..grafana_hit.end], grafana);
+
+    let oversized = format!("glc_{}", "A".repeat(500));
+    let oversized_hits = recognizer.analyze(&oversized, "en").expect("analyze");
+    assert!(
+        oversized_hits.iter().all(|h| {
+            !matches!(h.entity_type, EntityType::Custom(ref n) if n == "GRAFANA_CLOUD_TOKEN")
+        }),
+        "grafana rule must not truncate a longer blob: {oversized_hits:?}"
+    );
+
+    let shopify = format!("shpat_{}", "a".repeat(32));
+    let hits = recognizer.analyze(&shopify, "en").expect("analyze");
+    assert!(
+        hits.iter().any(
+            |h| matches!(h.entity_type, EntityType::Custom(ref n) if n == "SHOPIFY_ACCESS_TOKEN")
+        ),
+        "shopify prefix not detected: {hits:?}"
+    );
+
+    let (walked, walk_report) = load_packs(&[repo_patterns_dir()]).expect("tree walk");
+    assert_eq!(
+        walk_report.packs_loaded, 5,
+        "optional/ must not be discovered by walking patterns/: {walk_report:?}"
+    );
+    let walked = walked.expect("shipped packs");
+    let walked_hits = walked.analyze(&shopify, "en").expect("analyze");
+    assert!(
+        walked_hits.iter().all(|h| {
+            !matches!(h.entity_type, EntityType::Custom(ref n) if n == "SHOPIFY_ACCESS_TOKEN")
+        }),
+        "tree walk must not load providers-v1: {walked_hits:?}"
     );
 }

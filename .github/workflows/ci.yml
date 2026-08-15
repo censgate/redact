@@ -55,6 +55,33 @@ jobs:
       - name: Run doc tests
         run: cargo test --workspace --doc
 
+  facts:
+    name: Facts check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: facts
+
+      - name: Build redact-cli
+        run: cargo build -p redact-cli
+
+      - name: Check data/facts.json
+        run: node scripts/extract-facts.mjs --check --bin ./target/debug/redact
+
   wasm:
     name: WASM (pattern-only)
     runs-on: ubuntu-latest

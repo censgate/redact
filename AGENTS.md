@@ -7,7 +7,7 @@ Concise guidance for AI agents working with the Redact codebase.
 **Redact** is a high-performance, open-source PII (Personally Identifiable Information) detection and anonymization engine built in Rust. It serves as a drop-in replacement for Microsoft Presidio with 10-100x better performance.
 
 **Key capabilities:**
-- Pattern-based detection (54 entity types via regex, including secrets/credentials)
+- Pattern-based detection (61 compiled entity types via regex, including secrets/credentials and `GENERIC_SECRET`)
 - ML-powered NER using ONNX Runtime (BERT, RoBERTa, DistilBERT)
 - Multiple anonymization strategies (replace, mask, hash, encrypt)
 - Multi-platform: REST API, CLI, WebAssembly, privacy gateway (`redact-gateway`)
@@ -111,7 +111,8 @@ test(core): add pattern coverage tests
 |------|---------|
 | `Cargo.toml` | Workspace configuration, shared dependencies |
 | `crates/*/Cargo.toml` | Per-crate dependencies |
-| `patterns/*.yaml` | PII detection patterns (GDPR, HIPAA, CCPA) |
+| `patterns/*.yaml` | PII detection patterns (GDPR, HIPAA, CCPA); optional secrets pack under `patterns/optional/` |
+| `docs/secrets-detection.md` | GENERIC_SECRET entropy model, keyword lists, disable knobs |
 | `scripts/export_ner_model.py` | Export HuggingFace models to ONNX |
 
 ## NER/ONNX Pipeline

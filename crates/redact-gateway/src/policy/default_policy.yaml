@@ -37,6 +37,13 @@ profiles:
       HASHICORP_VAULT_TOKEN: { action: block }
       DATABASE_CONNECTION_STRING: { action: block }
       JWT_TOKEN: { action: block }
+      HUGGINGFACE_TOKEN: { action: block }
+      DATABRICKS_TOKEN: { action: block }
+      DIGITALOCEAN_TOKEN: { action: block }
+      NOTION_API_KEY: { action: block }
+      PERPLEXITY_API_KEY: { action: block }
+      HTTP_BASIC_AUTH: { action: block }
+      GENERIC_SECRET: { action: replace, min_confidence: 0.6 }
 
       # High-sensitivity identifiers: mask so shape survives, value does not.
       US_SSN: { action: mask, min_confidence: 0.7 }
@@ -79,6 +86,13 @@ profiles:
       DATABASE_CONNECTION_STRING: { action: block }
       HASHICORP_VAULT_TOKEN: { action: block }
       JWT_TOKEN: { action: block }
+      HUGGINGFACE_TOKEN: { action: block }
+      DATABRICKS_TOKEN: { action: block }
+      DIGITALOCEAN_TOKEN: { action: block }
+      NOTION_API_KEY: { action: block }
+      PERPLEXITY_API_KEY: { action: block }
+      HTTP_BASIC_AUTH: { action: block }
+      GENERIC_SECRET: { action: replace, min_confidence: 0.6 }
       DATE_TIME: { action: allow }
       AGE: { action: allow }
       URL: { action: allow }
@@ -101,6 +115,13 @@ profiles:
       SHA256_HASH: { action: allow }
       SHA1_HASH: { action: allow }
       MD5_HASH: { action: allow }
+      HUGGINGFACE_TOKEN: { action: block }
+      DATABRICKS_TOKEN: { action: block }
+      DIGITALOCEAN_TOKEN: { action: block }
+      NOTION_API_KEY: { action: block }
+      PERPLEXITY_API_KEY: { action: block }
+      HTTP_BASIC_AUTH: { action: block }
+      GENERIC_SECRET: { action: block }
 
   # Credentials only: useful when prompts are already trusted but secrets leak.
   secrets_only:
@@ -128,6 +149,13 @@ profiles:
       HASHICORP_VAULT_TOKEN: { action: block }
       DATABASE_CONNECTION_STRING: { action: block }
       JWT_TOKEN: { action: block }
+      HUGGINGFACE_TOKEN: { action: block }
+      DATABRICKS_TOKEN: { action: block }
+      DIGITALOCEAN_TOKEN: { action: block }
+      NOTION_API_KEY: { action: block }
+      PERPLEXITY_API_KEY: { action: block }
+      HTTP_BASIC_AUTH: { action: block }
+      GENERIC_SECRET: { action: block }
 
   # Observe-only: nothing is rewritten, detections are still counted, and
   # telemetry still reports what would have happened.

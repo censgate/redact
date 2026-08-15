@@ -46,6 +46,10 @@ enum Commands {
         #[arg(short, long)]
         entities: Vec<String>,
 
+        /// Entity types to exclude after `--entities` (or from the full set).
+        #[arg(long = "disable")]
+        disable: Vec<String>,
+
         /// Exit with code 1 when PII entities are detected.
         ///
         /// Useful for CI gates and pre-commit hooks. Output is printed
@@ -71,7 +75,13 @@ enum Commands {
         /// Entity types to anonymize (all if not specified)
         #[arg(short, long)]
         entities: Vec<String>,
+
+        /// Entity types to exclude after `--entities` (or from the full set).
+        #[arg(long = "disable")]
+        disable: Vec<String>,
     },
+    /// Print compiled entity types as JSON
+    ListEntities,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -114,10 +124,11 @@ fn run() -> Result<()> {
             text,
             files,
             entities,
+            disable,
             fail_on_detect,
         } => {
             let inputs = collect_inputs(text, &files)?;
-            let entity_types = parse_entity_types(&entities)?;
+            let entity_types = resolve_entity_filter(&entities, &disable)?;
             let detected = analyze(&inputs, &cli.language, &entity_types, cli.format)?;
             if fail_on_detect && detected > 0 {
                 std::process::exit(1);
@@ -128,9 +139,10 @@ fn run() -> Result<()> {
             files,
             strategy,
             entities,
+            disable,
         } => {
             let inputs = collect_inputs(text, &files)?;
-            let entity_types = parse_entity_types(&entities)?;
+            let entity_types = resolve_entity_filter(&entities, &disable)?;
             anonymize(
                 &inputs,
                 &cli.language,
@@ -138,6 +150,9 @@ fn run() -> Result<()> {
                 &entity_types,
                 cli.format,
             )?;
+        }
+        Commands::ListEntities => {
+            print_entity_list(cli.format)?;
         }
     }
 
@@ -166,83 +181,148 @@ fn collect_inputs(
     Ok(vec![(None, buffer)])
 }
 
+fn parse_one_entity_type(label: &str) -> Result<EntityType> {
+    let from_upper = EntityType::from(label.to_uppercase());
+    if !matches!(from_upper, EntityType::Custom(_)) {
+        return Ok(from_upper);
+    }
+    match label {
+        "Person" => Ok(EntityType::Person),
+        "Location" => Ok(EntityType::Location),
+        "Organization" => Ok(EntityType::Organization),
+        "DateTime" => Ok(EntityType::DateTime),
+        "EmailAddress" => Ok(EntityType::EmailAddress),
+        "PhoneNumber" => Ok(EntityType::PhoneNumber),
+        "IpAddress" => Ok(EntityType::IpAddress),
+        "Url" => Ok(EntityType::Url),
+        "DomainName" => Ok(EntityType::DomainName),
+        "CreditCard" => Ok(EntityType::CreditCard),
+        "Iban" | "IbanCode" => Ok(EntityType::IbanCode),
+        "UsBankNumber" => Ok(EntityType::UsBankNumber),
+        "UsSsn" => Ok(EntityType::UsSsn),
+        "UsDriverLicense" => Ok(EntityType::UsDriverLicense),
+        "UsPassport" => Ok(EntityType::UsPassport),
+        "UsZipCode" => Ok(EntityType::UsZipCode),
+        "UkNhs" => Ok(EntityType::UkNhs),
+        "UkNino" => Ok(EntityType::UkNino),
+        "UkPostcode" => Ok(EntityType::UkPostcode),
+        "UkDriverLicense" => Ok(EntityType::UkDriverLicense),
+        "UkPassportNumber" => Ok(EntityType::UkPassportNumber),
+        "UkPhoneNumber" => Ok(EntityType::UkPhoneNumber),
+        "UkMobileNumber" => Ok(EntityType::UkMobileNumber),
+        "UkSortCode" => Ok(EntityType::UkSortCode),
+        "UkCompanyNumber" => Ok(EntityType::UkCompanyNumber),
+        "MedicalLicense" => Ok(EntityType::MedicalLicense),
+        "MedicalRecordNumber" => Ok(EntityType::MedicalRecordNumber),
+        "PassportNumber" => Ok(EntityType::PassportNumber),
+        "Age" => Ok(EntityType::Age),
+        "Isbn" => Ok(EntityType::Isbn),
+        "PoBox" => Ok(EntityType::PoBox),
+        "CryptoWallet" => Ok(EntityType::CryptoWallet),
+        "BtcAddress" => Ok(EntityType::BtcAddress),
+        "EthAddress" => Ok(EntityType::EthAddress),
+        "Guid" => Ok(EntityType::Guid),
+        "MacAddress" => Ok(EntityType::MacAddress),
+        "Md5Hash" => Ok(EntityType::Md5Hash),
+        "Sha1Hash" => Ok(EntityType::Sha1Hash),
+        "Sha256Hash" => Ok(EntityType::Sha256Hash),
+        // Secrets and credentials
+        "PrivateKey" => Ok(EntityType::PrivateKey),
+        "JwtToken" => Ok(EntityType::JwtToken),
+        "AwsAccessKey" => Ok(EntityType::AwsAccessKey),
+        "GithubToken" => Ok(EntityType::GithubToken),
+        "GitlabToken" => Ok(EntityType::GitlabToken),
+        "SlackToken" => Ok(EntityType::SlackToken),
+        "SlackWebhook" => Ok(EntityType::SlackWebhook),
+        "StripeApiKey" => Ok(EntityType::StripeApiKey),
+        "GoogleApiKey" => Ok(EntityType::GoogleApiKey),
+        "OpenAiApiKey" => Ok(EntityType::OpenAiApiKey),
+        "AnthropicApiKey" => Ok(EntityType::AnthropicApiKey),
+        "NpmToken" => Ok(EntityType::NpmToken),
+        "PyPiToken" => Ok(EntityType::PyPiToken),
+        "SendGridApiKey" => Ok(EntityType::SendGridApiKey),
+        "TwilioApiKey" => Ok(EntityType::TwilioApiKey),
+        "TelegramBotToken" => Ok(EntityType::TelegramBotToken),
+        "HashicorpVaultToken" => Ok(EntityType::HashicorpVaultToken),
+        "DatabaseConnectionString" => Ok(EntityType::DatabaseConnectionString),
+        "HuggingFaceToken" => Ok(EntityType::HuggingFaceToken),
+        "DatabricksToken" => Ok(EntityType::DatabricksToken),
+        "DigitalOceanToken" => Ok(EntityType::DigitalOceanToken),
+        "NotionApiKey" => Ok(EntityType::NotionApiKey),
+        "PerplexityApiKey" => Ok(EntityType::PerplexityApiKey),
+        "HttpBasicAuth" => Ok(EntityType::HttpBasicAuth),
+        "GenericSecret" => Ok(EntityType::GenericSecret),
+        _ => Err(anyhow::anyhow!(
+            "Invalid entity type: {}. See --help for valid types",
+            label
+        )),
+    }
+}
+
 fn parse_entity_types(entities: &[String]) -> Result<Option<Vec<EntityType>>> {
     if entities.is_empty() {
         return Ok(None);
     }
-
-    let types: Result<Vec<EntityType>> = entities
-        .iter()
-        .map(|e| {
-            // Parse entity type from string
-            match e.as_str() {
-                "Person" => Ok(EntityType::Person),
-                "Location" => Ok(EntityType::Location),
-                "Organization" => Ok(EntityType::Organization),
-                "DateTime" => Ok(EntityType::DateTime),
-                "EmailAddress" => Ok(EntityType::EmailAddress),
-                "PhoneNumber" => Ok(EntityType::PhoneNumber),
-                "IpAddress" => Ok(EntityType::IpAddress),
-                "Url" => Ok(EntityType::Url),
-                "DomainName" => Ok(EntityType::DomainName),
-                "CreditCard" => Ok(EntityType::CreditCard),
-                "Iban" | "IbanCode" => Ok(EntityType::IbanCode),
-                "UsBankNumber" => Ok(EntityType::UsBankNumber),
-                "UsSsn" => Ok(EntityType::UsSsn),
-                "UsDriverLicense" => Ok(EntityType::UsDriverLicense),
-                "UsPassport" => Ok(EntityType::UsPassport),
-                "UsZipCode" => Ok(EntityType::UsZipCode),
-                "UkNhs" => Ok(EntityType::UkNhs),
-                "UkNino" => Ok(EntityType::UkNino),
-                "UkPostcode" => Ok(EntityType::UkPostcode),
-                "UkDriverLicense" => Ok(EntityType::UkDriverLicense),
-                "UkPassportNumber" => Ok(EntityType::UkPassportNumber),
-                "UkPhoneNumber" => Ok(EntityType::UkPhoneNumber),
-                "UkMobileNumber" => Ok(EntityType::UkMobileNumber),
-                "UkSortCode" => Ok(EntityType::UkSortCode),
-                "UkCompanyNumber" => Ok(EntityType::UkCompanyNumber),
-                "MedicalLicense" => Ok(EntityType::MedicalLicense),
-                "MedicalRecordNumber" => Ok(EntityType::MedicalRecordNumber),
-                "PassportNumber" => Ok(EntityType::PassportNumber),
-                "Age" => Ok(EntityType::Age),
-                "Isbn" => Ok(EntityType::Isbn),
-                "PoBox" => Ok(EntityType::PoBox),
-                "CryptoWallet" => Ok(EntityType::CryptoWallet),
-                "BtcAddress" => Ok(EntityType::BtcAddress),
-                "EthAddress" => Ok(EntityType::EthAddress),
-                "Guid" => Ok(EntityType::Guid),
-                "MacAddress" => Ok(EntityType::MacAddress),
-                "Md5Hash" => Ok(EntityType::Md5Hash),
-                "Sha1Hash" => Ok(EntityType::Sha1Hash),
-                "Sha256Hash" => Ok(EntityType::Sha256Hash),
-                // Secrets and credentials
-                "PrivateKey" => Ok(EntityType::PrivateKey),
-                "JwtToken" => Ok(EntityType::JwtToken),
-                "AwsAccessKey" => Ok(EntityType::AwsAccessKey),
-                "GithubToken" => Ok(EntityType::GithubToken),
-                "GitlabToken" => Ok(EntityType::GitlabToken),
-                "SlackToken" => Ok(EntityType::SlackToken),
-                "SlackWebhook" => Ok(EntityType::SlackWebhook),
-                "StripeApiKey" => Ok(EntityType::StripeApiKey),
-                "GoogleApiKey" => Ok(EntityType::GoogleApiKey),
-                "OpenAiApiKey" => Ok(EntityType::OpenAiApiKey),
-                "AnthropicApiKey" => Ok(EntityType::AnthropicApiKey),
-                "NpmToken" => Ok(EntityType::NpmToken),
-                "PyPiToken" => Ok(EntityType::PyPiToken),
-                "SendGridApiKey" => Ok(EntityType::SendGridApiKey),
-                "TwilioApiKey" => Ok(EntityType::TwilioApiKey),
-                "TelegramBotToken" => Ok(EntityType::TelegramBotToken),
-                "HashicorpVaultToken" => Ok(EntityType::HashicorpVaultToken),
-                "DatabaseConnectionString" => Ok(EntityType::DatabaseConnectionString),
-                _ => Err(anyhow::anyhow!(
-                    "Invalid entity type: {}. See --help for valid types",
-                    e
-                )),
-            }
-        })
-        .collect();
-
+    let types: Result<Vec<EntityType>> =
+        entities.iter().map(|e| parse_one_entity_type(e)).collect();
     Ok(Some(types?))
+}
+
+fn all_engine_entity_types() -> Vec<EntityType> {
+    let engine = AnalyzerEngine::new();
+    let mut types = Vec::new();
+    for recognizer in engine.recognizer_registry().recognizers() {
+        for entity in recognizer.supported_entities() {
+            if !types.contains(entity) {
+                types.push(entity.clone());
+            }
+        }
+    }
+    types
+}
+
+fn resolve_entity_filter(
+    entities: &[String],
+    disable: &[String],
+) -> Result<Option<Vec<EntityType>>> {
+    let disabled = disable
+        .iter()
+        .map(|e| parse_one_entity_type(e))
+        .collect::<Result<Vec<_>>>()?;
+    if entities.is_empty() && disabled.is_empty() {
+        return Ok(None);
+    }
+    let mut selected = if entities.is_empty() {
+        all_engine_entity_types()
+    } else {
+        parse_entity_types(entities)?.unwrap_or_default()
+    };
+    selected.retain(|t| !disabled.contains(t));
+    if selected.is_empty() {
+        return Err(anyhow::anyhow!(
+            "--disable removed every selected entity type"
+        ));
+    }
+    Ok(Some(selected))
+}
+
+fn print_entity_list(format: OutputFormat) -> Result<()> {
+    let mut labels: Vec<String> = all_engine_entity_types()
+        .into_iter()
+        .map(|t| t.as_str().to_string())
+        .collect();
+    labels.sort();
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&labels)?);
+        }
+        OutputFormat::Text => {
+            for label in labels {
+                println!("{label}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn analyze(
@@ -392,6 +472,41 @@ mod tests {
         let entities = vec!["InvalidType".to_string()];
         let result = parse_entity_types(&entities);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_screaming_snake_and_generic_secret() {
+        let types = parse_entity_types(&[
+            "GENERIC_SECRET".to_string(),
+            "GenericSecret".to_string(),
+            "AwsAccessKey".to_string(),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(types[0], EntityType::GenericSecret);
+        assert_eq!(types[1], EntityType::GenericSecret);
+        assert_eq!(types[2], EntityType::AwsAccessKey);
+    }
+
+    #[test]
+    fn test_disable_subtracts_after_allow_list() {
+        let filtered = resolve_entity_filter(
+            &["EmailAddress".to_string(), "GenericSecret".to_string()],
+            &["GENERIC_SECRET".to_string()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(filtered, vec![EntityType::EmailAddress]);
+    }
+
+    #[test]
+    fn test_disable_all_is_an_error() {
+        let err = resolve_entity_filter(
+            &["GenericSecret".to_string()],
+            &["GenericSecret".to_string()],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("removed every"));
     }
 
     #[test]

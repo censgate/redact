@@ -220,6 +220,16 @@ fn test_age() {
     assert_entity_detected("age: 32", EntityType::Age, 0.8);
     assert_entity_detected("aged: 67", EntityType::Age, 0.8);
     assert_entity_detected("years old: 25", EntityType::Age, 0.8);
+
+    let engine = create_engine();
+    let text = "age: 32";
+    let result = engine.analyze(text, None).unwrap();
+    let age = result
+        .detected_entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::Age)
+        .expect("AGE");
+    assert_eq!(&text[age.start..age.end], "age: 32");
 }
 
 #[test]

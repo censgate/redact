@@ -38,7 +38,7 @@ services:
       CENSGATE_PROVIDER_API_KEY: ${CENSGATE_PROVIDER_API_KEY:-}
       CENSGATE_HOST: "0.0.0.0"
       CENSGATE_PORT: "8080"
-      CENSGATE_PATTERN_PACKS: /app/patterns
+      CENSGATE_PATTERN_PACKS: /app/patterns/compliance:/app/patterns/pii
       # Pull-based Prometheus metrics on /metrics
       CENSGATE_METRICS_ENDPOINT: "true"
       # Operation span detail (OTLP transport is configured via OTEL_* below)

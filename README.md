@@ -9,7 +9,7 @@
 
 **OpenAI-compatible AI privacy gateway**
 
-Redact sits between your application and a model provider: it redacts prompts on the way out and model answers on the way back — with policy profiles, reversible tokenization, auth, and OpenTelemetry. Under the hood, a high-performance Rust detection engine (54 pattern entity types including secrets, plus optional ONNX NER) powers the gateway, CLI, REST API, and WebAssembly builds.
+Redact sits between your application and a model provider: it redacts prompts on the way out and model answers on the way back — with policy profiles, reversible tokenization, auth, and OpenTelemetry. Under the hood, a high-performance Rust detection engine (61 compiled entity types including secrets and `GENERIC_SECRET`, plus optional ONNX NER) powers the gateway, CLI, REST API, and WebAssembly builds.
 
 [Quick Start](#quick-start) · [Privacy Gateway](#privacy-gateway) · [Documentation](#documentation) · [Examples](#examples) · [Contributing](#contributing)
 
@@ -21,7 +21,7 @@ Redact sits between your application and a model provider: it redacts prompts on
 
 - **AI Privacy Gateway** — OpenAI-compatible proxy (`redact-gateway`) with policy profiles, reversible tokenization, API key/OIDC auth, OpenTelemetry, and buffered/incremental streaming redaction
 - **Engine-Powered** — In-process `redact-core` detection and anonymization (drop-in Presidio-class accuracy at Rust speed)
-- **Production Ready** — 54 pattern-based entity types with validation (including secrets/credentials), plus transformer-based NER
+- **Production Ready** — 61 compiled entity types with validation (including secrets/credentials and entropy-gated `GENERIC_SECRET`), plus transformer-based NER
 - **High Performance** — 10-100x faster than Python-based solutions with sub-millisecond inference
 - **Memory Safe** — Rust's borrow checker eliminates entire classes of security vulnerabilities
 - **Multi-Platform** — Privacy gateway, REST API, CLI, and WebAssembly (pattern-only)
@@ -174,7 +174,7 @@ engine.anonymize_with_hash("SSN 123-45-6789", "app-secret-salt");
 
 ### What is available
 
-All **54 pattern-based entity types** (email, phone, SSN, credit cards, IBAN, UK
+All **61 compiled entity types** (email, phone, SSN, credit cards, IBAN, UK
 identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates, secrets and
 credentials, ...) and the replace/mask anonymization strategies, plus salted
 hash via `anonymize_with_hash`. Typical bundle size is ~1-3 MB.
@@ -499,7 +499,7 @@ Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gate
 
 ## Supported Entity Types
 
-### Pattern-Based (54 types)
+### Pattern-Based (61 compiled types)
 
 | Category | Entity Types |
 |----------|--------------|
@@ -511,15 +511,17 @@ Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gate
 | **Crypto** | `CRYPTO_WALLET`, `BTC_ADDRESS`, `ETH_ADDRESS` |
 | **Technical** | `GUID`, `MAC_ADDRESS`, `MD5_HASH`, `SHA1_HASH`, `SHA256_HASH` |
 | **Generic** | `PASSPORT_NUMBER`, `AGE`, `ISBN`, `PO_BOX`, `DATE_TIME` |
-| **Secrets and credentials** | `PRIVATE_KEY`, `JWT_TOKEN`, `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`, `STRIPE_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `NPM_TOKEN`, `PYPI_TOKEN`, `SENDGRID_API_KEY`, `TWILIO_API_KEY`, `TELEGRAM_BOT_TOKEN`, `HASHICORP_VAULT_TOKEN`, `DATABASE_CONNECTION_STRING` |
+| **Secrets and credentials** | `PRIVATE_KEY`, `JWT_TOKEN`, `AWS_ACCESS_KEY`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `SLACK_TOKEN`, `SLACK_WEBHOOK`, `STRIPE_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `NPM_TOKEN`, `PYPI_TOKEN`, `SENDGRID_API_KEY`, `TWILIO_API_KEY`, `TELEGRAM_BOT_TOKEN`, `HASHICORP_VAULT_TOKEN`, `DATABASE_CONNECTION_STRING`, `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`, `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`, `HTTP_BASIC_AUTH`, `GENERIC_SECRET` |
 
 Pattern-based detection includes validation (Luhn for credit cards, mod-11 for NHS, IBAN checksums) to reduce false positives.
 
 Secrets and credentials use anchored, high-precision prefixes (e.g. `AKIA...`
 for AWS keys, `ghp_...` for GitHub tokens, `sk-ant-...` for Anthropic keys,
-`-----BEGIN ... PRIVATE KEY-----` blocks) rather than generic `key=...` /
-`password=...` catch-alls, which need entropy scoring to avoid false
-positives — that's future work.
+`-----BEGIN ... PRIVATE KEY-----` blocks). Assignment-like `api_key=...` /
+`password=...` values are handled by entropy-gated `GENERIC_SECRET` (see
+[`docs/secrets-detection.md`](docs/secrets-detection.md)). An opt-in long-tail
+pack lives at `patterns/optional/providers-v1.yaml` and is **not** on the
+gateway default path.
 
 ### NER-Based (ML-Powered)
 
@@ -727,6 +729,7 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 #### v0.9.0
 
 - [x] 18 secret/credential entity types (54 pattern-based total) — Phase 1 of #101
+- [x] Entropy-gated `GENERIC_SECRET` + 6 named types (61 compiled total) — Phase 2 of #101
 - [x] `redact-gateway`: policy profiles, reversible tokenization, OIDC and API key auth,
       OpenTelemetry traces/metrics/logs, runtime pattern packs, streaming redaction,
       container and Kubernetes assets (`ghcr.io/censgate/redact-gateway`)

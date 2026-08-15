@@ -133,6 +133,17 @@ pub struct PatternDefinition {
     /// When `false`, the pattern is ignored at load time. Defaults to `true`.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Optional entropy gate. Only `"generic"` is accepted; those rules call
+    /// [`redact_core::evaluate_generic_candidate`] and cannot skip the LHS
+    /// keyword / denylist / exclusion checks.
+    #[serde(default)]
+    pub entropy: Option<String>,
+    /// When set, the match span is capture group `n` instead of the full
+    /// match. Use this for rules that consume a trailing delimiter in place
+    /// of lookaround. Do not set it on patterns whose group 1 is structural
+    /// (MAC, IBAN, phone area codes).
+    #[serde(default)]
+    pub value_group: Option<usize>,
 }
 
 /// Resolve the [`EntityType`] for a pattern definition.
@@ -250,7 +261,6 @@ fn alias_for_stem(stem: &str, full_id: &str) -> Option<&'static str> {
         "bank_account" | "account_number" | "account_numbers" => "US_BANK_NUMBER",
         "dates" | "date_iso" | "date_common" => "DATE_TIME",
         "coordinates" | "address" => "LOCATION",
-        "api_key" | "generic_api_key" => "PRIVATE_KEY",
         _ => return None,
     })
 }
@@ -350,6 +360,12 @@ fn collect_yaml_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), PackErr
     for entry in entries {
         let child = entry.path();
         if child.is_dir() {
+            // Opt-in / quarantined trees are never auto-discovered, even when
+            // the operator points CENSGATE_PATTERN_PACKS at the packs root.
+            // An explicit file path still loads.
+            if is_skipped_pack_dir(&child) {
+                continue;
+            }
             collect_yaml_files(&child, out)?;
         } else if is_yaml_path(&child) {
             out.push(child);
@@ -362,6 +378,13 @@ fn is_yaml_path(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
         Some("yaml" | "yml")
+    )
+}
+
+fn is_skipped_pack_dir(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("optional" | "quarantine")
     )
 }
 
@@ -399,14 +422,63 @@ fn compile_pack_patterns(
         if !pattern.enabled {
             continue;
         }
+        let entropy_generic = match pattern.entropy.as_deref() {
+            None | Some("") => false,
+            Some("generic") => true,
+            Some(other) => {
+                tracing::warn!(
+                    pack = %pack_name,
+                    pattern_id = %pattern.id,
+                    entropy = %other,
+                    "skipping pattern with unknown entropy mode"
+                );
+                report.patterns_skipped += 1;
+                report.errors.push(format!(
+                    "pack `{pack_name}` pattern `{}`: unknown entropy `{other}` (only `generic` is supported)",
+                    pattern.id
+                ));
+                continue;
+            }
+        };
         match Regex::new(&pattern.regex) {
             Ok(regex) => {
+                if entropy_generic && regex.captures_len() < 2 {
+                    tracing::warn!(
+                        pack = %pack_name,
+                        pattern_id = %pattern.id,
+                        "skipping entropy:generic pattern without capture group 1"
+                    );
+                    report.patterns_skipped += 1;
+                    report.errors.push(format!(
+                        "pack `{pack_name}` pattern `{}`: entropy: generic requires a value-only capture group 1",
+                        pattern.id
+                    ));
+                    continue;
+                }
+                if let Some(group) = pattern.value_group {
+                    if group == 0 || group >= regex.captures_len() {
+                        tracing::warn!(
+                            pack = %pack_name,
+                            pattern_id = %pattern.id,
+                            value_group = group,
+                            "skipping pattern with invalid value_group"
+                        );
+                        report.patterns_skipped += 1;
+                        report.errors.push(format!(
+                            "pack `{pack_name}` pattern `{}`: value_group {group} is out of range",
+                            pattern.id
+                        ));
+                        continue;
+                    }
+                }
                 compiled.push(CompiledPattern {
                     pack_name: pack_name.to_string(),
                     pattern_id: pattern.id.clone(),
                     entity_type: entity_type_for_pattern(pattern),
                     regex,
                     confidence: pattern.confidence.clamp(0.0, 1.0),
+                    entropy_generic,
+                    value_group: pattern.value_group,
                 });
                 report.patterns_loaded += 1;
             }
@@ -434,6 +506,8 @@ struct CompiledPattern {
     entity_type: EntityType,
     regex: Regex,
     confidence: f32,
+    entropy_generic: bool,
+    value_group: Option<usize>,
 }
 
 impl fmt::Debug for CompiledPattern {
@@ -444,6 +518,8 @@ impl fmt::Debug for CompiledPattern {
             .field("entity_type", &self.entity_type)
             .field("regex", &self.regex.as_str())
             .field("confidence", &self.confidence)
+            .field("entropy_generic", &self.entropy_generic)
+            .field("value_group", &self.value_group)
             .finish()
     }
 }
@@ -531,7 +607,69 @@ impl Recognizer for PackRecognizer {
 
         let mut results = Vec::new();
         for pattern in &self.patterns {
-            if pattern.confidence < self.min_score {
+            if !pattern.entropy_generic && pattern.confidence < self.min_score {
+                continue;
+            }
+            if pattern.entropy_generic {
+                for caps in pattern.regex.captures_iter(text) {
+                    let Some(matched) = caps.get(1) else {
+                        continue;
+                    };
+                    let lhs = lhs_from_prefix(&text[..matched.start()]);
+                    let surrounding_start =
+                        floor_char_boundary(text, matched.start().saturating_sub(24));
+                    let surrounding_end =
+                        ceil_char_boundary(text, (matched.end() + 24).min(text.len()));
+                    let surrounding = &text[surrounding_start..surrounding_end];
+                    let Some(score) =
+                        redact_core::evaluate_generic_candidate(matched.as_str(), lhs, surrounding)
+                    else {
+                        continue;
+                    };
+                    if score < self.min_score {
+                        continue;
+                    }
+                    results.push(
+                        RecognizerResult::new(
+                            pattern.entity_type.clone(),
+                            matched.start(),
+                            matched.end(),
+                            score,
+                            self.name(),
+                        )
+                        .with_text(text)
+                        .with_context(serde_json::json!({
+                            "pack": pattern.pack_name,
+                            "pattern_id": pattern.pattern_id,
+                        })),
+                    );
+                }
+                continue;
+            }
+            if let Some(group) = pattern.value_group {
+                for caps in pattern.regex.captures_iter(text) {
+                    let Some(matched) = caps.get(group) else {
+                        continue;
+                    };
+                    let score = pattern.confidence;
+                    if score < self.min_score {
+                        continue;
+                    }
+                    results.push(
+                        RecognizerResult::new(
+                            pattern.entity_type.clone(),
+                            matched.start(),
+                            matched.end(),
+                            score,
+                            self.name(),
+                        )
+                        .with_text(text)
+                        .with_context(serde_json::json!({
+                            "pack": pattern.pack_name,
+                            "pattern_id": pattern.pattern_id,
+                        })),
+                    );
+                }
                 continue;
             }
             for mat in pattern.regex.find_iter(text) {
@@ -561,6 +699,37 @@ impl Recognizer for PackRecognizer {
     fn min_score(&self) -> f32 {
         self.min_score
     }
+}
+
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
+/// Last identifier-like token in the text immediately before a captured value.
+fn lhs_from_prefix(prefix: &str) -> &str {
+    let trimmed = prefix
+        .trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '=' | ':' | '"' | '\'' | ','));
+    let bytes = trimmed.as_bytes();
+    let mut i = bytes.len();
+    while i > 0 {
+        let b = bytes[i - 1];
+        if b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.') {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    &trimmed[i..]
 }
 
 #[cfg(test)]
@@ -670,6 +839,8 @@ patterns:
             examples: vec![],
             replacement: None,
             enabled: true,
+            entropy: None,
+            value_group: None,
         };
         assert_eq!(entity_type_for_pattern(&def), EntityType::CreditCard);
     }
@@ -687,6 +858,8 @@ patterns:
             examples: vec![],
             replacement: None,
             enabled: true,
+            entropy: None,
+            value_group: None,
         };
         assert_eq!(entity_type_for_pattern(&email), EntityType::EmailAddress);
 
@@ -701,6 +874,8 @@ patterns:
             examples: vec![],
             replacement: None,
             enabled: true,
+            entropy: None,
+            value_group: None,
         };
         assert_eq!(entity_type_for_pattern(&aws), EntityType::AwsAccessKey);
 
@@ -715,8 +890,30 @@ patterns:
             examples: vec![],
             replacement: None,
             enabled: true,
+            entropy: None,
+            value_group: None,
         };
         assert_eq!(entity_type_for_pattern(&nino), EntityType::UkNino);
+
+        let generic = PatternDefinition {
+            id: "sec_generic_api_key".into(),
+            regex: "x".into(),
+            name: None,
+            category: None,
+            entity_type: None,
+            confidence: 0.9,
+            description: None,
+            examples: vec![],
+            replacement: None,
+            enabled: true,
+            entropy: None,
+            value_group: None,
+        };
+        assert_ne!(
+            entity_type_for_pattern(&generic),
+            EntityType::PrivateKey,
+            "generic api_key must not alias to PRIVATE_KEY"
+        );
     }
 
     #[test]
@@ -823,5 +1020,139 @@ patterns:
         )
         .unwrap_err();
         assert!(matches!(err, PackError::Parse { .. }));
+    }
+
+    #[test]
+    fn entropy_generic_requires_capture_group_and_runs_the_shared_gate() {
+        let pack = load_pack_str(
+            r#"
+patterns:
+  - id: "opt_generic_assignment"
+    entity_type: "GENERIC_SECRET"
+    entropy: generic
+    regex: '(?i)(?:api_key|client_secret|access_token|checksum)\s*[:=]\s*([A-Za-z0-9+/=_-]{20,128})'
+    confidence: 0.7
+  - id: "opt_named_prefix"
+    entity_type: "SHOPIFY_ACCESS_TOKEN"
+    regex: '\bshpat_[a-fA-F0-9]{32}\b'
+    confidence: 0.95
+"#,
+            "providers",
+        )
+        .unwrap();
+        let mut report = PackLoadReport::default();
+        let mut compiled = Vec::new();
+        compile_pack_patterns("providers", &pack, &mut report, &mut compiled);
+        assert_eq!(report.patterns_loaded, 2);
+        let recognizer = PackRecognizer::from_compiled(vec!["providers".into()], compiled);
+
+        let body = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let secret = format!("api_key={body}");
+        let hits = recognizer.analyze(&secret, "en").unwrap();
+        assert!(
+            hits.iter()
+                .any(|h| h.entity_type == EntityType::GenericSecret),
+            "secret-LHS assignment must pass the generic gate: {hits:?}"
+        );
+
+        let digest = format!("checksum={body}");
+        let digest_hits = recognizer.analyze(&digest, "en").unwrap();
+        assert!(
+            digest_hits
+                .iter()
+                .all(|h| h.entity_type != EntityType::GenericSecret),
+            "digest-LHS must not emit via entropy:generic: {digest_hits:?}"
+        );
+
+        let named = format!("shpat_{}", "a".repeat(32));
+        let named_hits = recognizer.analyze(&named, "en").unwrap();
+        assert!(
+            named_hits
+                .iter()
+                .any(|h| matches!(h.entity_type, EntityType::Custom(ref n) if n == "SHOPIFY_ACCESS_TOKEN")),
+            "named-prefix pack rules must not go through the generic scorer: {named_hits:?}"
+        );
+    }
+
+    #[test]
+    fn non_entropy_keeps_full_match_unless_value_group_is_set() {
+        let pack = load_pack_str(
+            r#"
+patterns:
+  - id: "mac"
+    regex: '\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b'
+    confidence: 0.95
+  - id: "grafana"
+    regex: '\b(glc_[A-Za-z0-9+/]{32,400}={0,2})(?:\s|$|[^A-Za-z0-9+/=])'
+    value_group: 1
+    confidence: 0.90
+"#,
+            "spans",
+        )
+        .unwrap();
+        let mut report = PackLoadReport::default();
+        let mut compiled = Vec::new();
+        compile_pack_patterns("spans", &pack, &mut report, &mut compiled);
+        assert_eq!(report.patterns_loaded, 2);
+        let recognizer = PackRecognizer::from_compiled(vec!["spans".into()], compiled);
+
+        let mac = "00:1B:44:11:3A:B7";
+        let mac_hits = recognizer.analyze(mac, "en").unwrap();
+        assert_eq!(mac_hits.len(), 1);
+        assert_eq!(&mac[mac_hits[0].start..mac_hits[0].end], mac);
+
+        let grafana = format!("glc_{},", "A".repeat(40));
+        let grafana_hits = recognizer.analyze(&grafana, "en").unwrap();
+        assert_eq!(grafana_hits.len(), 1);
+        assert_eq!(
+            &grafana[grafana_hits[0].start..grafana_hits[0].end],
+            grafana.trim_end_matches(',')
+        );
+    }
+
+    #[test]
+    fn entropy_generic_analyze_requires_capture_group_1() {
+        let compiled = vec![CompiledPattern {
+            pack_name: "providers".into(),
+            pattern_id: "no_group".into(),
+            entity_type: EntityType::GenericSecret,
+            regex: Regex::new(r"(?i)api_key\s*[:=]\s*[A-Za-z0-9+/=_-]{20,128}").unwrap(),
+            confidence: 0.7,
+            entropy_generic: true,
+            value_group: None,
+        }];
+        let recognizer = PackRecognizer::from_compiled(vec!["providers".into()], compiled);
+        let body = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let hits = recognizer
+            .analyze(&format!("api_key={body}"), "en")
+            .unwrap();
+        assert!(
+            hits.is_empty(),
+            "entropy:generic must not fall back to group 0: {hits:?}"
+        );
+    }
+
+    #[test]
+    fn entropy_generic_without_capture_group_is_skipped() {
+        let pack = load_pack_str(
+            r#"
+patterns:
+  - id: "no_group"
+    entropy: generic
+    regex: '[A-Za-z0-9]{20,}'
+  - id: "unknown_mode"
+    entropy: shannon
+    regex: '([A-Za-z0-9]{20,})'
+"#,
+            "bad-entropy",
+        )
+        .unwrap();
+        let mut report = PackLoadReport::default();
+        let mut compiled = Vec::new();
+        compile_pack_patterns("bad-entropy", &pack, &mut report, &mut compiled);
+        assert_eq!(report.patterns_loaded, 0);
+        assert_eq!(report.patterns_skipped, 2);
+        assert!(report.errors.iter().any(|e| e.contains("capture group 1")));
+        assert!(report.errors.iter().any(|e| e.contains("unknown entropy")));
     }
 }

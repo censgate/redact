@@ -25,8 +25,141 @@ pub fn validate_entity(entity_type: &EntityType, value: &str) -> f32 {
         EntityType::UkNhs => validate_uk_nhs(value),
         EntityType::Isbn => validate_isbn(value),
         EntityType::IpAddress => validate_ip_address(value),
+        EntityType::HttpBasicAuth => validate_http_basic_auth(value),
         _ => 1.0, // No validation available
     }
+}
+
+/// Decode-validate an HTTP Basic credential token (the value after `Basic `).
+///
+/// Requires canonical base64 padding, UTF-8 printable ASCII with no NUL, and
+/// a `user:password` split where both sides are non-empty.
+pub fn validate_http_basic_auth(value: &str) -> f32 {
+    let token = value
+        .strip_prefix("Basic ")
+        .or_else(|| value.strip_prefix("basic "))
+        .unwrap_or(value);
+    if !is_canonical_b64(token) {
+        return 0.0;
+    }
+    let Ok(bytes) = decode_base64(token) else {
+        return 0.0;
+    };
+    let Ok(plain) = std::str::from_utf8(&bytes) else {
+        return 0.0;
+    };
+    if plain.contains('\0') || !plain.chars().all(|c| c.is_ascii() && !c.is_ascii_control()) {
+        return 0.0;
+    }
+    let Some((user, password)) = plain.split_once(':') else {
+        return 0.0;
+    };
+    if user.is_empty() || password.is_empty() {
+        return 0.0;
+    }
+    1.0
+}
+
+fn is_canonical_b64(token: &str) -> bool {
+    if token.is_empty() || !token.len().is_multiple_of(4) {
+        return false;
+    }
+    let pad = token.bytes().rev().take_while(|&b| b == b'=').count();
+    if pad > 2 {
+        return false;
+    }
+    let body_len = token.len() - pad;
+    if !token.as_bytes()[..body_len]
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || *b == b'+' || *b == b'/')
+    {
+        return false;
+    }
+    // Reject non-canonical unused padding bits (`dTpwYXN=` vs `dTpwYXM=`).
+    let Ok(bytes) = decode_base64(token) else {
+        return false;
+    };
+    encode_base64(&bytes) == token
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b0 = bytes[i];
+        let b1 = bytes.get(i + 1).copied();
+        let b2 = bytes.get(i + 2).copied();
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        match (b1, b2) {
+            (Some(b1), Some(b2)) => {
+                out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+                out.push(TABLE[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+                out.push(TABLE[(b2 & 0x3f) as usize] as char);
+            }
+            (Some(b1), None) => {
+                out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+                out.push(TABLE[((b1 & 0x0f) << 2) as usize] as char);
+                out.push('=');
+            }
+            (None, _) => {
+                out.push(TABLE[((b0 & 0x03) << 4) as usize] as char);
+                out.push('=');
+                out.push('=');
+            }
+        }
+        i += 3;
+    }
+    out
+}
+
+fn decode_base64(token: &str) -> Result<Vec<u8>, ()> {
+    const TABLE: [i8; 256] = {
+        let mut t = [-1i8; 256];
+        let mut i = 0;
+        while i < 26 {
+            t[(b'A' + i as u8) as usize] = i;
+            t[(b'a' + i as u8) as usize] = 26 + i;
+            i += 1;
+        }
+        i = 0;
+        while i < 10 {
+            t[(b'0' + i as u8) as usize] = 52 + i;
+            i += 1;
+        }
+        t[b'+' as usize] = 62;
+        t[b'/' as usize] = 63;
+        t
+    };
+    let mut out = Vec::with_capacity(token.len() / 4 * 3);
+    let bytes = token.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let a = TABLE[bytes[i] as usize];
+        let b = TABLE[bytes[i + 1] as usize];
+        if a < 0 || b < 0 {
+            return Err(());
+        }
+        out.push(((a as u8) << 2) | ((b as u8) >> 4));
+        if bytes[i + 2] != b'=' {
+            let c = TABLE[bytes[i + 2] as usize];
+            if c < 0 {
+                return Err(());
+            }
+            out.push(((b as u8) << 4) | ((c as u8) >> 2));
+            if bytes[i + 3] != b'=' {
+                let d = TABLE[bytes[i + 3] as usize];
+                if d < 0 {
+                    return Err(());
+                }
+                out.push(((c as u8) << 6) | (d as u8));
+            }
+        } else if bytes[i + 3] != b'=' {
+            return Err(());
+        }
+        i += 4;
+    }
+    Ok(out)
 }
 
 /// Validate credit card number using Luhn algorithm.
@@ -414,5 +547,25 @@ mod tests {
     fn test_invalid_ip() {
         assert_eq!(validate_ip_address("256.1.1.1"), 0.0);
         assert_eq!(validate_ip_address("1.1.1"), 0.0);
+    }
+
+    #[test]
+    fn test_http_basic_auth_requires_user_password() {
+        let ok = format!("{}{}", "dXNlcm5hbWU6", "cGFzc3dvcmQ=");
+        assert_eq!(validate_http_basic_auth(&ok), 1.0);
+        assert_eq!(validate_http_basic_auth("not-base64"), 0.0);
+        // "::::" is valid base64 alphabet but decodes without a colon pair.
+        assert_eq!(validate_http_basic_auth("QQ=="), 0.0);
+    }
+
+    #[test]
+    fn test_http_basic_auth_rejects_noncanonical_unused_bits() {
+        // "u:pas" encodes as dTpwYXM=; dTpwYXN= differs only in unused pad bits.
+        assert_eq!(validate_http_basic_auth("dTpwYXM="), 1.0);
+        assert_eq!(validate_http_basic_auth("dTpwYXN="), 0.0);
+        assert_eq!(
+            encode_base64(&decode_base64("dTpwYXM=").unwrap()),
+            "dTpwYXM="
+        );
     }
 }

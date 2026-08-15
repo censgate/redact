@@ -1,0 +1,840 @@
+{
+  "projects": [
+    {
+      "project": "react",
+      "repo": "facebook/react",
+      "sha": "4a9df08157f001c01b078d259748512211233dcf",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "LICENSE",
+          "bytes": 1088,
+          "lines": 21
+        },
+        {
+          "path": "packages/react/src/BadMapPolyfill.js",
+          "bytes": 568,
+          "lines": 23
+        },
+        {
+          "path": "packages/react/src/ReactAct.js",
+          "bytes": 14154,
+          "lines": 366
+        },
+        {
+          "path": "packages/react/src/ReactBaseClasses.js",
+          "bytes": 4905,
+          "lines": 146
+        },
+        {
+          "path": "packages/react/src/ReactCacheClient.js",
+          "bytes": 1380,
+          "lines": 34
+        },
+        {
+          "path": "packages/react/src/ReactCacheImpl.js",
+          "bytes": 4018,
+          "lines": 128
+        },
+        {
+          "path": "packages/react/src/ReactCacheServer.js",
+          "bytes": 248,
+          "lines": 10
+        },
+        {
+          "path": "packages/react/src/ReactChildren.js",
+          "bytes": 13998,
+          "lines": 463
+        },
+        {
+          "path": "packages/react/src/ReactClient.js",
+          "bytes": 3372,
+          "lines": 136
+        },
+        {
+          "path": "packages/react/src/ReactCompilerRuntime.js",
+          "bytes": 252,
+          "lines": 10
+        },
+        {
+          "path": "packages/react/src/ReactContext.js",
+          "bytes": 3133,
+          "lines": 113
+        },
+        {
+          "path": "packages/react/src/ReactCreateRef.js",
+          "bytes": 461,
+          "lines": 20
+        },
+        {
+          "path": "packages/react/src/ReactForwardRef.js",
+          "bytes": 2614,
+          "lines": 83
+        },
+        {
+          "path": "packages/react/src/ReactHooks.js",
+          "bytes": 7994,
+          "lines": 280
+        },
+        {
+          "path": "packages/react/src/ReactLazy.js",
+          "bytes": 5136,
+          "lines": 175
+        },
+        {
+          "path": "packages/react/src/ReactMemo.js",
+          "bytes": 1690,
+          "lines": 58
+        },
+        {
+          "path": "packages/react/src/ReactNoopUpdateQueue.js",
+          "bytes": 3741,
+          "lines": 110
+        },
+        {
+          "path": "packages/react/src/ReactOwnerStack.js",
+          "bytes": 596,
+          "lines": 23
+        },
+        {
+          "path": "packages/react/src/ReactPostpone.js",
+          "bytes": 606,
+          "lines": 23
+        },
+        {
+          "path": "packages/react/src/ReactServer.experimental.development.js",
+          "bytes": 2026,
+          "lines": 85
+        },
+        {
+          "path": "packages/react/src/ReactServer.experimental.js",
+          "bytes": 1940,
+          "lines": 83
+        },
+        {
+          "path": "packages/react/src/ReactServer.fb.js",
+          "bytes": 1572,
+          "lines": 67
+        },
+        {
+          "path": "packages/react/src/ReactServer.js",
+          "bytes": 1439,
+          "lines": 62
+        },
+        {
+          "path": "packages/react/src/ReactSharedInternalsClient.js",
+          "bytes": 2208,
+          "lines": 67
+        },
+        {
+          "path": "packages/react/src/ReactSharedInternalsServer.js",
+          "bytes": 1890,
+          "lines": 68
+        },
+        {
+          "path": "packages/react/src/ReactStartTransition.js",
+          "bytes": 2356,
+          "lines": 77
+        },
+        {
+          "path": "packages/react/src/ReactTaint.js",
+          "bytes": 4250,
+          "lines": 138
+        },
+        {
+          "path": "packages/react/src/ReactTaintRegistry.js",
+          "bytes": 1055,
+          "lines": 27
+        },
+        {
+          "path": "packages/react/src/ReactTransitionType.js",
+          "bytes": 635,
+          "lines": 21
+        },
+        {
+          "path": "packages/react/src/jsx/ReactJSX.js",
+          "bytes": 858,
+          "lines": 28
+        },
+        {
+          "path": "packages/react/src/jsx/ReactJSXServer.js",
+          "bytes": 858,
+          "lines": 28
+        },
+        {
+          "path": "packages/shared/CheckStringCoercion.js",
+          "bytes": 6201,
+          "lines": 180
+        },
+        {
+          "path": "packages/shared/ConsolePatchingDev.js",
+          "bytes": 2420,
+          "lines": 87
+        },
+        {
+          "path": "packages/shared/DefaultPrepareStackTrace.js",
+          "bytes": 358,
+          "lines": 12
+        },
+        {
+          "path": "packages/shared/DefaultPrepareStackTraceV8.js",
+          "bytes": 664,
+          "lines": 25
+        },
+        {
+          "path": "packages/shared/ExecutionEnvironment.js",
+          "bytes": 379,
+          "lines": 14
+        },
+        {
+          "path": "packages/shared/ReactComponentInfoStack.js",
+          "bytes": 1689,
+          "lines": 53
+        },
+        {
+          "path": "packages/shared/ReactFeatureFlags.js",
+          "bytes": 10041,
+          "lines": 272
+        },
+        {
+          "path": "packages/shared/ReactSharedInternals.js",
+          "bytes": 377,
+          "lines": 15
+        },
+        {
+          "path": "packages/shared/ReactSymbols.js",
+          "bytes": 2722,
+          "lines": 70
+        },
+        {
+          "path": "packages/shared/ReactVersion.js",
+          "bytes": 701,
+          "lines": 15
+        },
+        {
+          "path": "packages/shared/assign.js",
+          "bytes": 258,
+          "lines": 12
+        },
+        {
+          "path": "packages/shared/isArray.js",
+          "bytes": 402,
+          "lines": 18
+        },
+        {
+          "path": "packages/shared/objectIs.js",
+          "bytes": 696,
+          "lines": 24
+        }
+      ],
+      "bytes": 117949,
+      "lines": 3770
+    },
+    {
+      "project": "redis",
+      "repo": "redis/redis",
+      "sha": "d2c8a4b91e8c0e6aefd1f5bc0bf582cddbe046b7",
+      "license": "BSD-3-Clause",
+      "files": [
+        {
+          "path": "COPYING",
+          "bytes": 1487,
+          "lines": 10
+        },
+        {
+          "path": "src/adlist.c",
+          "bytes": 11681,
+          "lines": 417
+        },
+        {
+          "path": "src/adlist.h",
+          "bytes": 3766,
+          "lines": 100
+        },
+        {
+          "path": "src/ae.c",
+          "bytes": 17696,
+          "lines": 512
+        },
+        {
+          "path": "src/ae.h",
+          "bytes": 5528,
+          "lines": 136
+        },
+        {
+          "path": "src/anet.c",
+          "bytes": 22758,
+          "lines": 706
+        },
+        {
+          "path": "src/anet.h",
+          "bytes": 3244,
+          "lines": 75
+        },
+        {
+          "path": "src/crc16.c",
+          "bytes": 4477,
+          "lines": 88
+        },
+        {
+          "path": "src/crc16_slottable.h",
+          "bytes": 112334,
+          "lines": 835
+        },
+        {
+          "path": "src/crc64.c",
+          "bytes": 6137,
+          "lines": 161
+        },
+        {
+          "path": "src/crc64.h",
+          "bytes": 227,
+          "lines": 13
+        },
+        {
+          "path": "src/dict.c",
+          "bytes": 61797,
+          "lines": 1749
+        },
+        {
+          "path": "src/dict.h",
+          "bytes": 10152,
+          "lines": 231
+        },
+        {
+          "path": "src/endianconv.c",
+          "bytes": 3847,
+          "lines": 129
+        },
+        {
+          "path": "src/endianconv.h",
+          "bytes": 2948,
+          "lines": 78
+        },
+        {
+          "path": "src/geo.c",
+          "bytes": 38153,
+          "lines": 1005
+        },
+        {
+          "path": "src/geohash.c",
+          "bytes": 10224,
+          "lines": 299
+        },
+        {
+          "path": "src/geohash_helper.c",
+          "bytes": 11709,
+          "lines": 280
+        },
+        {
+          "path": "src/hyperloglog.c",
+          "bytes": 59371,
+          "lines": 1618
+        },
+        {
+          "path": "src/intset.c",
+          "bytes": 18080,
+          "lines": 560
+        },
+        {
+          "path": "src/intset.h",
+          "bytes": 2452,
+          "lines": 57
+        },
+        {
+          "path": "src/listpack.c",
+          "bytes": 97149,
+          "lines": 2660
+        },
+        {
+          "path": "src/listpack.h",
+          "bytes": 5566,
+          "lines": 106
+        },
+        {
+          "path": "src/monotonic.c",
+          "bytes": 5815,
+          "lines": 180
+        },
+        {
+          "path": "src/monotonic.h",
+          "bytes": 2222,
+          "lines": 61
+        },
+        {
+          "path": "src/mt19937-64.c",
+          "bytes": 6059,
+          "lines": 187
+        },
+        {
+          "path": "src/mt19937-64.h",
+          "bytes": 3318,
+          "lines": 87
+        },
+        {
+          "path": "src/rand.c",
+          "bytes": 3852,
+          "lines": 93
+        },
+        {
+          "path": "src/rand.h",
+          "bytes": 1767,
+          "lines": 38
+        },
+        {
+          "path": "src/rax.c",
+          "bytes": 75615,
+          "lines": 1927
+        },
+        {
+          "path": "src/rax.h",
+          "bytes": 9621,
+          "lines": 216
+        },
+        {
+          "path": "src/redisassert.c",
+          "bytes": 2559,
+          "lines": 53
+        },
+        {
+          "path": "src/redisassert.h",
+          "bytes": 2442,
+          "lines": 49
+        },
+        {
+          "path": "src/sds.c",
+          "bytes": 49821,
+          "lines": 1496
+        },
+        {
+          "path": "src/sds.h",
+          "bytes": 9669,
+          "lines": 287
+        },
+        {
+          "path": "src/sdsalloc.h",
+          "bytes": 2411,
+          "lines": 54
+        },
+        {
+          "path": "src/setcpuaffinity.c",
+          "bytes": 4139,
+          "lines": 155
+        },
+        {
+          "path": "src/sha1.c",
+          "bytes": 7740,
+          "lines": 239
+        },
+        {
+          "path": "src/sha1.h",
+          "bytes": 828,
+          "lines": 27
+        },
+        {
+          "path": "src/sha256.c",
+          "bytes": 5358,
+          "lines": 163
+        },
+        {
+          "path": "src/sha256.h",
+          "bytes": 1167,
+          "lines": 35
+        },
+        {
+          "path": "src/siphash.c",
+          "bytes": 14354,
+          "lines": 373
+        },
+        {
+          "path": "src/sparkline.c",
+          "bytes": 6650,
+          "lines": 179
+        },
+        {
+          "path": "src/timeout.c",
+          "bytes": 8058,
+          "lines": 202
+        },
+        {
+          "path": "src/util.c",
+          "bytes": 45627,
+          "lines": 1431
+        },
+        {
+          "path": "src/ziplist.c",
+          "bytes": 99880,
+          "lines": 2666
+        },
+        {
+          "path": "src/ziplist.h",
+          "bytes": 4008,
+          "lines": 74
+        },
+        {
+          "path": "src/zmalloc.c",
+          "bytes": 25641,
+          "lines": 851
+        },
+        {
+          "path": "src/zmalloc.h",
+          "bytes": 7218,
+          "lines": 167
+        }
+      ],
+      "bytes": 916622,
+      "lines": 23115
+    },
+    {
+      "project": "flask",
+      "repo": "pallets/flask",
+      "sha": "7fff56f5172c48b6f3aedf17ee14ef5c2533dfd1",
+      "license": "BSD-3-Clause",
+      "files": [
+        {
+          "path": "LICENSE.txt",
+          "bytes": 1475,
+          "lines": 28
+        },
+        {
+          "path": "src/flask/__init__.py",
+          "bytes": 2701,
+          "lines": 61
+        },
+        {
+          "path": "src/flask/__main__.py",
+          "bytes": 30,
+          "lines": 3
+        },
+        {
+          "path": "src/flask/app.py",
+          "bytes": 61744,
+          "lines": 1536
+        },
+        {
+          "path": "src/flask/blueprints.py",
+          "bytes": 4541,
+          "lines": 128
+        },
+        {
+          "path": "src/flask/cli.py",
+          "bytes": 37184,
+          "lines": 1135
+        },
+        {
+          "path": "src/flask/config.py",
+          "bytes": 13219,
+          "lines": 367
+        },
+        {
+          "path": "src/flask/ctx.py",
+          "bytes": 15120,
+          "lines": 449
+        },
+        {
+          "path": "src/flask/debughelpers.py",
+          "bytes": 6080,
+          "lines": 178
+        },
+        {
+          "path": "src/flask/globals.py",
+          "bytes": 1713,
+          "lines": 51
+        },
+        {
+          "path": "src/flask/helpers.py",
+          "bytes": 23521,
+          "lines": 634
+        },
+        {
+          "path": "src/flask/json/__init__.py",
+          "bytes": 5602,
+          "lines": 170
+        },
+        {
+          "path": "src/flask/json/provider.py",
+          "bytes": 7672,
+          "lines": 215
+        },
+        {
+          "path": "src/flask/json/tag.py",
+          "bytes": 9281,
+          "lines": 327
+        },
+        {
+          "path": "src/flask/logging.py",
+          "bytes": 2377,
+          "lines": 79
+        },
+        {
+          "path": "src/flask/sansio/app.py",
+          "bytes": 38116,
+          "lines": 964
+        },
+        {
+          "path": "src/flask/sansio/blueprints.py",
+          "bytes": 24637,
+          "lines": 632
+        },
+        {
+          "path": "src/flask/sansio/scaffold.py",
+          "bytes": 30387,
+          "lines": 792
+        },
+        {
+          "path": "src/flask/sessions.py",
+          "bytes": 15495,
+          "lines": 399
+        },
+        {
+          "path": "src/flask/signals.py",
+          "bytes": 750,
+          "lines": 17
+        },
+        {
+          "path": "src/flask/templating.py",
+          "bytes": 7537,
+          "lines": 219
+        },
+        {
+          "path": "src/flask/testing.py",
+          "bytes": 10136,
+          "lines": 298
+        },
+        {
+          "path": "src/flask/typing.py",
+          "bytes": 3293,
+          "lines": 93
+        },
+        {
+          "path": "src/flask/views.py",
+          "bytes": 6962,
+          "lines": 191
+        },
+        {
+          "path": "src/flask/wrappers.py",
+          "bytes": 9406,
+          "lines": 257
+        }
+      ],
+      "bytes": 338979,
+      "lines": 9223
+    },
+    {
+      "project": "clap",
+      "repo": "clap-rs/clap",
+      "sha": "352e99f59e7aabf2a34e5e9fd334e568a0b197e6",
+      "license": "MIT OR Apache-2.0",
+      "files": [
+        {
+          "path": "LICENSE-APACHE",
+          "bytes": 11358,
+          "lines": 202
+        },
+        {
+          "path": "LICENSE-MIT",
+          "bytes": 1062,
+          "lines": 19
+        },
+        {
+          "path": "clap_builder/src/builder/action.rs",
+          "bytes": 15562,
+          "lines": 461
+        },
+        {
+          "path": "clap_builder/src/builder/app_settings.rs",
+          "bytes": 1922,
+          "lines": 88
+        },
+        {
+          "path": "clap_builder/src/builder/arg.rs",
+          "bytes": 168995,
+          "lines": 5080
+        },
+        {
+          "path": "clap_builder/src/builder/arg_group.rs",
+          "bytes": 22563,
+          "lines": 635
+        },
+        {
+          "path": "clap_builder/src/builder/arg_predicate.rs",
+          "bytes": 537,
+          "lines": 19
+        },
+        {
+          "path": "clap_builder/src/builder/arg_settings.rs",
+          "bytes": 2104,
+          "lines": 91
+        },
+        {
+          "path": "clap_builder/src/builder/command.rs",
+          "bytes": 177383,
+          "lines": 5202
+        },
+        {
+          "path": "clap_builder/src/builder/debug_asserts.rs",
+          "bytes": 28608,
+          "lines": 820
+        },
+        {
+          "path": "clap_builder/src/builder/ext.rs",
+          "bytes": 1410,
+          "lines": 46
+        },
+        {
+          "path": "clap_builder/src/builder/mod.rs",
+          "bytes": 1921,
+          "lines": 71
+        },
+        {
+          "path": "clap_builder/src/builder/os_str.rs",
+          "bytes": 7681,
+          "lines": 330
+        },
+        {
+          "path": "clap_builder/src/builder/possible_value.rs",
+          "bytes": 6936,
+          "lines": 237
+        },
+        {
+          "path": "clap_builder/src/builder/range.rs",
+          "bytes": 8714,
+          "lines": 298
+        },
+        {
+          "path": "clap_builder/src/builder/resettable.rs",
+          "bytes": 5527,
+          "lines": 212
+        },
+        {
+          "path": "clap_builder/src/builder/str.rs",
+          "bytes": 6550,
+          "lines": 314
+        },
+        {
+          "path": "clap_builder/src/builder/styled_str.rs",
+          "bytes": 5862,
+          "lines": 210
+        },
+        {
+          "path": "clap_builder/src/builder/styling.rs",
+          "bytes": 4403,
+          "lines": 177
+        },
+        {
+          "path": "clap_builder/src/builder/tests.rs",
+          "bytes": 1272,
+          "lines": 56
+        },
+        {
+          "path": "clap_builder/src/builder/value_hint.rs",
+          "bytes": 3871,
+          "lines": 93
+        },
+        {
+          "path": "clap_builder/src/derive.rs",
+          "bytes": 13612,
+          "lines": 389
+        },
+        {
+          "path": "clap_builder/src/error/context.rs",
+          "bytes": 3576,
+          "lines": 114
+        },
+        {
+          "path": "clap_builder/src/error/format.rs",
+          "bytes": 17756,
+          "lines": 505
+        },
+        {
+          "path": "clap_builder/src/error/kind.rs",
+          "bytes": 13676,
+          "lines": 366
+        },
+        {
+          "path": "clap_builder/src/error/mod.rs",
+          "bytes": 28799,
+          "lines": 946
+        },
+        {
+          "path": "clap_builder/src/lib.rs",
+          "bytes": 1591,
+          "lines": 49
+        },
+        {
+          "path": "clap_builder/src/output/help.rs",
+          "bytes": 1234,
+          "lines": 39
+        },
+        {
+          "path": "clap_builder/src/output/mod.rs",
+          "bytes": 604,
+          "lines": 23
+        },
+        {
+          "path": "clap_builder/src/output/usage.rs",
+          "bytes": 18783,
+          "lines": 494
+        },
+        {
+          "path": "clap_builder/src/parser/error.rs",
+          "bytes": 1908,
+          "lines": 63
+        },
+        {
+          "path": "clap_builder/src/parser/features/mod.rs",
+          "bytes": 28,
+          "lines": 1
+        },
+        {
+          "path": "clap_builder/src/parser/matches/mod.rs",
+          "bytes": 335,
+          "lines": 13
+        },
+        {
+          "path": "clap_builder/src/parser/mod.rs",
+          "bytes": 724,
+          "lines": 25
+        },
+        {
+          "path": "clap_builder/src/parser/parser.rs",
+          "bytes": 65843,
+          "lines": 1676
+        },
+        {
+          "path": "clap_builder/src/parser/validator.rs",
+          "bytes": 18984,
+          "lines": 536
+        },
+        {
+          "path": "clap_builder/src/util/flat_map.rs",
+          "bytes": 6605,
+          "lines": 258
+        },
+        {
+          "path": "clap_builder/src/util/flat_set.rs",
+          "bytes": 2271,
+          "lines": 107
+        },
+        {
+          "path": "clap_builder/src/util/graph.rs",
+          "bytes": 1096,
+          "lines": 49
+        },
+        {
+          "path": "clap_builder/src/util/mod.rs",
+          "bytes": 1087,
+          "lines": 38
+        },
+        {
+          "path": "clap_builder/src/util/str_to_bool.rs",
+          "bytes": 776,
+          "lines": 21
+        }
+      ],
+      "bytes": 683529,
+      "lines": 20373
+    }
+  ],
+  "total_lines": 56481
+}

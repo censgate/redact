@@ -2,10 +2,13 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
+pub mod entropy;
+pub mod generic;
 pub mod pattern;
 pub mod registry;
 pub mod validation;
 
+pub use generic::{evaluate_generic_candidate, GenericSecretRecognizer};
 pub use registry::RecognizerRegistry;
 pub use validation::validate_entity;
 
