@@ -250,7 +250,6 @@ fn alias_for_stem(stem: &str, full_id: &str) -> Option<&'static str> {
         "bank_account" | "account_number" | "account_numbers" => "US_BANK_NUMBER",
         "dates" | "date_iso" | "date_common" => "DATE_TIME",
         "coordinates" | "address" => "LOCATION",
-        "api_key" | "generic_api_key" => "PRIVATE_KEY",
         _ => return None,
     })
 }
@@ -350,6 +349,12 @@ fn collect_yaml_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), PackErr
     for entry in entries {
         let child = entry.path();
         if child.is_dir() {
+            // Opt-in / quarantined trees are never auto-discovered, even when
+            // the operator points CENSGATE_PATTERN_PACKS at the packs root.
+            // An explicit file path still loads.
+            if is_skipped_pack_dir(&child) {
+                continue;
+            }
             collect_yaml_files(&child, out)?;
         } else if is_yaml_path(&child) {
             out.push(child);
@@ -362,6 +367,13 @@ fn is_yaml_path(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|e| e.to_str()),
         Some("yaml" | "yml")
+    )
+}
+
+fn is_skipped_pack_dir(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("optional" | "quarantine")
     )
 }
 
@@ -717,6 +729,24 @@ patterns:
             enabled: true,
         };
         assert_eq!(entity_type_for_pattern(&nino), EntityType::UkNino);
+
+        let generic = PatternDefinition {
+            id: "sec_generic_api_key".into(),
+            regex: "x".into(),
+            name: None,
+            category: None,
+            entity_type: None,
+            confidence: 0.9,
+            description: None,
+            examples: vec![],
+            replacement: None,
+            enabled: true,
+        };
+        assert_ne!(
+            entity_type_for_pattern(&generic),
+            EntityType::PrivateKey,
+            "generic api_key must not alias to PRIVATE_KEY"
+        );
     }
 
     #[test]

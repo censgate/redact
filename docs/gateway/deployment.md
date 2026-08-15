@@ -24,7 +24,7 @@ docker run --rm -p 8080:8080 \
   redact-gateway
 ```
 
-Repository pattern packs are copied to `/app/patterns` and `CENSGATE_PATTERN_PACKS` defaults to that path in the image.
+Repository pattern packs are copied to `/app/patterns`. `CENSGATE_PATTERN_PACKS` defaults to `/app/patterns/compliance:/app/patterns/pii` in the image (security and optional packs are opt-in).
 
 ## Docker Compose
 

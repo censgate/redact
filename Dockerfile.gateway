@@ -90,8 +90,9 @@ COPY patterns /app/patterns
 # Copy binary from builder
 COPY --from=builder /app/target/release/redact-gateway /usr/local/bin/redact-gateway
 
-# Load repository packs out of the box (override with CENSGATE_PATTERN_PACKS)
-ENV CENSGATE_PATTERN_PACKS=/app/patterns
+# Load reviewed compliance/PII packs only. patterns/security and
+# patterns/optional are opt-in (override with CENSGATE_PATTERN_PACKS).
+ENV CENSGATE_PATTERN_PACKS=/app/patterns/compliance:/app/patterns/pii
 
 # Expose gateway port
 EXPOSE 8080

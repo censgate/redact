@@ -218,7 +218,8 @@ patterns:
       - 'api_key: "<provider-shaped secret>"'
       - "access_token=abc123def456ghi789"
     replacement: "[API_KEY_REDACTED]"
-    enabled: true
+    # Disabled: assignment catch-all; needs GENERIC_SECRET + entropy (Phase 2 of #101).
+    enabled: false
 
   # Cryptographic Hashes
   - id: "global_hash_md5"

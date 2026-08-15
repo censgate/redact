@@ -127,9 +127,9 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
-            # Pattern packs baked into the image; keep explicit for clarity.
+            # Reviewed compliance/PII packs only; security/optional are opt-in.
             - name: CENSGATE_PATTERN_PACKS
-              value: /app/patterns
+              value: /app/patterns/compliance:/app/patterns/pii
             # OTLP transport (not part of the YAML schema — use OTEL_* vars).
             - name: OTEL_SERVICE_NAME
               value: redact-gateway
