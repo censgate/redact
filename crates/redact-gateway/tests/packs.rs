@@ -180,12 +180,12 @@ fn pack_noise_corpus() -> String {
     // SHA-1 (40 hex), MD5 (32 hex), a short assignment, a generic hooks URL,
     // and a Stripe publishable key. None of these should become secret types
     // via the default pack path or a quarantined credentials.yaml.
+    let pk = format!("{}{}_{}", "pk", "_test", "a".repeat(24));
     format!(
         "sha1 {sha1} md5 {md5} api_key=not-a-secret hooks {hooks} stripe {pk}",
         sha1 = "a".repeat(40),
         md5 = "b".repeat(32),
         hooks = "https://hooks.zapier.com/hooks/catch/123456/abcdef/",
-        pk = format!("{}{}_{}", "pk", "_test", "a".repeat(24)),
     )
 }
 

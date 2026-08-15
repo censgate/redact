@@ -2,7 +2,7 @@
 
 A short path from a fresh checkout to a working gateway. Each step builds on the last; you can stop after step 1 if you only need local redaction.
 
-Related: [configuration](configuration.md) · [policy](policy.md) · [tokenization](tokenization.md) · [authentication](authentication.md) · [streaming](streaming.md) · [telemetry](telemetry.md) · [audit](audit.md) · [deployment](deployment.md)
+Related: [configuration](configuration.md) · [policy](policy.md) · [tokenization](tokenization.md) · [authentication](authentication.md) · [streaming](streaming.md) · [telemetry](telemetry.md) · [audit](audit.md) · [deployment](deployment.md) · [secrets detection](../secrets-detection.md)
 
 ## 1. Try it with no provider
 

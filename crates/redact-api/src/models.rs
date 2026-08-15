@@ -195,7 +195,7 @@ pub struct HealthResponse {
     pub version: String,
     /// Number of recognizer instances (e.g. pattern, NER)
     pub recognizers: usize,
-    /// Number of entity types supported across all recognizers (e.g. 54+)
+    /// Number of entity types supported across all recognizers (e.g. 61+)
     pub entity_types: usize,
 }
 

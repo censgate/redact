@@ -84,7 +84,7 @@ const STOPWORDS: &[&str] = &[
 lazy_static! {
     static ref ASSIGNMENT: Regex = Regex::new(
         r#"(?x)(?i)
-        (?:^|[\s;])
+        (?:^|[\s;{,])
         (?:export\s+|-\s*e\s+)?
         ["']?
         (?P<key>[A-Za-z_][A-Za-z0-9_.-]*)
@@ -128,10 +128,9 @@ pub fn segment_key(key: &str) -> Vec<String> {
         if c.is_ascii_uppercase()
             && i > 0
             && (chars[i - 1].is_ascii_lowercase() || chars[i - 1].is_ascii_digit())
+            && !current.is_empty()
         {
-            if !current.is_empty() {
-                segments.push(std::mem::take(&mut current));
-            }
+            segments.push(std::mem::take(&mut current));
         }
         current.push(c.to_ascii_lowercase());
     }
@@ -164,8 +163,8 @@ fn env_suffix_is_secret(segments: &[String]) -> bool {
         segments[n - 1].as_str(),
         "secret" | "token" | "password" | "passwd"
     ) || (n >= 2
-        && ((segments[n - 2] == "api" && segments[n - 1] == "key")
-            || (segments[n - 2] == "access" && segments[n - 1] == "key")))
+        && segments[n - 1] == "key"
+        && (segments[n - 2] == "api" || segments[n - 2] == "access"))
 }
 
 /// Classify an assignment key using the closed allow/deny lists.
@@ -444,5 +443,15 @@ mod tests {
         let text = format!("integrity={}", "a".repeat(64));
         let hits = rec.analyze(&text, "en").unwrap();
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn json_quoted_key_is_a_closed_form() {
+        let rec = GenericSecretRecognizer::new();
+        let secret = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let text = format!(r#"{{"client_secret": "{secret}"}}"#);
+        let hits = rec.analyze(&text, "en").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&text[hits[0].start..hits[0].end], secret);
     }
 }

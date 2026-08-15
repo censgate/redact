@@ -24,8 +24,8 @@ struct SecretPattern {
 ///
 /// These are anchored/prefixed patterns only (e.g. `AKIA...`, `ghp_...`,
 /// `sk-ant-...`) chosen for high precision. Generic catch-alls like
-/// `api_key=...` or `password=...` are deliberately excluded here because
-/// they need entropy scoring to avoid false positives; that is future work.
+/// `api_key=...` or `password=...` are deliberately excluded here;
+/// those go through `GenericSecretRecognizer` (entropy-gated).
 const SECRET_PATTERNS: &[SecretPattern] = &[
     SecretPattern {
         entity_type: EntityType::PrivateKey,

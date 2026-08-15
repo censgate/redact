@@ -49,6 +49,8 @@ One pass can mix actions: a string may mask a card number, tokenize a name, and 
 
 `tokenize` describes what happens to outbound content. When a model's own answer contains a detected value, there is nobody downstream to restore a placeholder for, so a tokenize rule acts as `replace` on the response path. The value is removed either way.
 
+`GENERIC_SECRET` is independently disableable: set `{ action: allow }` on the profile. Named secret types stay `block` on `default`, `reversible`, and `secrets_only`. See [secrets detection](../secrets-detection.md).
+
 ## Confidence floors
 
 Each profile has `min_confidence` (default `0.5`). Per-entity rules may set their own floor. Detections below the applicable floor are treated as `allow`, so low-confidence noise never rewrites user content.
@@ -89,7 +91,7 @@ Shipped in [`default_policy.yaml`](../../crates/redact-gateway/src/policy/defaul
 
 | Profile | Default action | Intent |
 |---------|----------------|--------|
-| `default` | `replace` | Replace personal data; **block** credentials/secrets; **mask** high-sensitivity IDs (SSN, cards, MRN, …) at confidence ≥ 0.7; allow common false positives (dates, URLs, hashes, GUIDs) |
+| `default` | `replace` | Replace personal data; **block** named credentials/secrets; **replace** `GENERIC_SECRET` at confidence ≥ 0.6; **mask** high-sensitivity IDs (SSN, cards, MRN, …) at confidence ≥ 0.7; allow common false positives (dates, URLs, hashes, GUIDs) |
 | `reversible` | `tokenize` | Tokenize personal data for restore; block a core credential set; allow the same noise entities |
 | `strict` | `block` | Block any detection above confidence 0.6 (except allow-listed noise); no response restore |
 | `secrets_only` | `allow` | Block credentials/secrets only; leave everything else alone |

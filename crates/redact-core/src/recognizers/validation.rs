@@ -61,7 +61,7 @@ pub fn validate_http_basic_auth(value: &str) -> f32 {
 }
 
 fn is_canonical_b64(token: &str) -> bool {
-    if token.is_empty() || token.len() % 4 != 0 {
+    if token.is_empty() || !token.len().is_multiple_of(4) {
         return false;
     }
     let pad = token.bytes().rev().take_while(|&b| b == b'=').count();

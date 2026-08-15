@@ -124,7 +124,7 @@ fn is_path_shaped(value: &str) -> bool {
 /// Score a candidate against the length-aware floor. `None` means reject.
 pub fn score_entropy(value: &str) -> Option<f32> {
     let n = value.chars().count();
-    if n < MIN_LEN || n > MAX_LEN {
+    if !(MIN_LEN..=MAX_LEN).contains(&n) {
         return None;
     }
     let class = classify_charset(value)?;
@@ -214,6 +214,6 @@ mod tests {
     fn confidence_stays_in_band() {
         let value = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
         let score = score_entropy(value).unwrap();
-        assert!(score >= CONFIDENCE_FLOOR && score <= CONFIDENCE_CEILING);
+        assert!((CONFIDENCE_FLOOR..=CONFIDENCE_CEILING).contains(&score));
     }
 }

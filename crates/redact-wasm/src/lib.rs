@@ -7,7 +7,7 @@
 //! ## Scope
 //!
 //! These bindings expose the **pattern-based** detection and anonymization from
-//! [`redact_core`]: the 54 regex entity types (email, phone, SSN, credit cards,
+//! [`redact_core`]: the compiled regex entity types (email, phone, SSN, credit cards,
 //! IBAN, UK identifiers, crypto addresses, hashes, GUIDs, URLs, IP, dates,
 //! secrets and credentials, ...).
 //! No ML model is loaded, so the module stays small (~1-3 MB) and fits browser
@@ -47,7 +47,7 @@ use redact_core::{
 };
 use wasm_bindgen::prelude::*;
 
-/// PII detection and anonymization engine (pattern-based, 54 entity types).
+/// PII detection and anonymization engine (pattern-based, including secrets).
 #[wasm_bindgen]
 pub struct RedactEngine {
     engine: AnalyzerEngine,
@@ -397,6 +397,40 @@ mod tests {
         let mut sorted = parsed.clone();
         sorted.sort();
         assert_eq!(parsed, sorted);
+    }
+
+    #[test]
+    fn generic_secret_positive_includes_confidence() {
+        let engine = RedactEngine::new();
+        let secret = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let text = format!("api_key={secret}");
+        let json = engine.analyze(&text);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let hit = v["detected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["entity_type"] == "GENERIC_SECRET")
+            .expect("GENERIC_SECRET");
+        let score = hit["score"].as_f64().expect("confidence/score present");
+        assert!(
+            (0.60..=0.85).contains(&score),
+            "GENERIC_SECRET confidence must be in 0.60–0.85, got {score}"
+        );
+    }
+
+    #[test]
+    fn generic_secret_exclusion_password_stopword() {
+        let engine = RedactEngine::new();
+        let json = engine.analyze("password=password");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let types: Vec<&str> = v["detected_entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["entity_type"].as_str().unwrap())
+            .collect();
+        assert!(!types.contains(&"GENERIC_SECRET"));
     }
 
     #[test]
