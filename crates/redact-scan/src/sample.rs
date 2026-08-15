@@ -51,6 +51,9 @@ async fn sample_column(
     let column = quote_ident(&col.column).map_err(ScanError::new)?;
     let n = col.n_live_tup.max(0) as u64;
     let limit = i64::from(sample_rows.max(1));
+    // When the table is no larger than the sample budget, LIMIT is enough.
+    // TABLESAMPLE on a tiny relation still reads the same rows and can
+    // return zero pages; a full-table random scan is not used either way.
     let sql = if n > 0 && n <= u64::from(sample_rows) {
         format!("SELECT {column}::text FROM {table} LIMIT {limit}")
     } else {
