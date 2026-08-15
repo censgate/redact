@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `redact-scan`: new workspace crate and `redact-scan` binary for read-only
-  Postgres PII discovery. This revision adds the report types, credential
-  scrubber, and CLI preflight (`--include-samples` cannot be combined with
-  `--report-url`). Reports contain locations and counts only — never sample
-  values.
+  Postgres PII discovery. Report types, credential scrubber, CLI preflight,
+  a read-only safety session (refuse superuser and write grants), and
+  layers 0 / 0.5 (catalog metadata and `pg_stats`). Reports contain
+  locations and counts only — never sample values.
 
 ## [0.9.1] - 2026-08-08
 
