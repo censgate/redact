@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
-//! Scan orchestration for layers 0 and 0.5.
+//! Scan orchestration for layers 0, 0.5, 1, and 2.
 
 use chrono::Utc;
 use uuid::Uuid;
@@ -12,9 +12,11 @@ use crate::catalog::{candidates, l0_findings, load_columns};
 use crate::cli::Cli;
 use crate::detect::pattern_pack_label;
 use crate::error::ScanError;
+use crate::json_scan::l2_findings;
 use crate::layers::ScanLayer;
 use crate::report::{Finding, Sampling, ScanReport, Scanner, Target};
 use crate::safety::{connect_readonly, host_db_from_url};
+use crate::sample::l1_findings;
 use crate::stats::l05_findings;
 
 /// Run the selected layers and return a finalized report.
@@ -47,8 +49,11 @@ pub async fn run_scan(cli: &Cli) -> Result<ScanReport, ScanError> {
     if layers.contains(&ScanLayer::Stats) {
         findings.extend(l05_findings(&safe.pool, &cli.schema, &cand).await?);
     }
-    if layers.contains(&ScanLayer::Sample) || layers.contains(&ScanLayer::Json) {
-        tracing::warn!("layers 1 and 2 are not implemented in this revision");
+    if layers.contains(&ScanLayer::Sample) {
+        findings.extend(l1_findings(&safe.pool, &cand, cli.sample_rows).await?);
+    }
+    if layers.contains(&ScanLayer::Json) {
+        findings.extend(l2_findings(&safe.pool, &cand, cli.sample_rows).await?);
     }
 
     findings = dedup_findings(findings);
