@@ -103,6 +103,22 @@ async fn verify_readonly(safe: &SafePool, schema: &str) -> Result<(), ScanError>
         ));
     }
 
+    let column_writes: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT privilege_type
+        FROM information_schema.column_privileges
+        WHERE grantee = current_user
+        "#,
+    )
+    .fetch_all(&safe.pool)
+    .await
+    .map_err(|e| safe.scrub(e))?;
+    if has_write_grants(column_writes.iter().map(String::as_str)) {
+        return Err(ScanError::new(
+            "refusing to run: role holds column write grants (INSERT/UPDATE)",
+        ));
+    }
+
     let acl_writes: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)::bigint

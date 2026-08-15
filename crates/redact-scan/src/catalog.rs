@@ -119,30 +119,13 @@ pub fn l0_findings(columns: &[ColumnMeta]) -> Vec<Finding> {
                 confidence: 0.8,
                 evidence_class: EvidenceClass::TypeSignal,
             });
-            continue;
-        }
-        if is_date_type(&col.udt) {
-            if let Some((entity_type, confidence)) = name_entity(&col.column) {
-                if matches!(entity_type, redact_core::EntityType::DateTime) {
-                    out.push(Finding {
-                        table,
-                        column: col.column.clone(),
-                        json_path: None,
-                        entity_type,
-                        layer: ScanLayer::Metadata,
-                        match_count: 0,
-                        sampled_rows: 0,
-                        confidence,
-                        evidence_class: EvidenceClass::NameHeuristic,
-                    });
-                }
-            }
         }
         let _ = (
             col.unique_text,
             col.fk_to_subject,
             is_json_type(&col.udt),
             is_textish(&col.udt),
+            is_date_type(&col.udt),
             &col.comment,
         );
     }

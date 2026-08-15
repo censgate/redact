@@ -35,7 +35,9 @@ pub fn name_entity(column: &str) -> Option<(EntityType, f32)> {
         ("ipv4", EntityType::IpAddress, 0.8),
         ("ipv6", EntityType::IpAddress, 0.8),
     ];
-    for (needle, ty, conf) in rules {
+    let mut ranked: Vec<_> = rules.iter().collect();
+    ranked.sort_by_key(|(needle, _, _)| std::cmp::Reverse(needle.len()));
+    for (needle, ty, conf) in ranked {
         if n == *needle || n.contains(needle) {
             return Some((ty.clone(), *conf));
         }
@@ -90,5 +92,13 @@ mod tests {
     fn status_is_not_pii() {
         assert!(name_entity("status").is_none());
         assert!(name_entity("active").is_none());
+    }
+
+    #[test]
+    fn ip_address_is_not_location() {
+        let (ty, _) = name_entity("ip_address").unwrap();
+        assert_eq!(ty, EntityType::IpAddress);
+        let (ty, _) = name_entity("client_ipv4").unwrap();
+        assert_eq!(ty, EntityType::IpAddress);
     }
 }
