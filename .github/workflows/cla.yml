@@ -1,6 +1,7 @@
 # CLA signatures are stored in this repository on the unprotected
 # `cla-signatures` branch (signatures/version1/cla.json).
-# Do not create that JSON file by hand — the action creates it.
+# The action creates signatures/version1/cla.json on first human sign-off.
+# Maintainer-run agents that cannot post a sign-off comment are allowlisted.
 #
 # contributor-assistant/github-action is archived; v2.6.1 remains the
 # last release. Pin by SHA. If the action stops working, a maintainer
@@ -41,7 +42,7 @@ jobs:
           path-to-signatures: signatures/version1/cla.json
           path-to-document: https://github.com/censgate/redact/blob/main/CLA.md
           branch: cla-signatures
-          allowlist: dependabot[bot],github-actions[bot]
+          allowlist: dependabot[bot],github-actions[bot],cursoragent,cursor[bot]
           custom-notsigned-prcomment: |
             Thank you for your pull request. Each human contributor must sign
             the Individual Contributor License Agreement (CLA.md) before this
@@ -71,7 +72,12 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const allowlist = new Set(['dependabot[bot]', 'github-actions[bot]']);
+            const allowlist = new Set([
+              'dependabot[bot]',
+              'github-actions[bot]',
+              'cursoragent',
+              'cursor[bot]',
+            ]);
             const prNumber = context.payload.pull_request
               ? context.payload.pull_request.number
               : context.issue.number;
