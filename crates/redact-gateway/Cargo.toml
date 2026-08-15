@@ -46,7 +46,7 @@ rand = { workspace = true }
 regex = { workspace = true }
 arc-swap = "1.7"
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 serde_norway = "0.9"
 subtle = "2.6"
