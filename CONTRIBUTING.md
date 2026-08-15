@@ -2,9 +2,9 @@
 
 Thank you for your interest in contributing to Redact! This document provides guidelines and information for contributors.
 
-## Code of Conduct
+Before you invest time, read [docs/PROJECT_SCOPE.md](docs/PROJECT_SCOPE.md). Pull requests that implement out-of-scope work will not be merged.
 
-This project adheres to a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
+Contributors are expected to be respectful in issues, discussions, and pull requests. A formal Code of Conduct file is not published in this repository.
 
 ## How Can I Contribute?
 
@@ -34,7 +34,9 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 3. **Add tests** for new functionality
 4. **Run the test suite** to ensure all tests pass
 5. **Update documentation** as needed
-6. **Create a pull request** with a clear title and description
+6. **Sign off every commit** with `git commit -s` (Developer Certificate of Origin)
+7. **Create a pull request** with a clear title and description
+8. **Sign the CLA** when the bot comments (see [License and contributor agreements](#license-and-contributor-agreements))
 
 ## Development Setup
 
@@ -78,6 +80,9 @@ cargo test --package redact-core
 
 # Run specific test suite
 cargo test --package redact-core --test pattern_coverage
+cargo test --package redact-core --test integration_policy
+cargo test --package redact-core --test error_scenarios
+cargo test --package redact-core --test concurrent_operations
 
 # Run benchmarks
 cargo bench --package redact-core
@@ -154,6 +159,8 @@ Follow the [Conventional Commits](https://www.conventionalcommits.org/) specific
 <footer>
 ```
 
+Use `git commit -s` so Git adds a `Signed-off-by: Name <email>` trailer (Developer Certificate of Origin). That is project policy; the CLA bot does not check for it.
+
 ### Types
 
 - `feat`: New feature
@@ -174,6 +181,7 @@ Implement label mapping configuration for custom NER models
 with multilingual support. Add tests for Spanish and French.
 
 Closes #123
+Signed-off-by: Your Name <you@example.com>
 ```
 
 ```
@@ -181,6 +189,8 @@ fix(anonymizer): correct hash anonymization for empty strings
 
 The hash anonymizer was panicking on empty input strings.
 Add null check and return empty string for empty input.
+
+Signed-off-by: Your Name <you@example.com>
 ```
 
 ## Versioning
@@ -230,12 +240,15 @@ redact/
 ├── scripts/                 # Utility scripts
 ├── examples/                # Usage examples
 ├── docs/
+│   ├── PROJECT_SCOPE.md     # What this repository accepts
 │   ├── gateway/             # Gateway operator documentation
 │   └── benchmarks/          # Benchmark methodology and results
 └── .github/workflows/       # CI/CD pipelines
 ```
 
 ## Areas for Contribution
+
+Confirm the idea is in [project scope](docs/PROJECT_SCOPE.md) before starting.
 
 ### High Priority
 
@@ -273,10 +286,49 @@ Contributors will be recognized in:
 - GitHub contributors page
 - Release notes for significant contributions
 
-## License
+## License and contributor agreements
 
-By contributing to Redact, you agree that your contributions will be licensed under the Apache 2.0 License.
+The outbound license for this repository remains the [Apache License 2.0](LICENSE).
+
+### Contributor License Agreement (required)
+
+Every human contributor must sign the [Contributor License Agreement](CLA.md)
+before a pull request can be merged.
+
+- **Independent contributors:** when the CLA bot comments on your first pull
+  request, post exactly:
+
+  ```
+  I have read the CLA Document and I hereby sign the CLA
+  ```
+
+- **Employer-owned work:** do not rely on an Individual CLA alone. An
+  authorised corporate signer must email a completed Corporate CLA to
+  support@censgate.com. A Corporate CLA does **not** replace each
+  developer's Individual CLA. Maintainers then add designated GitHub
+  usernames to the `allowlist` in `.github/workflows/cla.yml` or to
+  `signatures/version1/cla.json` on the `cla-signatures` branch so the
+  check can pass.
+
+Individual signatures are GitHub usernames stored on this repository's
+`cla-signatures` branch (already public on the pull request). Signed
+Corporate CLA documents are kept off this repository.
+
+The CLA is a license grant, not an assignment. It does not change the
+Apache-2.0 outbound license.
+
+### Developer Certificate of Origin (required by policy)
+
+Every commit must include a DCO sign-off:
+
+```bash
+git commit -s -m "feat: your change"
+```
+
+That adds `Signed-off-by: Your Name <you@example.com>`. DCO is per-commit
+provenance; the CLA covers rights. DCO is **not** enforced by the CLA bot.
+Use the pull-request template checkbox and `git commit -s`.
 
 ---
 
-Thank you for contributing to Redact! 🎉
+Thank you for contributing to Redact!

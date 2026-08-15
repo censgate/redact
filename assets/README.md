@@ -6,7 +6,7 @@ This folder contains the official Censgate logo files for use in open source and
 
 - You are free to use the Censgate logo in unmodified form to reference, promote, or integrate with the Censgate project.
 - Do not modify, distort, or alter the logo's appearance.
-- Do not use the Censgate logo in ways that imply endorsement or partnership without explicit permission from Censgate, Inc.
+- Do not use the Censgate logo in ways that imply endorsement or partnership without explicit permission from Censgate LLC.
 
 ## Copyright Notice
 
