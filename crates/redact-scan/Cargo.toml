@@ -36,7 +36,7 @@ path = "src/main.rs"
 [dev-dependencies]
 assert_cmd = "2.2"
 predicates = "3.1"
-testcontainers-modules = { version = "0.13", features = ["postgres"] }
+testcontainers-modules = { version = "0.15", features = ["postgres"] }
 rand = { workspace = true }
 tokio = { workspace = true }
 sqlx = { workspace = true }
