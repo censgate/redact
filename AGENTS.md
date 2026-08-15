@@ -21,7 +21,8 @@ crates/
 ├── redact-api/     # REST API server (Axum)
 ├── redact-cli/     # Command-line interface (Clap)
 ├── redact-wasm/    # WebAssembly bindings
-└── redact-gateway/ # OpenAI-compatible privacy gateway (embeds redact-core)
+├── redact-gateway/ # OpenAI-compatible privacy gateway (embeds redact-core)
+└── redact-verify/  # Independent ledger pack verifier (no redact-core)
 ```
 
 ### Crate Dependencies
