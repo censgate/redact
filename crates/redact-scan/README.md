@@ -24,7 +24,7 @@ See [docs/scanning-model.md](../../docs/scanning-model.md) for the four discover
   },
   "scanner": {
     "version": "0.9.1",
-    "pattern_pack": "builtin@54"
+    "pattern_pack": "builtin@<supported-entity-count>"
   },
   "sampling": {
     "layers": [0.0, 0.5, 1.0, 2.0],

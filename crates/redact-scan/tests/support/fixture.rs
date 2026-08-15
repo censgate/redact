@@ -33,22 +33,10 @@ impl Fixture {
         let c_flag = ident(&mut rng, "c");
 
         sql.push(format!(
-            r#"
-            CREATE TABLE {t_pii} (
-              {c_email} text,
-              {c_ssn} text,
-              {c_iban} text,
-              {c_cc} text,
-              {c_ip} inet,
-              {c_json} jsonb
-            );
-            CREATE TABLE {t_clean} (
-              {c_status} text,
-              {c_qty} int,
-              {c_note} text,
-              {c_flag} boolean
-            );
-            "#
+            "CREATE TABLE {t_pii} ({c_email} text, {c_ssn} text, {c_iban} text, {c_cc} text, {c_ip} inet, {c_json} jsonb)"
+        ));
+        sql.push(format!(
+            "CREATE TABLE {t_clean} ({c_status} text, {c_qty} int, {c_note} text, {c_flag} boolean)"
         ));
 
         let email = format!("user{seed}@example.test");
@@ -62,7 +50,7 @@ impl Fixture {
         // Repeat a subset so ANALYZE fills most_common_vals.
         for _ in 0..40 {
             sql.push(format!(
-                "INSERT INTO {t_pii} ({c_email},{c_ssn},{c_iban},{c_cc},{c_ip},{c_json}) VALUES ('{email}','{ssn}','{iban}','{cc}','{ip}','{json}');"
+                "INSERT INTO {t_pii} ({c_email},{c_ssn},{c_iban},{c_cc},{c_ip},{c_json}) VALUES ('{email}','{ssn}','{iban}','{cc}','{ip}','{json}')"
             ));
         }
         // Unique emails so histogram_bounds also holds values.
@@ -70,7 +58,7 @@ impl Fixture {
             let unique = format!("uniq{seed}{i}@example.test");
             secret_values.push(unique.clone());
             sql.push(format!(
-                "INSERT INTO {t_pii} ({c_email},{c_ssn},{c_iban},{c_cc},{c_ip},{c_json}) VALUES ('{unique}','{ssn}','{iban}','{cc}','{ip}','{json}');"
+                "INSERT INTO {t_pii} ({c_email},{c_ssn},{c_iban},{c_cc},{c_ip},{c_json}) VALUES ('{unique}','{ssn}','{iban}','{cc}','{ip}','{json}')"
             ));
         }
         for _ in 0..30 {
@@ -80,7 +68,7 @@ impl Fixture {
                 "pending"
             };
             sql.push(format!(
-                "INSERT INTO {t_clean} ({c_status},{c_qty},{c_note},{c_flag}) VALUES ('{status}',{},'lorem ipsum dolor sit amet',true);",
+                "INSERT INTO {t_clean} ({c_status},{c_qty},{c_note},{c_flag}) VALUES ('{status}',{},'lorem ipsum dolor sit amet',true)",
                 rng.random_range(1..100)
             ));
         }
@@ -117,6 +105,10 @@ fn ident<R: Rng>(rng: &mut R, prefix: &str) -> String {
 
 pub async fn apply(pool: &PgPool, statements: &[String]) -> sqlx::Result<()> {
     for s in statements {
+        let s = s.trim().trim_end_matches(';');
+        if s.is_empty() {
+            continue;
+        }
         sqlx::query(s).execute(pool).await?;
     }
     Ok(())
