@@ -485,6 +485,27 @@ mod tests {
     }
 
     #[test]
+    fn strict_lists_phase2_secret_types_as_block() {
+        let set = PolicySet::default();
+        let profile = set.profiles.get("strict").expect("strict");
+        for entity in [
+            EntityType::HuggingFaceToken,
+            EntityType::DatabricksToken,
+            EntityType::DigitalOceanToken,
+            EntityType::NotionApiKey,
+            EntityType::PerplexityApiKey,
+            EntityType::HttpBasicAuth,
+            EntityType::GenericSecret,
+        ] {
+            assert_eq!(
+                profile.decide(&entity, 0.99),
+                EntityAction::Block,
+                "strict must block {entity:?}"
+            );
+        }
+    }
+
+    #[test]
     fn secrets_only_blocks_every_high_sensitivity_type() {
         let set = PolicySet::default();
         let profile = set.profiles.get("secrets_only").expect("secrets_only");

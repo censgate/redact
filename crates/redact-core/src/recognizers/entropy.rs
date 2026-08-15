@@ -6,7 +6,7 @@
 //!
 //! This module is WASM-safe: no filesystem, clock, network, or extra crates.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Minimum candidate length (inclusive) for generic secrets.
 pub const MIN_LEN: usize = 20;
@@ -46,11 +46,12 @@ pub fn shannon_entropy(value: &str) -> f64 {
     if n == 0 {
         return 0.0;
     }
-    let mut counts: HashMap<char, usize> = HashMap::new();
+    let mut counts: BTreeMap<char, usize> = BTreeMap::new();
     for c in value.chars() {
         *counts.entry(c).or_insert(0) += 1;
     }
     let n_f = n as f64;
+    // BTreeMap so the fold order is stable (HashMap iteration is not).
     counts.values().fold(0.0, |acc, &count| {
         let p = count as f64 / n_f;
         acc - p * p.log2()
@@ -75,12 +76,6 @@ pub fn classify_charset(value: &str) -> Option<CharsetClass> {
         return None;
     }
     if is_screaming_snake(value) || is_path_shaped(value) {
-        if value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        {
-            return Some(CharsetClass::Alphanumeric);
-        }
         return None;
     }
 
@@ -187,10 +182,9 @@ mod tests {
 
     #[test]
     fn screaming_snake_is_not_base64() {
-        assert_eq!(
-            classify_charset("ANTHROPIC_API_KEY_PLACEHOLDER_XX"),
-            Some(CharsetClass::Alphanumeric)
-        );
+        assert_eq!(classify_charset("ANTHROPIC_API_KEY_PLACEHOLDER_XX"), None);
+        assert_eq!(classify_charset("A1B2C3D4E5F6G7H8I9A_"), None);
+        assert!(score_entropy("A1B2C3D4E5F6G7H8I9A_").is_none());
     }
 
     #[test]

@@ -798,8 +798,27 @@ fn test_gitlab_routable_and_agent_tokens() {
 
 #[test]
 fn test_aws_bedrock_api_key_shapes() {
-    let bedrock = token("ABSK", &format!("{}==", "A".repeat(109)));
-    assert_entity_detected(&bedrock, EntityType::AwsAccessKey, 0.9);
+    let padded = token("ABSK", &format!("{}==", "A".repeat(109)));
+    assert_entity_detected(&padded, EntityType::AwsAccessKey, 0.9);
+    let engine = create_engine();
+    let padded_result = engine.analyze(&padded, None).unwrap();
+    let padded_hit = padded_result
+        .detected_entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::AwsAccessKey)
+        .expect("padded Bedrock");
+    assert_eq!(&padded[padded_hit.start..padded_hit.end], padded);
+
+    let unpadded = token("ABSK", &"A".repeat(109));
+    assert_entity_detected(&unpadded, EntityType::AwsAccessKey, 0.9);
+    let unpadded_result = engine.analyze(&unpadded, None).unwrap();
+    let unpadded_hit = unpadded_result
+        .detected_entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::AwsAccessKey)
+        .expect("unpadded Bedrock");
+    assert_eq!(&unpadded[unpadded_hit.start..unpadded_hit.end], unpadded);
+
     let short_lived = token("bedrock-api-key-", "YmVkcm9jay5hbWF6b25hd3MuY29t");
     assert_entity_detected(&short_lived, EntityType::AwsAccessKey, 0.9);
 }

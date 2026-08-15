@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `GENERIC_SECRET` rejects SCREAMING_SNAKE and path-shaped values instead of
+  scoring them as alphanumeric. HTTP Basic auth requires canonical base64
+  (decode + re-encode), so unused padding bits are rejected. AGE keeps its
+  full labelled span. AWS Bedrock and Grafana Cloud tokens use a trailing
+  delimiter instead of `\\b` after `=`. Pack `entropy: generic` requires
+  capture group 1 at analyze time.
 - Gateway default pack path is `/app/patterns/compliance:/app/patterns/pii`.
   Noisy `credentials.yaml` rules are disabled; `optional/` and `quarantine/`
   directories are not auto-discovered. Removed `api_key` → `PRIVATE_KEY` alias.

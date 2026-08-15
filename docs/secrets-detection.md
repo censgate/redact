@@ -104,6 +104,6 @@ redact --format json list-entities
 
 ## Compiled-in named types (Phase 2)
 
-In addition to the Phase 1 prefixes: `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`, `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`, `HTTP_BASIC_AUTH` (hand-rolled base64 decode, canonical padding, `user:password` both non-empty). GitLab keeps `glpat-` length 20 and adds gitleaks-closed routable / `glcbt-` / `glagent-` / `gloas-` / `gldt-` / `glft-` / `glptt-` shapes. AWS Bedrock (`ABSK…` and the short-lived `bedrock-api-key-YmVk…` literal) is an `AWS_ACCESS_KEY` alternation.
+In addition to the Phase 1 prefixes: `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`, `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`, `HTTP_BASIC_AUTH` (hand-rolled base64 decode, canonical padding including unused bits, `user:password` both non-empty). GitLab keeps `glpat-` length 20 and adds gitleaks-closed routable / `glcbt-` / `glagent-` / `gloas-` / `gldt-` / `glft-` / `glptt-` shapes. AWS Bedrock (`ABSK…` and the short-lived `bedrock-api-key-YmVk…` literal) is an `AWS_ACCESS_KEY` alternation. Trailing `=` uses a delimiter class rather than `\\b`.
 
 Not compiled-in (pack or later): Azure AD `Q~` infix, GCP SA JSON, Teams webhooks, Discord, Datadog, Azure storage, Cloudflare global, generic-api-key, live API checks.

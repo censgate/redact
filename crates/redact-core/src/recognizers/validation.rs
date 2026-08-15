@@ -69,9 +69,48 @@ fn is_canonical_b64(token: &str) -> bool {
         return false;
     }
     let body_len = token.len() - pad;
-    token.as_bytes()[..body_len]
+    if !token.as_bytes()[..body_len]
         .iter()
         .all(|b| b.is_ascii_alphanumeric() || *b == b'+' || *b == b'/')
+    {
+        return false;
+    }
+    // Reject non-canonical unused padding bits (`dTpwYXN=` vs `dTpwYXM=`).
+    let Ok(bytes) = decode_base64(token) else {
+        return false;
+    };
+    encode_base64(&bytes) == token
+}
+
+fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut i = 0;
+    while i < bytes.len() {
+        let b0 = bytes[i];
+        let b1 = bytes.get(i + 1).copied();
+        let b2 = bytes.get(i + 2).copied();
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        match (b1, b2) {
+            (Some(b1), Some(b2)) => {
+                out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+                out.push(TABLE[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+                out.push(TABLE[(b2 & 0x3f) as usize] as char);
+            }
+            (Some(b1), None) => {
+                out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+                out.push(TABLE[((b1 & 0x0f) << 2) as usize] as char);
+                out.push('=');
+            }
+            (None, _) => {
+                out.push(TABLE[((b0 & 0x03) << 4) as usize] as char);
+                out.push('=');
+                out.push('=');
+            }
+        }
+        i += 3;
+    }
+    out
 }
 
 fn decode_base64(token: &str) -> Result<Vec<u8>, ()> {
@@ -517,5 +556,16 @@ mod tests {
         assert_eq!(validate_http_basic_auth("not-base64"), 0.0);
         // "::::" is valid base64 alphabet but decodes without a colon pair.
         assert_eq!(validate_http_basic_auth("QQ=="), 0.0);
+    }
+
+    #[test]
+    fn test_http_basic_auth_rejects_noncanonical_unused_bits() {
+        // "u:pas" encodes as dTpwYXM=; dTpwYXN= differs only in unused pad bits.
+        assert_eq!(validate_http_basic_auth("dTpwYXM="), 1.0);
+        assert_eq!(validate_http_basic_auth("dTpwYXN="), 0.0);
+        assert_eq!(
+            encode_base64(&decode_base64("dTpwYXM=").unwrap()),
+            "dTpwYXM="
+        );
     }
 }

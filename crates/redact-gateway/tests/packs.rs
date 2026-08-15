@@ -296,6 +296,23 @@ fn optional_providers_v1_loads_explicitly_and_stays_off_the_tree_walk() {
         recognizer.pattern_count()
     );
 
+    let grafana = format!("glc_{}", "A".repeat(40));
+    let grafana_hits = recognizer.analyze(&grafana, "en").expect("analyze");
+    let grafana_hit = grafana_hits
+        .iter()
+        .find(|h| matches!(h.entity_type, EntityType::Custom(ref n) if n == "GRAFANA_CLOUD_TOKEN"))
+        .expect("grafana prefix");
+    assert_eq!(&grafana[grafana_hit.start..grafana_hit.end], grafana);
+
+    let oversized = format!("glc_{}", "A".repeat(500));
+    let oversized_hits = recognizer.analyze(&oversized, "en").expect("analyze");
+    assert!(
+        oversized_hits.iter().all(|h| {
+            !matches!(h.entity_type, EntityType::Custom(ref n) if n == "GRAFANA_CLOUD_TOKEN")
+        }),
+        "grafana rule must not truncate a longer blob: {oversized_hits:?}"
+    );
+
     let shopify = format!("shpat_{}", "a".repeat(32));
     let hits = recognizer.analyze(&shopify, "en").expect("analyze");
     assert!(

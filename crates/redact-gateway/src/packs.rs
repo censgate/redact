@@ -587,7 +587,7 @@ impl Recognizer for PackRecognizer {
             }
             if pattern.entropy_generic {
                 for caps in pattern.regex.captures_iter(text) {
-                    let Some(matched) = caps.get(1).or_else(|| caps.get(0)) else {
+                    let Some(matched) = caps.get(1) else {
                         continue;
                     };
                     let lhs = lhs_from_prefix(&text[..matched.start()]);
@@ -621,7 +621,12 @@ impl Recognizer for PackRecognizer {
                 }
                 continue;
             }
-            for mat in pattern.regex.find_iter(text) {
+            for caps in pattern.regex.captures_iter(text) {
+                // Prefer group 1 when present so trailing delimiters used in
+                // place of lookaround (Grafana padded tokens) stay out of the span.
+                let Some(matched) = caps.get(1).or_else(|| caps.get(0)) else {
+                    continue;
+                };
                 let score = pattern.confidence;
                 if score < self.min_score {
                     continue;
@@ -629,8 +634,8 @@ impl Recognizer for PackRecognizer {
                 results.push(
                     RecognizerResult::new(
                         pattern.entity_type.clone(),
-                        mat.start(),
-                        mat.end(),
+                        matched.start(),
+                        matched.end(),
                         score,
                         self.name(),
                     )
@@ -1015,6 +1020,27 @@ patterns:
                 .iter()
                 .any(|h| matches!(h.entity_type, EntityType::Custom(ref n) if n == "SHOPIFY_ACCESS_TOKEN")),
             "named-prefix pack rules must not go through the generic scorer: {named_hits:?}"
+        );
+    }
+
+    #[test]
+    fn entropy_generic_analyze_requires_capture_group_1() {
+        let compiled = vec![CompiledPattern {
+            pack_name: "providers".into(),
+            pattern_id: "no_group".into(),
+            entity_type: EntityType::GenericSecret,
+            regex: Regex::new(r"(?i)api_key\s*[:=]\s*[A-Za-z0-9+/=_-]{20,128}").unwrap(),
+            confidence: 0.7,
+            entropy_generic: true,
+        }];
+        let recognizer = PackRecognizer::from_compiled(vec!["providers".into()], compiled);
+        let body = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+        let hits = recognizer
+            .analyze(&format!("api_key={body}"), "en")
+            .unwrap();
+        assert!(
+            hits.is_empty(),
+            "entropy:generic must not fall back to group 0: {hits:?}"
         );
     }
 

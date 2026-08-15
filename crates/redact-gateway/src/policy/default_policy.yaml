@@ -115,6 +115,13 @@ profiles:
       SHA256_HASH: { action: allow }
       SHA1_HASH: { action: allow }
       MD5_HASH: { action: allow }
+      HUGGINGFACE_TOKEN: { action: block }
+      DATABRICKS_TOKEN: { action: block }
+      DIGITALOCEAN_TOKEN: { action: block }
+      NOTION_API_KEY: { action: block }
+      PERPLEXITY_API_KEY: { action: block }
+      HTTP_BASIC_AUTH: { action: block }
+      GENERIC_SECRET: { action: block }
 
   # Credentials only: useful when prompts are already trusted but secrets leak.
   secrets_only:

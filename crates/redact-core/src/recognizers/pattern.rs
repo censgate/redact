@@ -44,7 +44,10 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
     },
     SecretPattern {
         entity_type: EntityType::AwsAccessKey,
-        regex: r"\bABSK[A-Za-z0-9+/]{109,269}={0,2}\b",
+        // Padding `=` is not a word character, so a trailing `\b` drops the
+        // pad and can emit a truncated token. Capture the full key; the
+        // trailing delimiter is not part of the span.
+        regex: r"\b(ABSK[A-Za-z0-9+/]{109,269}={0,2})(?:\s|$|[^A-Za-z0-9+/=])",
         score: 0.95,
     },
     SecretPattern {
@@ -716,7 +719,16 @@ impl Recognizer for PatternRecognizer {
         for (entity_type, patterns) in &self.patterns {
             for pattern in patterns {
                 for capture in pattern.regex.captures_iter(text) {
-                    if let Some(matched) = capture.get(1).or_else(|| capture.get(0)) {
+                    // Prefer group 1 only for patterns that capture a value-only
+                    // span (HTTP Basic credentials; padded AWS Bedrock keys).
+                    // PII patterns such as AGE also have a group 1 — using it
+                    // globally would shrink those spans to the digits alone.
+                    if let Some(matched) = match entity_type {
+                        EntityType::HttpBasicAuth | EntityType::AwsAccessKey => {
+                            capture.get(1).or_else(|| capture.get(0))
+                        }
+                        _ => capture.get(0),
+                    } {
                         let start = matched.start();
                         let end = matched.end();
                         let matched_text = matched.as_str();
@@ -763,6 +775,18 @@ impl Recognizer for PatternRecognizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_age_span_includes_label() {
+        let recognizer = PatternRecognizer::new();
+        let text = "age: 42";
+        let results = recognizer.analyze(text, "en").unwrap();
+        let age = results
+            .iter()
+            .find(|r| r.entity_type == EntityType::Age)
+            .expect("AGE");
+        assert_eq!(&text[age.start..age.end], "age: 42");
+    }
 
     #[test]
     fn test_email_detection() {

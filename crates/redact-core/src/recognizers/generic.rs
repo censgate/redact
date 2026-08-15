@@ -206,11 +206,6 @@ fn is_identifier_only(value: &str) -> bool {
             .all(|c| c.is_ascii_alphabetic() || matches!(c, '_' | '-' | '.'))
 }
 
-fn is_hash_shaped_hex(value: &str) -> bool {
-    let n = value.chars().count();
-    matches!(n, 32 | 40 | 64 | 128) && value.chars().all(|c| c.is_ascii_hexdigit())
-}
-
 fn looks_like_jwt(value: &str) -> bool {
     value.starts_with("eyJ") && value.matches('.').count() >= 2
 }
@@ -259,9 +254,6 @@ pub fn evaluate_generic_candidate(value: &str, lhs: &str, surrounding: &str) -> 
                 } else {
                     None
                 };
-            }
-            if is_hash_shaped_hex(value) && classify_lhs(lhs) == LhsClass::Digest {
-                return None;
             }
             score_entropy(value)
         }
@@ -443,6 +435,17 @@ mod tests {
         let text = format!("integrity={}", "a".repeat(64));
         let hits = rec.analyze(&text, "en").unwrap();
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn screaming_snake_assignment_is_not_a_generic_secret() {
+        let rec = GenericSecretRecognizer::new();
+        let text = "api_key=A1B2C3D4E5F6G7H8I9A_";
+        let hits = rec.analyze(text, "en").unwrap();
+        assert!(
+            hits.is_empty(),
+            "screaming-snake values must be rejected: {hits:?}"
+        );
     }
 
     #[test]

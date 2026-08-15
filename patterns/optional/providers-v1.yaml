@@ -99,7 +99,7 @@ patterns:
   - id: "opt_grafana_cloud_token"
     name: "Grafana Cloud API token"
     entity_type: "GRAFANA_CLOUD_TOKEN"
-    regex: '\bglc_[A-Za-z0-9+/]{32,400}={0,2}'
+    regex: '\b(glc_[A-Za-z0-9+/]{32,400}={0,2})(?:\s|$|[^A-Za-z0-9+/=])'
     confidence: 0.90
     enabled: true
 
