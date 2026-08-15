@@ -42,6 +42,11 @@ pub fn tablesample_percent(n_live_tup: u64, sample_rows: u32) -> f64 {
     (200.0 * f64::from(sample_rows) / n_live_tup as f64).clamp(1.0, 100.0)
 }
 
+/// Percent token written into `TABLESAMPLE SYSTEM (…)` (two decimal places).
+pub fn sql_tablesample_percent(n_live_tup: u64, sample_rows: u32) -> f64 {
+    (tablesample_percent(n_live_tup, sample_rows) * 100.0).round() / 100.0
+}
+
 async fn sample_column(
     pool: &PgPool,
     col: &ColumnMeta,
@@ -54,17 +59,25 @@ async fn sample_column(
     // When the table is no larger than the sample budget, LIMIT is enough.
     // TABLESAMPLE on a tiny relation still reads the same rows and can
     // return zero pages; a full-table random scan is not used either way.
-    let sql = if n > 0 && n <= u64::from(sample_rows) {
+    // Stale n_live_tup=0 (fresh replica) must not use TABLESAMPLE 1%.
+    let sql = if n <= u64::from(sample_rows) {
         format!("SELECT {column}::text FROM {table} LIMIT {limit}")
     } else {
-        let pct = (tablesample_percent(n, sample_rows) * 100.0).round() / 100.0;
+        let pct = sql_tablesample_percent(n, sample_rows);
         format!("SELECT {column}::text FROM {table} TABLESAMPLE SYSTEM ({pct}) LIMIT {limit}")
     };
 
-    let values: Vec<Option<String>> = sqlx::query_scalar(&sql)
+    let mut values: Vec<Option<String>> = sqlx::query_scalar(&sql)
         .fetch_all(pool)
         .await
         .map_err(ScanError::new)?;
+    if values.is_empty() && n > u64::from(sample_rows) {
+        let fallback = format!("SELECT {column}::text FROM {table} LIMIT {limit}");
+        values = sqlx::query_scalar(&fallback)
+            .fetch_all(pool)
+            .await
+            .map_err(ScanError::new)?;
+    }
     let sampled = values.len() as u64;
     if sampled == 0 {
         return Ok(None);
@@ -78,6 +91,12 @@ async fn sample_column(
             continue;
         }
         match_count += 1;
+        crate::report::record_sample(
+            &format!("{}.{}", col.schema, col.table),
+            &col.column,
+            None,
+            &v,
+        );
         for (ty, score) in hits {
             match &best {
                 Some((_, s)) if *s >= score => {}
@@ -110,5 +129,7 @@ mod tests {
         assert_eq!(tablesample_percent(0, 1000), 1.0);
         assert!((tablesample_percent(10_000, 1000) - 20.0).abs() < 1e-9);
         assert_eq!(tablesample_percent(100, 1000), 100.0);
+        assert!((sql_tablesample_percent(10_000, 1000) - 20.0).abs() < 1e-9);
+        assert!(sql_tablesample_percent(10_000, 1000) < 100.0);
     }
 }

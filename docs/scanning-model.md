@@ -58,9 +58,8 @@ nominated that type from the column name.
 findings. `content_hash` is SHA-256 of canonical JSON with that field
 omitted.
 
-`--out` always writes `ScanReport` JSON. `--format table` is for terminals
-and includes a rule-of-three note when a sample found nothing:
-“0 matches in 1,000 rows; prevalence above 0.3% is unlikely.”
+`--out` always writes `ScanReport` JSON. `--format table` is for terminals.
+A rule-of-three note is only appropriate when rows were actually sampled.
 
 `--report-url` optionally POSTs the same JSON to a caller-supplied
 endpoint (`Authorization: Bearer` when `--api-key` is set;

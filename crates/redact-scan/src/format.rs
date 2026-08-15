@@ -4,7 +4,6 @@
 
 //! Human-readable table output. Never prints sample values.
 
-use crate::bound::rule_of_three_message;
 use crate::report::ScanReport;
 
 /// Render a tab-separated table of findings.
@@ -16,10 +15,6 @@ pub fn render_table(report: &ScanReport) -> String {
     ));
     if report.findings.is_empty() {
         out.push_str("No findings.\n");
-        out.push_str(&rule_of_three_message(u64::from(
-            report.sampling.rows_per_column,
-        )));
-        out.push('\n');
         return out;
     }
     out.push_str("table\tcolumn\tpath\tentity\tlayer\tmatches\tsampled\tconfidence\tevidence\n");
@@ -71,7 +66,8 @@ mod tests {
             content_hash: String::new(),
         };
         let s = render_table(&report);
-        assert!(s.contains("0.3%"));
+        assert!(s.contains("No findings."));
+        assert!(!s.contains("0.3%"));
         assert!(!s.contains("user@"));
     }
 }

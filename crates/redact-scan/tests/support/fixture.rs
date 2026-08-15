@@ -44,7 +44,7 @@ impl Fixture {
         let iban = "GB82WEST12345698765432";
         let cc = "4111111111111111";
         let ip = "203.0.113.10";
-        let json = format!(r#"{{"customer":{{"email":"{email}"}}}}"#);
+        let json = format!(r#"{{"customer":{{"email":"{email}"}},"{email}":"note"}}"#);
         secret_values.extend([email.clone(), ssn.into(), iban.into(), cc.into(), ip.into()]);
 
         // Repeat a subset so ANALYZE fills most_common_vals.

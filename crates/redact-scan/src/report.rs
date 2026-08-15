@@ -5,6 +5,7 @@
 use chrono::{DateTime, Utc};
 use redact_core::EntityType;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use uuid::Uuid;
 
 use crate::canonical::content_hash;
@@ -120,6 +121,55 @@ pub struct DebugSamples {
     pub scan_id: Uuid,
     /// Operator note. Must not be merged into [`ScanReport`].
     pub notes: String,
+    /// Local previews. Never copied into [`ScanReport`].
+    pub samples: Vec<DebugSample>,
+}
+
+/// One local debug preview. Sidecar only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugSample {
+    /// Qualified table name.
+    pub table: String,
+    /// Column name.
+    pub column: String,
+    /// JSON path when the preview came from layer 2.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_path: Option<String>,
+    /// Truncated cell text. Sidecar only.
+    pub preview: String,
+}
+
+thread_local! {
+    static SAMPLE_SINK: RefCell<Option<Vec<DebugSample>>> = const { RefCell::new(None) };
+}
+
+/// Start collecting sidecar previews for `--include-samples`.
+pub fn enable_sample_sink() {
+    SAMPLE_SINK.with(|s| *s.borrow_mut() = Some(Vec::new()));
+}
+
+/// Record a sidecar preview. No-op unless [`enable_sample_sink`] was called.
+pub fn record_sample(table: &str, column: &str, json_path: Option<&str>, preview: &str) {
+    SAMPLE_SINK.with(|s| {
+        if let Some(buf) = s.borrow_mut().as_mut() {
+            if buf.len() >= 32 {
+                return;
+            }
+            let mut preview = preview.to_string();
+            preview.truncate(64);
+            buf.push(DebugSample {
+                table: table.into(),
+                column: column.into(),
+                json_path: json_path.map(str::to_string),
+                preview,
+            });
+        }
+    });
+}
+
+/// Take collected sidecar previews.
+pub fn take_samples() -> Vec<DebugSample> {
+    SAMPLE_SINK.with(|s| s.borrow_mut().take().unwrap_or_default())
 }
 
 #[cfg(test)]

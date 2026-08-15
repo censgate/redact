@@ -66,7 +66,7 @@ pub async fn l05_findings(
         if hits.is_empty() {
             continue;
         }
-        let sampled = hits.len() as u64;
+        let match_count = hits.len() as u64;
         let (entity_type, confidence) = hits
             .into_iter()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
@@ -77,8 +77,8 @@ pub async fn l05_findings(
             json_path: None,
             entity_type,
             layer: ScanLayer::Stats,
-            match_count: sampled,
-            sampled_rows: sampled,
+            match_count,
+            sampled_rows: 0,
             confidence,
             evidence_class: EvidenceClass::PgStats,
         });

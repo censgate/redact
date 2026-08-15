@@ -38,6 +38,9 @@ fn run() -> Result<i32, ScanError> {
         .init();
 
     let rt = tokio::runtime::Runtime::new().map_err(ScanError::new)?;
+    if cli.include_samples {
+        redact_scan::report::enable_sample_sink();
+    }
     let report = rt.block_on(run_scan(&cli))?;
     let json = serde_json::to_string_pretty(&report).map_err(ScanError::new)?;
     let rendered = match cli.format {
@@ -55,6 +58,7 @@ fn run() -> Result<i32, ScanError> {
         let samples = DebugSamples {
             scan_id: report.scan_id,
             notes: "local debug only; ScanReport contains no values".into(),
+            samples: redact_scan::report::take_samples(),
         };
         if let Some(path) = &cli.samples_out {
             std::fs::write(
@@ -75,7 +79,7 @@ fn run() -> Result<i32, ScanError> {
     }
 
     if let Some(spec) = &cli.fail_on {
-        if fail_on_matches(spec, &report.findings) {
+        if fail_on_matches(spec, &report.findings)? {
             return Ok(EXIT_FINDINGS);
         }
     }

@@ -52,35 +52,44 @@ pub fn detect_types(text: &str) -> Vec<(EntityType, f32)> {
 
 /// Detect only the listed entity types; never retain `RecognizerResult.text`.
 pub fn detect_types_filtered(text: &str, allowed: &[EntityType]) -> Vec<(EntityType, f32)> {
-    let engine = AnalyzerEngine::new();
-    let Ok(result) = engine.analyze_with_entities(text, allowed, Some("en")) else {
-        return Vec::new();
-    };
-    result
-        .detected_entities
-        .into_iter()
-        .map(|e| (e.entity_type, e.score))
-        .collect()
+    thread_local! {
+        static ENGINE: AnalyzerEngine = AnalyzerEngine::new();
+    }
+    ENGINE.with(|engine| {
+        let Ok(result) = engine.analyze_with_entities(text, allowed, Some("en")) else {
+            return Vec::new();
+        };
+        result
+            .detected_entities
+            .into_iter()
+            .map(|e| (e.entity_type, e.score))
+            .collect()
+    })
 }
 
-/// Parse a `--fail-on` entity token. `any` returns `None`.
-pub fn parse_entity_type(s: &str) -> Option<EntityType> {
+/// Parse `--fail-on`. `any` is `Ok(None)`. Unknown names are errors.
+pub fn parse_fail_on(s: &str) -> Result<Option<EntityType>, crate::error::ScanError> {
     let t = s.trim();
     if t.eq_ignore_ascii_case("any") {
-        return None;
+        return Ok(None);
     }
-    Some(EntityType::from(t.to_string()))
+    let ty = EntityType::from(t.to_string());
+    if matches!(ty, EntityType::Custom(_)) {
+        return Err(crate::error::ScanError::new(format!(
+            "unknown --fail-on entity type {t}"
+        )));
+    }
+    Ok(Some(ty))
 }
 
 /// True when `--fail-on` should exit 1.
-pub fn fail_on_matches(spec: &str, findings: &[crate::report::Finding]) -> bool {
-    if spec.eq_ignore_ascii_case("any") {
-        return !findings.is_empty();
-    }
-    let wanted = parse_entity_type(spec);
-    match wanted {
-        None => !findings.is_empty(),
-        Some(ty) => findings.iter().any(|f| f.entity_type == ty),
+pub fn fail_on_matches(
+    spec: &str,
+    findings: &[crate::report::Finding],
+) -> Result<bool, crate::error::ScanError> {
+    match parse_fail_on(spec)? {
+        None => Ok(!findings.is_empty()),
+        Some(ty) => Ok(findings.iter().any(|f| f.entity_type == ty)),
     }
 }
 
@@ -117,9 +126,10 @@ mod tests {
             confidence: 0.9,
             evidence_class: EvidenceClass::TableSample,
         };
-        assert!(fail_on_matches("any", std::slice::from_ref(&f)));
-        assert!(fail_on_matches("EMAIL_ADDRESS", std::slice::from_ref(&f)));
-        assert!(!fail_on_matches("US_SSN", std::slice::from_ref(&f)));
-        assert!(!fail_on_matches("any", &[]));
+        assert!(fail_on_matches("any", std::slice::from_ref(&f)).unwrap());
+        assert!(fail_on_matches("EMAIL_ADDRESS", std::slice::from_ref(&f)).unwrap());
+        assert!(!fail_on_matches("US_SSN", std::slice::from_ref(&f)).unwrap());
+        assert!(!fail_on_matches("any", &[]).unwrap());
+        assert!(parse_fail_on("EMAIL").is_err());
     }
 }

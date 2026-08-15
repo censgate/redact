@@ -35,14 +35,22 @@ pub fn name_entity(column: &str) -> Option<(EntityType, f32)> {
         ("ipv4", EntityType::IpAddress, 0.8),
         ("ipv6", EntityType::IpAddress, 0.8),
     ];
-    let mut ranked: Vec<_> = rules.iter().collect();
-    ranked.sort_by_key(|(needle, _, _)| std::cmp::Reverse(needle.len()));
-    for (needle, ty, conf) in ranked {
+    let mut best: Option<(EntityType, f32, usize)> = None;
+    for (needle, ty, conf) in rules {
         if n == *needle || n.contains(needle) {
-            return Some((ty.clone(), *conf));
+            let cand = (ty.clone(), *conf, needle.len());
+            let take = match &best {
+                None => true,
+                Some((_, bconf, blen)) => {
+                    *conf > *bconf || (*conf == *bconf && needle.len() > *blen)
+                }
+            };
+            if take {
+                best = Some(cand);
+            }
         }
     }
-    None
+    best.map(|(ty, conf, _)| (ty, conf))
 }
 
 /// True for `json` / `jsonb` (candidates only, not L0 findings).
@@ -100,5 +108,13 @@ mod tests {
         assert_eq!(ty, EntityType::IpAddress);
         let (ty, _) = name_entity("client_ipv4").unwrap();
         assert_eq!(ty, EntityType::IpAddress);
+    }
+
+    #[test]
+    fn email_address_is_email_not_location() {
+        let (ty, _) = name_entity("email_address").unwrap();
+        assert_eq!(ty, EntityType::EmailAddress);
+        let (ty, _) = name_entity("contact_email_addr").unwrap();
+        assert_eq!(ty, EntityType::EmailAddress);
     }
 }

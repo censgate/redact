@@ -49,7 +49,7 @@ async fn scan_json_column(
         .await
         .map_err(ScanError::new)?;
 
-    let mut by_path: BTreeMap<String, (u64, u64, redact_core::EntityType, f32)> = BTreeMap::new();
+    let mut by_path: BTreeMap<String, (u64, redact_core::EntityType, f32)> = BTreeMap::new();
     let mut sampled_docs = 0u64;
     for raw in docs.into_iter().flatten() {
         sampled_docs += 1;
@@ -63,16 +63,21 @@ async fn scan_json_column(
             if hits.is_empty() {
                 continue;
             }
+            crate::report::record_sample(
+                &format!("{}.{}", col.schema, col.table),
+                &col.column,
+                Some(&path),
+                &text,
+            );
             let (ty, score) = hits
                 .into_iter()
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .expect("hits non-empty");
-            let entry = by_path.entry(path).or_insert((0, 0, ty.clone(), score));
+            let entry = by_path.entry(path).or_insert((0, ty.clone(), score));
             entry.0 += 1;
-            entry.1 = sampled_docs;
-            if score > entry.3 {
-                entry.2 = ty;
-                entry.3 = score;
+            if score > entry.2 {
+                entry.1 = ty;
+                entry.2 = score;
             }
         }
     }
@@ -80,19 +85,37 @@ async fn scan_json_column(
     Ok(by_path
         .into_iter()
         .map(
-            |(json_path, (match_count, sampled_rows, entity_type, confidence))| Finding {
+            |(json_path, (match_count, entity_type, confidence))| Finding {
                 table: format!("{}.{}", col.schema, col.table),
                 column: col.column.clone(),
                 json_path: Some(json_path),
                 entity_type,
                 layer: ScanLayer::Json,
                 match_count,
-                sampled_rows,
+                sampled_rows: sampled_docs,
                 confidence,
                 evidence_class: EvidenceClass::JsonPath,
             },
         )
         .collect())
+}
+
+/// Replace a JSON object key that looks like a value with a type placeholder.
+pub fn sanitize_path_key(key: &str) -> String {
+    let hits = detect_types(key);
+    if let Some((ty, _)) = hits
+        .into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    {
+        return format!("{{{}}}", ty.as_str());
+    }
+    if key
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return key.to_string();
+    }
+    "{key}".to_string()
 }
 
 fn walk(value: &Value, path: &str, out: &mut Vec<(String, String)>) {
@@ -101,7 +124,7 @@ fn walk(value: &Value, path: &str, out: &mut Vec<(String, String)>) {
         Value::Number(n) => out.push((path.to_string(), n.to_string())),
         Value::Object(map) => {
             for (k, v) in map {
-                let child = format!("{path}.{k}");
+                let child = format!("{path}.{}", sanitize_path_key(k));
                 walk(v, &child, out);
             }
         }
@@ -126,5 +149,20 @@ mod tests {
         walk(&v, "$", &mut paths);
         assert!(paths.iter().any(|(p, _)| p == "$.customer.email"));
         assert!(paths.iter().any(|(p, _)| p == "$.n"));
+    }
+
+    #[test]
+    fn sanitizes_email_object_keys() {
+        let v = serde_json::json!({"alice@example.test": "x"});
+        let mut paths = Vec::new();
+        walk(&v, "$", &mut paths);
+        assert!(
+            paths.iter().all(|(p, _)| !p.contains("alice@")),
+            "{paths:?}"
+        );
+        assert!(
+            paths.iter().any(|(p, _)| p.contains("EMAIL_ADDRESS")),
+            "{paths:?}"
+        );
     }
 }

@@ -92,6 +92,13 @@ fn dedup_findings(mut findings: Vec<Finding>) -> Vec<Finding> {
             .then(a.column.cmp(&b.column))
             .then(a.json_path.cmp(&b.json_path))
             .then(a.entity_type.as_str().cmp(b.entity_type.as_str()))
+            .then(
+                b.layer
+                    .as_f64()
+                    .partial_cmp(&a.layer.as_f64())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(b.match_count.cmp(&a.match_count))
     });
     findings.dedup_by(|a, b| {
         a.table == b.table
@@ -131,7 +138,14 @@ mod tests {
             confidence: 0.8,
             evidence_class: EvidenceClass::NameHeuristic,
         };
-        let out = dedup_findings(vec![f.clone(), f]);
+        let mut stronger = f.clone();
+        stronger.layer = ScanLayer::Sample;
+        stronger.match_count = 4;
+        stronger.sampled_rows = 10;
+        stronger.evidence_class = EvidenceClass::TableSample;
+        let out = dedup_findings(vec![f, stronger.clone()]);
         assert_eq!(out.len(), 1);
+        assert_eq!(out[0].layer, ScanLayer::Sample);
+        assert_eq!(out[0].match_count, 4);
     }
 }

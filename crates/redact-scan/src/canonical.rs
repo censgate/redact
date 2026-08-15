@@ -12,7 +12,9 @@ use sha2::{Digest, Sha256};
 /// Object keys are sorted recursively; `serde_json` compact encoding is used
 /// (no insignificant whitespace). This is not a full RFC 8785 implementation.
 pub fn content_hash<T: Serialize>(report: &T) -> Result<String> {
-    let mut value = serde_json::to_value(report)?;
+    // Serialize first so f32 confidence matches the JSON written to --out.
+    let text = serde_json::to_string(report)?;
+    let mut value: Value = serde_json::from_str(&text)?;
     if let Value::Object(map) = &mut value {
         map.remove("content_hash");
     }
