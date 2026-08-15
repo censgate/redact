@@ -1,0 +1,8 @@
+# cargo-audit config for CI (`cargo audit` in .github/workflows/ci.yml).
+#
+# RUSTSEC-2023-0071 has no patched `rsa` release. The crate is in the lockfile
+# only because sqlx lists optional `sqlx-mysql`; redact-scan enables the
+# `postgres` feature and never talks to MySQL. Revisit if a crate starts
+# enabling sqlx `mysql` or otherwise decrypts RSA PKCS#1 v1.5.
+[advisories]
+ignore = ["RUSTSEC-2023-0071"]
