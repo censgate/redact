@@ -40,3 +40,9 @@ impl From<anyhow::Error> for ScanError {
         Self::new(err)
     }
 }
+
+impl From<sqlx::Error> for ScanError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::new(err)
+    }
+}

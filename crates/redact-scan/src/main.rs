@@ -6,7 +6,7 @@ use clap::Parser;
 use redact_scan::cli::Cli;
 use redact_scan::error::ScanError;
 use redact_scan::scrub::scrub;
-use redact_scan::EXIT_ERROR;
+use redact_scan::{run_scan, EXIT_CLEAN, EXIT_ERROR};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -26,14 +26,27 @@ fn run() -> Result<i32, ScanError> {
     if cli.url.is_none() {
         return Err(ScanError::new("--url is required"));
     }
-    Err(ScanError::new(
-        "scan execution is not implemented in this revision",
-    ))
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("redact_scan=info")),
+        )
+        .init();
+
+    let rt = tokio::runtime::Runtime::new().map_err(ScanError::new)?;
+    let report = rt.block_on(run_scan(&cli))?;
+    let json = serde_json::to_string_pretty(&report).map_err(ScanError::new)?;
+    if let Some(path) = &cli.out {
+        std::fs::write(path, &json).map_err(ScanError::new)?;
+    } else {
+        println!("{json}");
+    }
+    Ok(EXIT_CLEAN)
 }
 
 fn install_panic_hook() {
     std::panic::set_hook(Box::new(move |info| {
-        // Do not invoke the default hook: it would print the original payload.
         eprintln!("panic: {}", scrub(&info.to_string()));
     }));
 }
