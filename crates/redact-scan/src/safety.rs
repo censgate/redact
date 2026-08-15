@@ -103,17 +103,27 @@ async fn verify_readonly(safe: &SafePool, schema: &str) -> Result<(), ScanError>
         ));
     }
 
-    let column_writes: Vec<String> = sqlx::query_scalar(
+    let column_writes: i64 = sqlx::query_scalar(
         r#"
-        SELECT privilege_type
-        FROM information_schema.column_privileges
-        WHERE grantee = current_user
+        SELECT COUNT(*)::bigint
+        FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+          AND c.relkind IN ('r', 'p', 'v', 'm')
+          AND (
+            has_column_privilege(current_user, c.oid, a.attname, 'INSERT')
+            OR has_column_privilege(current_user, c.oid, a.attname, 'UPDATE')
+          )
         "#,
     )
-    .fetch_all(&safe.pool)
+    .bind(schema)
+    .fetch_one(&safe.pool)
     .await
     .map_err(|e| safe.scrub(e))?;
-    if has_write_grants(column_writes.iter().map(String::as_str)) {
+    if column_writes > 0 {
         return Err(ScanError::new(
             "refusing to run: role holds column write grants (INSERT/UPDATE)",
         ));
