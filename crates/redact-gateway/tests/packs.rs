@@ -278,3 +278,44 @@ patterns:
     );
     assert!(recognizer.is_none());
 }
+
+#[test]
+fn optional_providers_v1_loads_explicitly_and_stays_off_the_tree_walk() {
+    let pack = repo_patterns_dir().join("optional/providers-v1.yaml");
+    let (recognizer, report) = load_packs(&[pack]).expect("explicit optional pack");
+    let recognizer = recognizer.expect("providers-v1 should compile");
+    assert_eq!(report.packs_loaded, 1);
+    assert_eq!(
+        report.patterns_skipped, 0,
+        "providers-v1 must compile: {:?}",
+        report.errors
+    );
+    assert!(
+        recognizer.pattern_count() <= 25,
+        "optional pack must stay at ≤25 rules, got {}",
+        recognizer.pattern_count()
+    );
+
+    let shopify = format!("shpat_{}", "a".repeat(32));
+    let hits = recognizer.analyze(&shopify, "en").expect("analyze");
+    assert!(
+        hits.iter().any(
+            |h| matches!(h.entity_type, EntityType::Custom(ref n) if n == "SHOPIFY_ACCESS_TOKEN")
+        ),
+        "shopify prefix not detected: {hits:?}"
+    );
+
+    let (walked, walk_report) = load_packs(&[repo_patterns_dir()]).expect("tree walk");
+    assert_eq!(
+        walk_report.packs_loaded, 5,
+        "optional/ must not be discovered by walking patterns/: {walk_report:?}"
+    );
+    let walked = walked.expect("shipped packs");
+    let walked_hits = walked.analyze(&shopify, "en").expect("analyze");
+    assert!(
+        walked_hits.iter().all(|h| {
+            !matches!(h.entity_type, EntityType::Custom(ref n) if n == "SHOPIFY_ACCESS_TOKEN")
+        }),
+        "tree walk must not load providers-v1: {walked_hits:?}"
+    );
+}

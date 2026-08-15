@@ -52,7 +52,7 @@ pub mod types;
 // Re-export commonly used types
 pub use anonymizers::{AnonymizationStrategy, AnonymizerConfig, AnonymizerRegistry};
 pub use engine::AnalyzerEngine;
-pub use recognizers::{Recognizer, RecognizerRegistry};
+pub use recognizers::{evaluate_generic_candidate, Recognizer, RecognizerRegistry};
 pub use types::{
     AnalysisMetadata, AnalysisResult, AnonymizedResult, EntityType, RecognizerResult, Token,
 };
