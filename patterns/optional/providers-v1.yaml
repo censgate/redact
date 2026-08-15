@@ -10,7 +10,9 @@
 # 09242ce9c8a60d9b051fc2d166f9e849b88c7ac0.
 # Named-prefix rules do not use the generic entropy scorer.
 # The single `entropy: generic` rule must expose capture group 1 (the
-# value) and goes through evaluate_generic_candidate.
+# value) and goes through evaluate_generic_candidate. Rules that consume
+# a trailing delimiter set `value_group: 1`; other pack rules keep the
+# full match so structural groups (MAC, phone, IBAN) are not truncated.
 version: "1.0"
 name: "providers-v1"
 framework: "optional-providers"
@@ -100,6 +102,7 @@ patterns:
     name: "Grafana Cloud API token"
     entity_type: "GRAFANA_CLOUD_TOKEN"
     regex: '\b(glc_[A-Za-z0-9+/]{32,400}={0,2})(?:\s|$|[^A-Za-z0-9+/=])'
+    value_group: 1
     confidence: 0.90
     enabled: true
 

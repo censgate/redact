@@ -63,6 +63,15 @@ fn loads_all_shipped_repo_pattern_packs() {
         }),
         "aws key not detected: {hits:?}"
     );
+
+    let mac = "00:1B:44:11:3A:B7";
+    let mac_hits = recognizer.analyze(mac, "en").expect("analyze");
+    assert!(
+        mac_hits
+            .iter()
+            .any(|h| { h.entity_type == EntityType::MacAddress && &mac[h.start..h.end] == mac }),
+        "MAC pack rules must keep the full span, not group 1: {mac_hits:?}"
+    );
 }
 
 #[test]

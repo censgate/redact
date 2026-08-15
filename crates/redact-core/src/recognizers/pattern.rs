@@ -205,7 +205,7 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
         entity_type: EntityType::HttpBasicAuth,
         // The rust `regex` crate has no lookaround. Padding `=` is not a word
         // character, so a trailing `\b` misses canonically padded tokens.
-        regex: r"\bBasic\s+([A-Za-z0-9+/]+={0,2})(?:\s|$|[^A-Za-z0-9+/=])",
+        regex: r"(?i)\bBasic\s+([A-Za-z0-9+/]+={0,2})(?:\s|$|[^A-Za-z0-9+/=])",
         score: 0.95,
     },
 ];

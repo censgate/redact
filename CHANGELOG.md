@@ -37,7 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (decode + re-encode), so unused padding bits are rejected. AGE keeps its
   full labelled span. AWS Bedrock and Grafana Cloud tokens use a trailing
   delimiter instead of `\\b` after `=`. Pack `entropy: generic` requires
-  capture group 1 at analyze time.
+  capture group 1 at analyze time. Non-entropy pack rules keep the full
+  match unless they set `value_group`. HTTP Basic matching is
+  case-insensitive.
 - Gateway default pack path is `/app/patterns/compliance:/app/patterns/pii`.
   Noisy `credentials.yaml` rules are disabled; `optional/` and `quarantine/`
   directories are not auto-discovered. Removed `api_key` → `PRIVATE_KEY` alias.

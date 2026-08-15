@@ -761,6 +761,16 @@ fn test_http_basic_auth() {
         .find(|e| e.entity_type == EntityType::HttpBasicAuth)
         .expect("HTTP_BASIC_AUTH");
     assert_eq!(&text[hit.start..hit.end], cred);
+    assert_entity_detected(
+        &format!("Authorization: BASIC {cred}"),
+        EntityType::HttpBasicAuth,
+        0.9,
+    );
+    assert_entity_detected(
+        &format!("Authorization: basic {cred}"),
+        EntityType::HttpBasicAuth,
+        0.9,
+    );
 }
 
 #[test]
