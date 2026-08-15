@@ -305,12 +305,14 @@ before a pull request can be merged.
 - **Employer-owned work:** do not rely on an Individual CLA alone. An
   authorised corporate signer must email a completed Corporate CLA to
   support@censgate.com. A Corporate CLA does **not** replace each
-  developer's Individual CLA. Maintainers then record designated GitHub
-  usernames so the check can pass.
+  developer's Individual CLA. Maintainers then add designated GitHub
+  usernames to the `allowlist` in `.github/workflows/cla.yml` or to
+  `signatures/version1/cla.json` on the `cla-signatures` branch so the
+  check can pass.
 
 Individual signatures are GitHub usernames stored on this repository's
 `cla-signatures` branch (already public on the pull request). Signed
-Corporate CLA documents are kept privately and are not committed here.
+Corporate CLA documents are kept off this repository.
 
 The CLA is a license grant, not an assignment. It does not change the
 Apache-2.0 outbound license.

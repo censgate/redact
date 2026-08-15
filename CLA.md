@@ -1,7 +1,9 @@
 # Contributor License Agreement
 
-**Document version:** 1.0  
-**Effective date:** 14 August 2026  
+**Document version:** 1.0
+
+**Effective date:** 14 August 2026
+
 **Entity:** Censgate LLC, Sheridan, Wyoming, United States
 
 This agreement is a **license grant, not an assignment of copyright**. It does
@@ -46,9 +48,11 @@ signer must also complete the Corporate CLA and email it to
 **support@censgate.com**.
 
 A CCLA does **not** replace each developer's Individual CLA. After a CCLA
-is on file, maintainers record designated GitHub usernames privately (not
-the signed PDF) so the pull-request check can pass. Signed CCLA documents
-and Schedule A lists are kept off this public repository.
+is on file, maintainers add the designated GitHub usernames to the
+`allowlist` in `.github/workflows/cla.yml` or to
+`signatures/version1/cla.json` on the `cla-signatures` branch so the
+pull-request check can pass. Signed CCLA documents and Schedule A lists
+are kept off this public repository.
 
 ---
 
