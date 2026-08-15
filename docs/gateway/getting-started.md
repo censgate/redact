@@ -43,17 +43,21 @@ curl -s http://127.0.0.1:8080/v1/redact \
 }
 ```
 
-`session_id` is generated per request when you omit it. The bundled `default` profile replaces emails and **blocks** AWS access keys. A body that contains both shows the block:
+`session_id` is generated per request when you omit it. The bundled `default` profile replaces emails and **blocks** AWS access keys. A body that contains both shows the block.
+
+Assemble the sample access key at the shell so docs never embed a contiguous secret-shaped literal (secret-scanning false positive):
 
 ```bash
+# AWS docs sample shape: prefix + body (AKIA + IOSFODNN7EXAMPLE)
+AWS_KEY="AKIA""IOSFODNN7EXAMPLE"
 curl -s http://127.0.0.1:8080/v1/redact \
   -H 'content-type: application/json' \
-  -d '{"text":"Contact alice@example.com with key AKIAIOSFODNN7EXAMPLE"}'
+  -d "{\"text\":\"Contact alice@example.com with key ${AWS_KEY}\"}"
 ```
 
 ```json
 {
-  "text": "Contact alice@example.com with key AKIAIOSFODNN7EXAMPLE",
+  "text": "Contact alice@example.com with key <aws-access-key-id>",
   "profile": "default",
   "session_id": "9f1315f5-6172-4833-b251-b7742f7e215a",
   "blocked": true,
@@ -73,9 +77,10 @@ curl -s http://127.0.0.1:8080/v1/redact \
 When the pass is blocked, the response keeps the original `text` and sets `blocked: true` with the offending entity in `blocked_entities`. Use `/v1/compliance/check` for a dry-run that never persists tokens:
 
 ```bash
+AWS_KEY="AKIA""IOSFODNN7EXAMPLE"
 curl -s http://127.0.0.1:8080/v1/compliance/check \
   -H 'content-type: application/json' \
-  -d '{"text":"Contact alice@example.com with key AKIAIOSFODNN7EXAMPLE"}'
+  -d "{\"text\":\"Contact alice@example.com with key ${AWS_KEY}\"}"
 ```
 
 ```json

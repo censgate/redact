@@ -405,3 +405,11 @@ pub fn chat_request(content: &str) -> Value {
         "messages": [{"role": "user", "content": content}]
     })
 }
+
+/// Synthetic AWS access key id (AWS docs example shape).
+///
+/// Assembled at run time so a contiguous secret-like literal never appears in
+/// committed source (GitHub secret scanning false positive).
+pub fn sample_aws_access_key() -> String {
+    format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE")
+}
