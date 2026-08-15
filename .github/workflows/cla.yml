@@ -42,7 +42,7 @@ jobs:
           path-to-signatures: signatures/version1/cla.json
           path-to-document: https://github.com/censgate/redact/blob/main/CLA.md
           branch: cla-signatures
-          allowlist: dependabot[bot],github-actions[bot],cursoragent,cursor[bot],censgate-coder,censgate-qa
+          allowlist: dependabot[bot],github-actions[bot],cursoragent,cursor[bot],censgate-coder,censgate-qa,censgate-mark
           custom-notsigned-prcomment: |
             Thank you for your pull request. Each human contributor must sign
             the Individual Contributor License Agreement (CLA.md) before this
@@ -79,6 +79,7 @@ jobs:
               'cursor[bot]',
               'censgate-coder',
               'censgate-qa',
+              'censgate-mark',
             ]);
             const prNumber = context.payload.pull_request
               ? context.payload.pull_request.number
