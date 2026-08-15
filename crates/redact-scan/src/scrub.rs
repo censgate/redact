@@ -9,7 +9,7 @@ fn password_query() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r#"(?i)(password|passwd|pwd|secret)(?:=|%3[Dd])(?:'([^']*)'|"([^"]*)"|([^&\s]+))"#,
+            r#"(?i)(password|passwd|pwd|secret)(?:=|%3[Dd])(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"|([^&\s]+))"#,
         )
         .expect("password query regex")
     })
@@ -168,6 +168,9 @@ mod tests {
         let d = scrub(r#"libpq connect failed password="pa ss" dbname=prod"#);
         assert!(!d.contains("pa ss"), "{d}");
         assert!(d.contains("password=***"), "{d}");
+        let e = scrub(r"libpq connect failed: password='pa\' ss' dbname=prod");
+        assert!(!e.contains("ss'"), "{e}");
+        assert!(e.contains("password=***"), "{e}");
     }
 
     #[test]
