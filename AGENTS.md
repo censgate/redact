@@ -203,3 +203,29 @@ Before committing:
 - **Rust**: 1.93.0 (see `.tool-versions`)
 - **MSRV**: 1.88
 - **Python**: 3.8+ (for NER model export only)
+
+## Cursor Cloud specific instructions
+
+The VM snapshot already has Rust 1.93.0 (rustfmt + clippy), the native build deps
+(`pkg-config`, `cmake`, `g++`, `libssl-dev`), and the fixes below applied; the startup
+update script only refreshes the toolchain and pre-fetches crates (`cargo fetch --locked`).
+Standard build/lint/test/run commands live in **Development Commands** and **Testing
+Strategy** above — use those. Non-obvious caveats:
+
+- **C++ compiler must be GNU, not clang.** The workspace pulls in `tokenizers` →
+  `esaxx-rs`, whose C++ build fails under clang with `esaxx.cpp: 'cstdint' file not found`.
+  The environment sets `cc`/`c++` to GNU via `update-alternatives` (`gcc`/`g++`). If you
+  ever hit that error, either re-run `sudo update-alternatives --set c++ /usr/bin/g++`
+  and `sudo update-alternatives --set cc /usr/bin/gcc`, or build with `CC=gcc CXX=g++`.
+- **CLI has no root default-run binary.** Use `cargo run -p redact-cli -- <args>`
+  (e.g. `... -- analyze "test@example.com"`); `--bin redact-cli` fails from the workspace root.
+- **redact-api and redact-gateway both default to port 8080.** Run only one on 8080, or
+  override: `redact-api` uses `HOST`/`PORT`; `redact-gateway` uses `--host/--port`
+  (or `CENSGATE_HOST`/`CENSGATE_PORT`). Example dev split: API on 8080, gateway on 8081.
+- **Gateway dev tips.** Pass `OTEL_SDK_DISABLED=true` to silence telemetry-export noise.
+  Health: `GET /healthz`. Redaction: `POST /v1/redact` with a `profile`
+  (`strict` blocks, `reversible` tokenizes). `POST /v1/restore` returns `403` under the
+  default no-auth config — that is expected; it needs `auth.mode = api_key` or `oidc`.
+- **NER is optional.** `redact-ner` builds without a model (the `ort` crate uses
+  `load-dynamic`), but the NER e2e tests are `#[ignore]` and need an exported ONNX model
+  plus `libonnxruntime.so` (`ORT_DYLIB_PATH`) — not provisioned by default.
