@@ -6,6 +6,7 @@ members = [
     "crates/redact-wasm",
     "crates/redact-cli",
     "crates/redact-gateway",
+    "crates/redact-scan",
 ]
 resolver = "2"
 
@@ -72,6 +73,9 @@ criterion = "0.8"
 
 # HTTP client (for examples)
 reqwest = { version = "0.13", features = ["json"] }
+
+# Postgres (redact-scan only — never add to redact-core)
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "tls-rustls-ring", "chrono", "uuid", "macros"] }
 
 [profile.release]
 opt-level = 3
