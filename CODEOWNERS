@@ -1,7 +1,6 @@
 # Global code owners
 * @censgate/maintainers
 
-# Specific areas
-/pkg/ @censgate/maintainers
-/cmd/ @censgate/maintainers
+# Paths that exist in this repository
+/crates/ @censgate/maintainers
 /.github/ @censgate/maintainers

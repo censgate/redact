@@ -750,6 +750,7 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 We welcome contributions. Please read:
 
 - [CONTRIBUTING.md](/censgate/redact/blob/main/CONTRIBUTING.md) — build, test, and review process
+- [CODE_OF_CONDUCT.md](/censgate/redact/blob/main/CODE_OF_CONDUCT.md) — Contributor Covenant
 - [docs/PROJECT_SCOPE.md](/censgate/redact/blob/main/docs/PROJECT_SCOPE.md) — what this repository accepts
 - [CLA.md](/censgate/redact/blob/main/CLA.md) — Individual and Corporate Contributor License Agreement (required)
 

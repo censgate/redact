@@ -4,7 +4,11 @@ Thank you for your interest in contributing to Redact! This document provides gu
 
 Before you invest time, read [docs/PROJECT_SCOPE.md](docs/PROJECT_SCOPE.md). Pull requests that implement out-of-scope work will not be merged.
 
-Contributors are expected to be respectful in issues, discussions, and pull requests. A formal Code of Conduct file is not published in this repository.
+## Code of Conduct
+
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+By participating, you are expected to uphold it. Report unacceptable behavior to
+support@censgate.com.
 
 ## How Can I Contribute?
 
