@@ -74,3 +74,13 @@ jobs:
             echo "Waiting for crates.io index..."
             sleep 45
           done
+
+      - name: Verify crates.io versions
+        env:
+          CRATES: ${{ steps.resolve.outputs.packages }}
+        run: |
+          set -euo pipefail
+          TAG_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          export TAG_VERSION
+          echo "Asserting crates.io has ${TAG_VERSION} for: ${CRATES}"
+          ./scripts/ci/verify-crates.sh

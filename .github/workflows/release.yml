@@ -110,7 +110,7 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: build-binaries
+    needs: [build-binaries, verify-pushed-images]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -202,6 +202,11 @@ jobs:
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-gateway
         continue-on-error: true
 
+      - name: Verify crates.io versions
+        run: ./scripts/ci/verify-crates.sh
+        env:
+          TAG_VERSION: ${{ env.TAG_VERSION }}
+
   docker:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
@@ -234,7 +239,7 @@ jobs:
           TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      - name: Build API image for smoke test (amd64 only)
+      - name: Build API image for smoke test (amd64)
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -243,29 +248,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Smoke test API image
-        run: |
-          set -euo pipefail
-          docker run -d --name api-smoke -p 8080:8080 redact-api:smoke-test
-          cleanup() { docker rm -f api-smoke >/dev/null 2>&1 || true; }
-          trap cleanup EXIT
-          echo "Waiting for API to become healthy..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
-              echo "API ready after ${i}s"
-              curl -sf http://localhost:8080/healthz | python3 -m json.tool
-              exit 0
-            fi
-            if ! docker ps -q -f name=api-smoke | grep -q .; then
-              echo "ERROR: API container exited early"
-              docker logs api-smoke || true
-              exit 1
-            fi
-            sleep 1
-          done
-          echo "ERROR: API failed to become healthy within 30s"
-          docker logs api-smoke || true
-          exit 1
+      - name: Smoke test API image (amd64)
+        run: IMAGE=redact-api:smoke-test ./scripts/ci/smoke-api.sh
+
+      - name: Build API image for smoke test (arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: redact-api:smoke-test-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test API image (arm64)
+        run: IMAGE=redact-api:smoke-test-arm64 PLATFORM=linux/arm64 ./scripts/ci/smoke-api.sh
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -309,7 +306,7 @@ jobs:
           TAGS="${IMAGE}:full,${IMAGE}:${VER}-full,${IMAGE}:${MINOR}-full,${IMAGE}:${MAJOR}-full"
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      - name: Build full image for smoke test (amd64 only)
+      - name: Build full image for smoke test (amd64)
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -321,57 +318,24 @@ jobs:
           cache-from: type=gha,scope=ner-full
           cache-to: type=gha,mode=max,scope=ner-full
 
-      - name: Smoke test NER image
-        run: |
-          echo "--- Starting smoke test container ---"
-          docker run -d --name smoke-test -p 8080:8080 redact-full:smoke-test
-          echo "Waiting for server to start..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
-              echo "Server ready after ${i}s"
-              break
-            fi
-            if [ "$i" = "30" ]; then
-              echo "ERROR: Server failed to start within 30s"
-              docker logs smoke-test
-              exit 1
-            fi
-            sleep 1
-          done
+      - name: Smoke test NER image (amd64)
+        run: IMAGE=redact-full:smoke-test ./scripts/ci/smoke-ner.sh
 
-          echo "--- Health check ---"
-          HEALTH=$(curl -sf http://localhost:8080/healthz)
-          echo "$HEALTH" | python3 -m json.tool
-          RECOGNIZERS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('recognizers',0))")
-          if [ "$RECOGNIZERS" -lt 2 ]; then
-            echo "ERROR: Expected at least 2 recognizers (pattern + NER), got $RECOGNIZERS"
-            docker rm -f smoke-test
-            exit 1
-          fi
-          echo "OK: $RECOGNIZERS recognizers"
+      - name: Build full image for smoke test (arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.ner
+          platforms: linux/arm64
+          load: true
+          tags: redact-full:smoke-test-arm64
+          build-args: |
+            NER_BASE=ghcr.io/${{ github.repository }}-ner-base:v2
+          cache-from: type=gha,scope=ner-full
+          cache-to: type=gha,mode=max,scope=ner-full
 
-          echo "--- NER entity detection ---"
-          RESULT=$(curl -sf http://localhost:8080/api/v1/analyze \
-            -H 'Content-Type: application/json' \
-            -d '{"text": "John Smith works at Microsoft in Seattle"}')
-          echo "$RESULT" | python3 -m json.tool
-          NER_FOUND=$(echo "$RESULT" | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          results = data.get('results', [])
-          types = {e['entity_type'] for e in results}
-          ner_types = types & {'PERSON', 'ORGANIZATION', 'LOCATION'}
-          print(len(ner_types))
-          ")
-          if [ "$NER_FOUND" -lt 2 ]; then
-            echo "ERROR: Expected at least 2 NER entity types (PERSON/ORG/LOC), found $NER_FOUND"
-            docker rm -f smoke-test
-            exit 1
-          fi
-          echo "OK: $NER_FOUND NER entity types detected"
-
-          docker rm -f smoke-test
-          echo "--- Smoke test passed ---"
+      - name: Smoke test NER image (arm64)
+        run: IMAGE=redact-full:smoke-test-arm64 PLATFORM=linux/arm64 ./scripts/ci/smoke-ner.sh
 
       - name: Build and push full image (pattern + ONNX NER)
         uses: docker/build-push-action@v7
@@ -420,7 +384,7 @@ jobs:
           TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      - name: Build gateway image for smoke test (amd64 only)
+      - name: Build gateway image for smoke test (amd64)
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -430,8 +394,22 @@ jobs:
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
 
-      - name: Smoke test gateway image
-        run: docker run --rm redact-gateway:smoke-test --version
+      - name: Smoke test gateway image (amd64)
+        run: IMAGE=redact-gateway:smoke-test ./scripts/ci/smoke-gateway.sh
+
+      - name: Build gateway image for smoke test (arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.gateway
+          platforms: linux/arm64
+          load: true
+          tags: redact-gateway:smoke-test-arm64
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
+
+      - name: Smoke test gateway image (arm64)
+        run: IMAGE=redact-gateway:smoke-test-arm64 PLATFORM=linux/arm64 ./scripts/ci/smoke-gateway.sh
 
       - name: Build and push gateway image
         uses: docker/build-push-action@v7
@@ -443,3 +421,230 @@ jobs:
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
           platforms: linux/amd64,linux/arm64
+
+  # Pull the published multi-arch manifest by digest and smoke both
+  # architectures. This is the only test that asserts the artifact a stranger
+  # receives — load:true and push:true are separate buildx invocations.
+  verify-pushed-images:
+    name: Verify pushed ${{ matrix.family }} (${{ matrix.platform }})
+    needs: [docker, docker-full, docker-gateway]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        family: [api, full, gateway]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.VERSION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image family
+        id: image
+        run: |
+          set -euo pipefail
+          VER="${VERSION#v}"
+          MAJOR="${VER%%.*}"
+          MINOR="${VER%.*}"
+          REPO="ghcr.io/${{ github.repository }}"
+          case "${{ matrix.family }}" in
+            api)
+              echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+              echo "tags=${VER},${MINOR},${MAJOR},latest" >> "$GITHUB_OUTPUT"
+              echo "smoke=api" >> "$GITHUB_OUTPUT"
+              ;;
+            full)
+              echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+              echo "tags=${VER}-full,${MINOR}-full,${MAJOR}-full,full" >> "$GITHUB_OUTPUT"
+              echo "smoke=ner" >> "$GITHUB_OUTPUT"
+              ;;
+            gateway)
+              echo "repo=${REPO}-gateway" >> "$GITHUB_OUTPUT"
+              echo "tags=${VER},${MINOR},${MAJOR},latest" >> "$GITHUB_OUTPUT"
+              echo "smoke=gateway" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unknown family ${{ matrix.family }}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Assert tags share one digest
+        id: digest
+        run: |
+          set -euo pipefail
+          DIGEST="$(./scripts/ci/verify-image-digest.sh "${{ steps.image.outputs.repo }}" "${{ steps.image.outputs.tags }}")"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${{ steps.image.outputs.repo }}@${DIGEST}"
+
+      - name: Pull by digest
+        run: |
+          docker pull --platform ${{ matrix.platform }} \
+            "${{ steps.image.outputs.repo }}@${{ steps.digest.outputs.digest }}"
+
+      - name: Smoke pulled image
+        env:
+          IMAGE: ${{ steps.image.outputs.repo }}@${{ steps.digest.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          case "${{ steps.image.outputs.smoke }}" in
+            api) ./scripts/ci/smoke-api.sh ;;
+            ner) ./scripts/ci/smoke-ner.sh ;;
+            gateway) ./scripts/ci/smoke-gateway.sh ;;
+            *) echo "unknown smoke ${{ steps.image.outputs.smoke }}" >&2; exit 1 ;;
+          esac
+
+  # Consume published artifacts the way a stranger does: no repo checkout.
+  stranger-path:
+    name: Consume as a stranger
+    needs: [verify-pushed-images, publish-crates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          VER="${VERSION#v}"
+          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: README quickstart in a clean Rust container
+        env:
+          TAG_VERSION: ${{ steps.ver.outputs.ver }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e TAG_VERSION="${TAG_VERSION}" \
+            rust:1.93-bookworm bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends curl
+              cargo install redact-cli
+              redact --version
+              redact --version | grep -F "${TAG_VERSION}"
+              cargo install redact-gateway
+              export OTEL_SDK_DISABLED=true
+              redact-gateway --host 127.0.0.1 &
+              gw_pid=$!
+              cleanup() { kill "${gw_pid}" >/dev/null 2>&1 || true; }
+              trap cleanup EXIT
+              echo "Waiting for gateway /healthz..."
+              for i in $(seq 1 60); do
+                if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+                  echo "Gateway ready after ${i}s"
+                  break
+                fi
+                if ! kill -0 "${gw_pid}" 2>/dev/null; then
+                  echo "ERROR: redact-gateway exited early" >&2
+                  exit 1
+                fi
+                if [ "${i}" = "60" ]; then
+                  echo "ERROR: gateway not ready within 60s" >&2
+                  exit 1
+                fi
+                sleep 1
+              done
+              BODY="$(curl -sS http://127.0.0.1:8080/v1/redact \
+                -H "content-type: application/json" \
+                -d "{\"text\":\"Email me at alice@example.com\"}")"
+              echo "${BODY}"
+              echo "${BODY}" | grep -q "\[EMAIL_ADDRESS\]"
+              if echo "${BODY}" | grep -q "alice@example.com"; then
+                echo "ERROR: plaintext email still present" >&2
+                exit 1
+              fi
+              echo "OK: README quickstart redacted the sample email"
+            '
+
+      - name: Pull and exercise published gateway image
+        env:
+          TAG_VERSION: ${{ steps.ver.outputs.ver }}
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}-gateway:${TAG_VERSION}"
+          docker pull "${IMAGE}"
+          NAME="stranger-gw"
+          docker run -d --name "${NAME}" -p 8080:8080 -e OTEL_SDK_DISABLED=true "${IMAGE}"
+          cleanup() { docker rm -f "${NAME}" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          echo "Waiting for published gateway /healthz..."
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              echo "Gateway ready after ${i}s"
+              break
+            fi
+            if ! docker ps -q -f "name=^/${NAME}$" | grep -q .; then
+              echo "ERROR: container exited early" >&2
+              docker logs "${NAME}" >&2 || true
+              exit 1
+            fi
+            if [ "${i}" = "30" ]; then
+              echo "ERROR: gateway not ready within 30s" >&2
+              docker logs "${NAME}" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          EMAIL_BODY="$(curl -sf http://127.0.0.1:8080/v1/redact \
+            -H "content-type: application/json" \
+            -d "{\"text\":\"Email me at alice@example.com\"}")"
+          echo "${EMAIL_BODY}" | python3 -m json.tool
+          echo "${EMAIL_BODY}" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          text = data.get('text', '')
+          if data.get('blocked') is True:
+              raise SystemExit('ERROR: email-only request was blocked')
+          if 'alice@example.com' in text:
+              raise SystemExit('ERROR: plaintext email still present')
+          if '[EMAIL_ADDRESS]' not in text:
+              raise SystemExit('ERROR: expected [EMAIL_ADDRESS] placeholder')
+          print('OK: email replaced')
+          "
+
+          AWS_KEY="AKIA""IOSFODNN7EXAMPLE"
+          COMBO_BODY="$(curl -sf http://127.0.0.1:8080/v1/redact \
+            -H "content-type: application/json" \
+            -d "{\"text\":\"Contact alice@example.com with key ${AWS_KEY}\"}")"
+          echo "${COMBO_BODY}" | python3 -m json.tool
+          echo "${COMBO_BODY}" | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          if data.get('blocked') is not True:
+              raise SystemExit('ERROR: expected blocked=true for AWS access key')
+          blocked = data.get('outcome', {}).get('blocked_entities') or []
+          if 'AWS_ACCESS_KEY' not in blocked:
+              raise SystemExit('ERROR: expected AWS_ACCESS_KEY in blocked_entities')
+          email_replace = (
+              data.get('outcome', {})
+              .get('entity_action_counts', {})
+              .get('EMAIL_ADDRESS', {})
+              .get('replace', 0)
+          )
+          if email_replace < 1:
+              raise SystemExit('ERROR: expected EMAIL_ADDRESS replace in outcome')
+          print('OK: AWS key blocked, email counted as replace')
+          "
+          echo "OK: stranger pulled ${IMAGE} and it redacts"

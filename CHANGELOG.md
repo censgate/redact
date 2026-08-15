@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Release: GitHub Release publication waits for all three image jobs and a
+  post-push digest smoke on `linux/amd64` and `linux/arm64` (the load-then-push
+  split is what let #114 ship).
+- Release: gateway image smoke asserts `/v1/redact` (email replace + AWS key
+  block), not only `--version`.
+- Release: crates.io publish is checked against the index after the
+  `continue-on-error` publish steps.
+- Release: a no-checkout stranger-path job installs from crates.io and pulls
+  the published gateway image the way a consumer would.
+
 ## [0.9.1] - 2026-08-08
 
 ### Fixed
