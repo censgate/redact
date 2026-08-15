@@ -109,6 +109,10 @@ pub fn sanitize_path_key(key: &str) -> String {
     {
         return format!("{{{}}}", ty.as_str());
     }
+    let digits = key.chars().filter(|c| c.is_ascii_digit()).count();
+    if digits >= 7 {
+        return "{key}".to_string();
+    }
     if key
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')

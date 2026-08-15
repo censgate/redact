@@ -142,6 +142,9 @@ impl Cli {
                 "--include-samples with --format json requires --samples-out"
             ));
         }
+        if let Some(spec) = &self.fail_on {
+            crate::detect::parse_fail_on(spec).map_err(|e| anyhow!("{e}"))?;
+        }
         Ok(())
     }
 }

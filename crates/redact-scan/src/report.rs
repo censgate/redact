@@ -155,8 +155,7 @@ pub fn record_sample(table: &str, column: &str, json_path: Option<&str>, preview
             if buf.len() >= 32 {
                 return;
             }
-            let mut preview = preview.to_string();
-            preview.truncate(64);
+            let preview: String = preview.chars().take(64).collect();
             buf.push(DebugSample {
                 table: table.into(),
                 column: column.into(),
