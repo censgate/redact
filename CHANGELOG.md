@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   layers 0 / 0.5 / 1 / 2 (catalog, `pg_stats`, bounded `TABLESAMPLE`,
   JSON paths). Optional `--report-url` POSTs the report JSON; `--fail-on`
   exits 1 on matching findings. Reports contain locations and counts
-  only — never sample values.
+  only — never sample values. See `docs/scanning-model.md`.
 
 ## [0.9.1] - 2026-08-08
 
