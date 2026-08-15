@@ -235,7 +235,7 @@ jobs:
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build API image for smoke test (amd64 only)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -268,7 +268,7 @@ jobs:
           exit 1
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
@@ -310,7 +310,7 @@ jobs:
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build full image for smoke test (amd64 only)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.ner
@@ -374,7 +374,7 @@ jobs:
           echo "--- Smoke test passed ---"
 
       - name: Build and push full image (pattern + ONNX NER)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.ner
@@ -421,7 +421,7 @@ jobs:
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
       - name: Build gateway image for smoke test (amd64 only)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.gateway
@@ -434,7 +434,7 @@ jobs:
         run: docker run --rm redact-gateway:smoke-test --version
 
       - name: Build and push gateway image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.gateway
