@@ -34,21 +34,35 @@ async fn start_postgres() -> (
     String,
     String,
 ) {
-    let container = Postgres::default()
-        .with_tag("16-alpine")
-        .with_cmd([
-            "postgres",
-            "-c",
-            "shared_preload_libraries=pg_stat_statements",
-        ])
-        .start()
-        .await
-        .expect("start postgres");
-    let host = container.get_host().await.expect("host").to_string();
-    let port = container.get_host_port_ipv4(5432).await.expect("port");
-    let admin = format!("postgres://postgres:postgres@{host}:{port}/postgres");
-    let scanner = format!("postgres://scanner:scan-pass-not-super@{host}:{port}/postgres");
-    (container, admin, scanner)
+    // Hub pulls flake with "bytes remaining on stream"; retry before failing CI.
+    let mut last_err = None;
+    for attempt in 1..=5u32 {
+        match Postgres::default()
+            .with_tag("16-alpine")
+            .with_cmd([
+                "postgres",
+                "-c",
+                "shared_preload_libraries=pg_stat_statements",
+            ])
+            .start()
+            .await
+        {
+            Ok(container) => {
+                let host = container.get_host().await.expect("host").to_string();
+                let port = container.get_host_port_ipv4(5432).await.expect("port");
+                let admin = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+                let scanner =
+                    format!("postgres://scanner:scan-pass-not-super@{host}:{port}/postgres");
+                return (container, admin, scanner);
+            }
+            Err(err) => {
+                eprintln!("start postgres attempt {attempt}/5 failed: {err}");
+                last_err = Some(err);
+                tokio::time::sleep(Duration::from_secs(u64::from(attempt))).await;
+            }
+        }
+    }
+    panic!("start postgres: {last_err:?}");
 }
 
 async fn admin_pool(url: &str) -> sqlx::PgPool {

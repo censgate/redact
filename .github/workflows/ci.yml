@@ -252,6 +252,19 @@ jobs:
           cache-on-failure: true
           key: redact-scan-integration
 
+      - name: Pre-pull Postgres test image
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if docker pull postgres:16-alpine; then
+              exit 0
+            fi
+            echo "docker pull failed (attempt ${i}), retrying..."
+            sleep $((i * 2))
+          done
+          echo "ERROR: could not pull postgres:16-alpine" >&2
+          exit 1
+
       - name: Run gated Postgres tests
         env:
           REDACT_SCAN_INTEGRATION: "1"
