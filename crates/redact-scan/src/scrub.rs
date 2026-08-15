@@ -8,8 +8,10 @@ use std::sync::OnceLock;
 fn password_query() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)(password|passwd|pwd|secret)(?:=|%3[Dd])([^&\s]+)")
-            .expect("password query regex")
+        Regex::new(
+            r#"(?i)(password|passwd|pwd|secret)(?:=|%3[Dd])(?:'([^']*)'|"([^"]*)"|([^&\s]+))"#,
+        )
+        .expect("password query regex")
     })
 }
 
@@ -156,6 +158,16 @@ mod tests {
         let s = scrub("error password=hunter2 extra");
         assert!(!s.contains("hunter2"));
         assert!(s.contains("password=***"));
+    }
+
+    #[test]
+    fn scrubs_quoted_libpq_password() {
+        let s = scrub("libpq connect failed: host=db user=app password='pa ss' dbname=prod");
+        assert!(!s.contains("pa ss"), "{s}");
+        assert!(s.contains("password=***"), "{s}");
+        let d = scrub(r#"libpq connect failed password="pa ss" dbname=prod"#);
+        assert!(!d.contains("pa ss"), "{d}");
+        assert!(d.contains("password=***"), "{d}");
     }
 
     #[test]
