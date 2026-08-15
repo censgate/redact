@@ -245,6 +245,12 @@ fn parse_one_entity_type(label: &str) -> Result<EntityType> {
         "TelegramBotToken" => Ok(EntityType::TelegramBotToken),
         "HashicorpVaultToken" => Ok(EntityType::HashicorpVaultToken),
         "DatabaseConnectionString" => Ok(EntityType::DatabaseConnectionString),
+        "HuggingFaceToken" => Ok(EntityType::HuggingFaceToken),
+        "DatabricksToken" => Ok(EntityType::DatabricksToken),
+        "DigitalOceanToken" => Ok(EntityType::DigitalOceanToken),
+        "NotionApiKey" => Ok(EntityType::NotionApiKey),
+        "PerplexityApiKey" => Ok(EntityType::PerplexityApiKey),
+        "HttpBasicAuth" => Ok(EntityType::HttpBasicAuth),
         "GenericSecret" => Ok(EntityType::GenericSecret),
         _ => Err(anyhow::anyhow!(
             "Invalid entity type: {}. See --help for valid types",

@@ -272,6 +272,9 @@ patterns:
     .unwrap();
 
     let (recognizer, report) = load_packs(&[tmp.path().to_path_buf()]).unwrap();
-    assert_eq!(report.packs_loaded, 0, "skipped dirs must not load: {report:?}");
+    assert_eq!(
+        report.packs_loaded, 0,
+        "skipped dirs must not load: {report:?}"
+    );
     assert!(recognizer.is_none());
 }

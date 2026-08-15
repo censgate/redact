@@ -87,6 +87,12 @@ pub enum EntityType {
     TelegramBotToken,
     HashicorpVaultToken,
     DatabaseConnectionString,
+    HuggingFaceToken,
+    DatabricksToken,
+    DigitalOceanToken,
+    NotionApiKey,
+    PerplexityApiKey,
+    HttpBasicAuth,
     GenericSecret,
 
     // Generic
@@ -155,6 +161,12 @@ impl EntityType {
             EntityType::TelegramBotToken => "TELEGRAM_BOT_TOKEN",
             EntityType::HashicorpVaultToken => "HASHICORP_VAULT_TOKEN",
             EntityType::DatabaseConnectionString => "DATABASE_CONNECTION_STRING",
+            EntityType::HuggingFaceToken => "HUGGINGFACE_TOKEN",
+            EntityType::DatabricksToken => "DATABRICKS_TOKEN",
+            EntityType::DigitalOceanToken => "DIGITALOCEAN_TOKEN",
+            EntityType::NotionApiKey => "NOTION_API_KEY",
+            EntityType::PerplexityApiKey => "PERPLEXITY_API_KEY",
+            EntityType::HttpBasicAuth => "HTTP_BASIC_AUTH",
             EntityType::GenericSecret => "GENERIC_SECRET",
             EntityType::Custom(name) => name,
         }
@@ -194,6 +206,12 @@ impl EntityType {
                 | EntityType::TelegramBotToken
                 | EntityType::HashicorpVaultToken
                 | EntityType::DatabaseConnectionString
+                | EntityType::HuggingFaceToken
+                | EntityType::DatabricksToken
+                | EntityType::DigitalOceanToken
+                | EntityType::NotionApiKey
+                | EntityType::PerplexityApiKey
+                | EntityType::HttpBasicAuth
                 | EntityType::GenericSecret
         )
     }
@@ -220,6 +238,12 @@ impl EntityType {
                 | EntityType::TelegramBotToken
                 | EntityType::HashicorpVaultToken
                 | EntityType::DatabaseConnectionString
+                | EntityType::HuggingFaceToken
+                | EntityType::DatabricksToken
+                | EntityType::DigitalOceanToken
+                | EntityType::NotionApiKey
+                | EntityType::PerplexityApiKey
+                | EntityType::HttpBasicAuth
         )
     }
 
@@ -305,6 +329,12 @@ impl EntityType {
             EntityType::TelegramBotToken => 100,
             EntityType::HashicorpVaultToken => 100,
             EntityType::DatabaseConnectionString => 95,
+            EntityType::HuggingFaceToken => 100,
+            EntityType::DatabricksToken => 100,
+            EntityType::DigitalOceanToken => 100,
+            EntityType::NotionApiKey => 100,
+            EntityType::PerplexityApiKey => 100,
+            EntityType::HttpBasicAuth => 100,
             EntityType::GenericSecret => 35,
 
             // Custom types default to medium specificity
@@ -460,6 +490,12 @@ impl From<String> for EntityType {
             "TELEGRAM_BOT_TOKEN" => EntityType::TelegramBotToken,
             "HASHICORP_VAULT_TOKEN" => EntityType::HashicorpVaultToken,
             "DATABASE_CONNECTION_STRING" => EntityType::DatabaseConnectionString,
+            "HUGGINGFACE_TOKEN" => EntityType::HuggingFaceToken,
+            "DATABRICKS_TOKEN" => EntityType::DatabricksToken,
+            "DIGITALOCEAN_TOKEN" => EntityType::DigitalOceanToken,
+            "NOTION_API_KEY" => EntityType::NotionApiKey,
+            "PERPLEXITY_API_KEY" => EntityType::PerplexityApiKey,
+            "HTTP_BASIC_AUTH" => EntityType::HttpBasicAuth,
             "GENERIC_SECRET" => EntityType::GenericSecret,
             _ => EntityType::Custom(s),
         }
@@ -556,6 +592,12 @@ mod tests {
             EntityType::TelegramBotToken,
             EntityType::HashicorpVaultToken,
             EntityType::DatabaseConnectionString,
+            EntityType::HuggingFaceToken,
+            EntityType::DatabricksToken,
+            EntityType::DigitalOceanToken,
+            EntityType::NotionApiKey,
+            EntityType::PerplexityApiKey,
+            EntityType::HttpBasicAuth,
             EntityType::GenericSecret,
         ]
     }

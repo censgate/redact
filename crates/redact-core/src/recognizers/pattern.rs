@@ -43,6 +43,16 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
         score: 0.95,
     },
     SecretPattern {
+        entity_type: EntityType::AwsAccessKey,
+        regex: r"\bABSK[A-Za-z0-9+/]{109,269}={0,2}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::AwsAccessKey,
+        regex: r"\bbedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29t\b",
+        score: 0.95,
+    },
+    SecretPattern {
         entity_type: EntityType::GithubToken,
         regex: r"\b(?:gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59})\b",
         score: 0.95,
@@ -50,6 +60,41 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
     SecretPattern {
         entity_type: EntityType::GitlabToken,
         regex: r"\bglpat-[A-Za-z0-9_-]{20}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bglpat-[0-9a-zA-Z_-]{27,300}\.[0-9a-z]{2}[0-9a-z]{7}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bglcbt-[0-9a-zA-Z]{1,5}_[0-9a-zA-Z_-]{20}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bglagent-[A-Za-z0-9_-]{50}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bgloas-[A-Za-z0-9_-]{64}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bgldt-[A-Za-z0-9_-]{20}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bglft-[A-Za-z0-9_-]{20}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::GitlabToken,
+        regex: r"\bglptt-[0-9a-fA-F]{40}\b",
         score: 0.95,
     },
     SecretPattern {
@@ -127,6 +172,38 @@ const SECRET_PATTERNS: &[SecretPattern] = &[
         // query parameters dangling after the placeholder.
         regex: r"\b(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|amqp|mssql)://[^:@/\s]+:[^@/\s]+@[^\s/]+(?:/[^\s?#]*)?(?:\?[^\s#]*)?",
         score: 0.90,
+    },
+    SecretPattern {
+        entity_type: EntityType::HuggingFaceToken,
+        regex: r"\b(?:hf_|api_org_)[A-Za-z]{34}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::DatabricksToken,
+        regex: r"\bdapi[0-9a-fA-F]{32}(?:-\d)?\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::DigitalOceanToken,
+        regex: r"\bdo[por]_v1_[0-9a-fA-F]{64}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::NotionApiKey,
+        regex: r"\bntn_[0-9]{11}[A-Za-z0-9]{35}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::PerplexityApiKey,
+        regex: r"\bpplx-[A-Za-z0-9]{48}\b",
+        score: 0.95,
+    },
+    SecretPattern {
+        entity_type: EntityType::HttpBasicAuth,
+        // The rust `regex` crate has no lookaround. Padding `=` is not a word
+        // character, so a trailing `\b` misses canonically padded tokens.
+        regex: r"\bBasic\s+([A-Za-z0-9+/]+={0,2})(?:\s|$|[^A-Za-z0-9+/=])",
+        score: 0.95,
     },
 ];
 
@@ -510,8 +587,16 @@ impl PatternRecognizer {
         );
 
         // Secrets and credentials - loaded from the flat data table above.
+        // Panic on compile failure: `let _ = add_pattern` previously swallowed
+        // invalid regexes (the rust `regex` crate has no lookaround).
         for p in SECRET_PATTERNS {
-            let _ = self.add_pattern(p.entity_type.clone(), p.regex, p.score);
+            self.add_pattern(p.entity_type.clone(), p.regex, p.score)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "SECRET_PATTERNS regex failed to compile for {:?}: {e}",
+                        p.entity_type
+                    )
+                });
         }
     }
 
@@ -614,6 +699,12 @@ impl Recognizer for PatternRecognizer {
                 EntityType::TelegramBotToken,
                 EntityType::HashicorpVaultToken,
                 EntityType::DatabaseConnectionString,
+                EntityType::HuggingFaceToken,
+                EntityType::DatabricksToken,
+                EntityType::DigitalOceanToken,
+                EntityType::NotionApiKey,
+                EntityType::PerplexityApiKey,
+                EntityType::HttpBasicAuth,
             ];
         }
         &SUPPORTED
@@ -625,7 +716,7 @@ impl Recognizer for PatternRecognizer {
         for (entity_type, patterns) in &self.patterns {
             for pattern in patterns {
                 for capture in pattern.regex.captures_iter(text) {
-                    if let Some(matched) = capture.get(0) {
+                    if let Some(matched) = capture.get(1).or_else(|| capture.get(0)) {
                         let start = matched.start();
                         let end = matched.end();
                         let matched_text = matched.as_str();
@@ -863,11 +954,11 @@ mod tests {
     fn test_supported_entities_count() {
         let recognizer = PatternRecognizer::new();
         let supported = recognizer.supported_entities();
-        // Should have 54 pattern-based entity types (36 original + 18 secrets)
+        // 36 original PII + 18 Phase 1 secrets + 6 Phase 2 named types
         assert_eq!(
             supported.len(),
-            54,
-            "Should support 54 pattern-based entity types, got {}",
+            60,
+            "Should support 60 pattern-based entity types, got {}",
             supported.len()
         );
     }

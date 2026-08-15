@@ -474,6 +474,58 @@ mod tests {
             profile.decide(&EntityType::PrivateKey, 0.99),
             EntityAction::Block
         );
+        assert_eq!(
+            profile.decide(&EntityType::HuggingFaceToken, 0.99),
+            EntityAction::Block
+        );
+        assert_eq!(
+            profile.decide(&EntityType::GenericSecret, 0.70),
+            EntityAction::Replace
+        );
+    }
+
+    #[test]
+    fn secrets_only_blocks_every_high_sensitivity_type() {
+        let set = PolicySet::default();
+        let profile = set.profiles.get("secrets_only").expect("secrets_only");
+        let types = [
+            EntityType::PrivateKey,
+            EntityType::JwtToken,
+            EntityType::AwsAccessKey,
+            EntityType::GithubToken,
+            EntityType::GitlabToken,
+            EntityType::SlackToken,
+            EntityType::SlackWebhook,
+            EntityType::StripeApiKey,
+            EntityType::GoogleApiKey,
+            EntityType::OpenAiApiKey,
+            EntityType::AnthropicApiKey,
+            EntityType::NpmToken,
+            EntityType::PyPiToken,
+            EntityType::SendGridApiKey,
+            EntityType::TwilioApiKey,
+            EntityType::TelegramBotToken,
+            EntityType::HashicorpVaultToken,
+            EntityType::DatabaseConnectionString,
+            EntityType::HuggingFaceToken,
+            EntityType::DatabricksToken,
+            EntityType::DigitalOceanToken,
+            EntityType::NotionApiKey,
+            EntityType::PerplexityApiKey,
+            EntityType::HttpBasicAuth,
+            EntityType::GenericSecret,
+        ];
+        for entity in types {
+            assert!(
+                entity.is_high_sensitivity(),
+                "{entity:?} should be high sensitivity"
+            );
+            assert_ne!(
+                profile.decide(&entity, 0.99),
+                EntityAction::Allow,
+                "secrets_only must not allow {entity:?}"
+            );
+        }
     }
 
     #[test]
