@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
   only by unused optional `sqlx-mysql` — this crate enables Postgres only.
+- `redact-scan`: retry testcontainer start and pre-pull `postgres:16-alpine`
+  in CI so Hub `bytes remaining on stream` flakes do not fail the job.
 
 ## [0.9.1] - 2026-08-08
 
