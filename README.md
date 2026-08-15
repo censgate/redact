@@ -659,6 +659,7 @@ redact/
 │   ├── redact-ner/       # ONNX NER integration (optional engine add-on)
 │   ├── redact-api/       # REST API service (Axum) over the same engine
 │   ├── redact-cli/       # Command-line tool
+│   ├── redact-scan/      # Read-only Postgres PII discovery scanner
 │   └── redact-wasm/      # WebAssembly bindings (pattern engine)
 ├── docs/
 │   ├── gateway/          # Gateway operator documentation

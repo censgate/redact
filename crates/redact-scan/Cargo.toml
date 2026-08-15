@@ -1,0 +1,38 @@
+[package]
+name = "redact-scan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/redact-scan"
+description = "Read-only Postgres PII discovery scanner"
+keywords = ["pii", "postgres", "privacy", "gdpr", "discovery"]
+categories = ["command-line-utilities", "database"]
+
+[dependencies]
+redact-core = { path = "../redact-core", version = "0.9.1" }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+
+[[bin]]
+name = "redact-scan"
+path = "src/main.rs"
+
+[dev-dependencies]
+assert_cmd = "2.2"
+predicates = "3.1"
+tempfile = "3.27"
+serde_json = { workspace = true }
+redact-core = { path = "../redact-core", version = "0.9.1" }
+chrono = { workspace = true }
+uuid = { workspace = true }

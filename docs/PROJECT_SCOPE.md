@@ -18,6 +18,7 @@ This Apache-2.0 repository accepts contributions to:
 | `redact-cli` | Command-line interface |
 | `redact-wasm` | WebAssembly bindings |
 | `redact-gateway` | Self-hosted OpenAI-compatible privacy gateway |
+| `redact-scan` | Read-only Postgres PII discovery scanner |
 
 Also in scope: documentation, tests, examples, packaging, and CI for those
 crates.
