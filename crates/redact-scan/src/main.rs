@@ -32,10 +32,8 @@ fn run() -> Result<i32, ScanError> {
 }
 
 fn install_panic_hook() {
-    let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let msg = scrub(&info.to_string());
-        eprintln!("panic: {msg}");
-        default(info);
+        // Do not invoke the default hook: it would print the original payload.
+        eprintln!("panic: {}", scrub(&info.to_string()));
     }));
 }

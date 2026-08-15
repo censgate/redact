@@ -7,16 +7,21 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::str::FromStr;
 
-/// Discovery layer. Serialized as 0, 0.5, 1, or 2.
+/// Discovery layer. Serialized as JSON numbers `0`, `0.5`, `1`, or `2`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScanLayer {
+    /// Layer 0: catalog metadata only (no user-table reads).
     Metadata,
+    /// Layer 0.5: planner statistics (`pg_stats`).
     Stats,
+    /// Layer 1: bounded `TABLESAMPLE` of candidate columns.
     Sample,
+    /// Layer 2: JSON/JSONB path sampling.
     Json,
 }
 
 impl ScanLayer {
+    /// Numeric form used on the CLI and in report JSON.
     pub fn as_f64(self) -> f64 {
         match self {
             ScanLayer::Metadata => 0.0,
@@ -26,6 +31,7 @@ impl ScanLayer {
         }
     }
 
+    /// Parse the numeric layer token.
     pub fn from_f64(v: f64) -> Result<Self> {
         if (v - 0.0).abs() < f64::EPSILON {
             Ok(ScanLayer::Metadata)
@@ -104,6 +110,7 @@ pub fn parse_layers(s: &str) -> Result<Vec<ScanLayer>> {
     Ok(out)
 }
 
+/// Default layer set: `0,0.5,1,2`.
 pub fn default_layers() -> Vec<ScanLayer> {
     vec![
         ScanLayer::Metadata,

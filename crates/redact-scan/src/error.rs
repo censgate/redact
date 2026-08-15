@@ -5,19 +5,21 @@
 use crate::scrub::scrub_secret;
 use std::fmt;
 
-/// Scanner error. Display/Debug never include raw credentials.
+/// Scanner error. [`Display`](std::fmt::Display) and [`Debug`] never include raw credentials.
 #[derive(Debug)]
 pub struct ScanError {
     message: String,
 }
 
 impl ScanError {
+    /// Build an error after running the credential scrubber on `message`.
     pub fn new(message: impl std::fmt::Display) -> Self {
         Self {
             message: crate::scrub::scrub(&message.to_string()),
         }
     }
 
+    /// Build an error, also replacing every occurrence of `secret`.
     pub fn with_secret(message: impl std::fmt::Display, secret: &str) -> Self {
         Self {
             message: scrub_secret(&message.to_string(), secret),

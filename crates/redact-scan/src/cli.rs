@@ -4,78 +4,120 @@
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, ValueEnum};
+use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::layers::{default_layers, parse_layers, ScanLayer};
+use crate::scrub::scrub;
 
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+/// Report rendering format.
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum OutputFormat {
+    /// Pretty-printed `ScanReport` JSON.
     Json,
+    /// Human-readable table (no sample values).
     Table,
 }
 
-#[derive(Debug, Parser)]
-#[command(
-    name = "redact-scan",
-    about = "Read-only Postgres PII discovery scanner",
-    version
-)]
+/// Read-only Postgres PII discovery scanner.
+///
+/// Prefer a replica or staging database. Debug formatting redacts
+/// connection URLs and API keys.
+#[derive(Parser)]
+#[command(name = "redact-scan", version)]
 pub struct Cli {
-    /// Postgres connection URL (also reads DATABASE_URL)
+    /// Postgres connection URL (also reads `DATABASE_URL`).
     #[arg(long, env = "DATABASE_URL")]
     pub url: Option<String>,
 
-    /// Schema to scan
+    /// Schema to scan.
     #[arg(long, default_value = "public")]
     pub schema: String,
 
-    /// Comma-separated layers: 0,0.5,1,2
+    /// Comma-separated layers: `0,0.5,1,2`.
     #[arg(long, default_value = "0,0.5,1,2")]
     pub layers: String,
 
-    /// Maximum rows to sample per candidate column
+    /// Maximum rows to sample per candidate column.
     #[arg(long, default_value_t = 1000)]
     pub sample_rows: u32,
 
-    /// Statement timeout (e.g. 30s)
+    /// Statement timeout (for example `30s`).
     #[arg(long, default_value = "30s")]
     pub statement_timeout: String,
 
-    /// Output format
+    /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
     pub format: OutputFormat,
 
-    /// Write the report to this path
+    /// Write the report JSON to this path.
     #[arg(long)]
     pub out: Option<PathBuf>,
 
-    /// Optional HTTP endpoint that receives the report JSON
+    /// Optional HTTP endpoint that receives the report JSON.
     #[arg(long)]
     pub report_url: Option<String>,
 
-    /// Bearer token for --report-url (also reads REDACT_SCAN_API_KEY)
+    /// Bearer token for `--report-url` (also reads `REDACT_SCAN_API_KEY`).
     #[arg(long, env = "REDACT_SCAN_API_KEY")]
     pub api_key: Option<String>,
 
-    /// Extra header for --report-url, repeatable (`Name: value`)
+    /// Extra header for `--report-url`, repeatable (`Name: value`).
     #[arg(long = "report-header")]
     pub report_headers: Vec<String>,
 
-    /// Exit 1 when findings match this entity type, or `any`
+    /// Exit 1 when findings match this entity type, or `any`.
     #[arg(long)]
     pub fail_on: Option<String>,
 
-    /// Write local debug samples (incompatible with --report-url)
+    /// Write local debug samples (incompatible with `--report-url`).
     #[arg(long)]
     pub include_samples: bool,
 
-    /// Path for local debug samples (required with --include-samples and --format json)
+    /// Path for local debug samples (required with `--include-samples` and `--format json`).
     #[arg(long)]
     pub samples_out: Option<PathBuf>,
 }
 
+impl fmt::Debug for Cli {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cli")
+            .field("url", &self.url.as_deref().map(scrub))
+            .field("schema", &self.schema)
+            .field("layers", &self.layers)
+            .field("sample_rows", &self.sample_rows)
+            .field("statement_timeout", &self.statement_timeout)
+            .field("format", &self.format)
+            .field("out", &self.out)
+            .field("report_url", &self.report_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***"))
+            .field(
+                "report_headers",
+                &self
+                    .report_headers
+                    .iter()
+                    .map(|h| scrub(h))
+                    .collect::<Vec<_>>(),
+            )
+            .field("fail_on", &self.fail_on)
+            .field("include_samples", &self.include_samples)
+            .field("samples_out", &self.samples_out)
+            .finish()
+    }
+}
+
+impl fmt::Debug for OutputFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OutputFormat::Json => f.write_str("Json"),
+            OutputFormat::Table => f.write_str("Table"),
+        }
+    }
+}
+
 impl Cli {
+    /// Parse `--layers` into unique [`ScanLayer`] values.
     pub fn parsed_layers(&self) -> Result<Vec<ScanLayer>> {
         if self.layers.trim().is_empty() {
             return Ok(default_layers());
@@ -83,6 +125,7 @@ impl Cli {
         parse_layers(&self.layers)
     }
 
+    /// Parse `--statement-timeout` (`30s`, `500ms`, `2m`, or bare seconds).
     pub fn statement_timeout(&self) -> Result<Duration> {
         parse_duration(&self.statement_timeout)
     }
@@ -99,14 +142,11 @@ impl Cli {
                 "--include-samples with --format json requires --samples-out"
             ));
         }
-        if self.url.is_none() && self.report_url.is_none() {
-            // Allow --include-samples + --report-url error path without --url.
-            // A real scan still needs --url; checked in run().
-        }
         Ok(())
     }
 }
 
+/// Parse a human duration used by `--statement-timeout`.
 pub fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
     if let Some(ms) = s.strip_suffix("ms") {
@@ -148,5 +188,20 @@ mod tests {
     fn duration_parse() {
         assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn debug_redacts_url_and_api_key() {
+        let cli = Cli::parse_from([
+            "redact-scan",
+            "--url",
+            "postgres://alice:s3cret-pass@localhost/app",
+            "--api-key",
+            "tok_live_secret",
+        ]);
+        let shown = format!("{cli:?}");
+        assert!(!shown.contains("s3cret-pass"));
+        assert!(!shown.contains("tok_live_secret"));
+        assert!(shown.contains("***"));
     }
 }

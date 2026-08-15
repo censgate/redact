@@ -7,7 +7,9 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// SHA-256 of canonical JSON with `content_hash` omitted / empty.
+/// SHA-256 hex of RFC 8785-style canonical JSON with `content_hash` omitted.
+///
+/// Object keys are sorted; insignificant whitespace is omitted.
 pub fn content_hash<T: Serialize>(report: &T) -> Result<String> {
     let mut value = serde_json::to_value(report)?;
     if let Value::Object(map) = &mut value {
@@ -47,12 +49,38 @@ fn canonical_value(value: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct First {
+        b: i32,
+        a: i32,
+        content_hash: String,
+    }
+
+    #[derive(Serialize)]
+    struct Second {
+        a: i32,
+        b: i32,
+    }
 
     #[test]
-    fn hash_is_stable_under_key_order() {
-        let a = json!({"b": 1, "a": 2, "content_hash": "x"});
-        let b = json!({"a": 2, "b": 1});
-        assert_eq!(content_hash(&a).unwrap(), content_hash(&b).unwrap());
+    fn hash_is_stable_under_struct_field_order() {
+        let first = First {
+            b: 1,
+            a: 2,
+            content_hash: "ignored".into(),
+        };
+        let second = Second { a: 2, b: 1 };
+        let first_json = serde_json::to_string(&first).unwrap();
+        let second_json = serde_json::to_string(&second).unwrap();
+        assert_ne!(
+            first_json, second_json,
+            "fixture must serialize keys in different orders"
+        );
+        assert_eq!(
+            content_hash(&first).unwrap(),
+            content_hash(&second).unwrap()
+        );
     }
 }

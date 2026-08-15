@@ -31,8 +31,3 @@ path = "src/main.rs"
 [dev-dependencies]
 assert_cmd = "2.2"
 predicates = "3.1"
-tempfile = "3.27"
-serde_json = { workspace = true }
-redact-core = { path = "../redact-core", version = "0.9.1" }
-chrono = { workspace = true }
-uuid = { workspace = true }
