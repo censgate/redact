@@ -3,7 +3,9 @@
 // in the project root for license information.
 
 use crate::anonymizers::{AnonymizerConfig, AnonymizerRegistry};
-use crate::recognizers::{pattern::PatternRecognizer, RecognizerRegistry};
+use crate::recognizers::{
+    generic::GenericSecretRecognizer, pattern::PatternRecognizer, RecognizerRegistry,
+};
 use crate::types::{AnalysisMetadata, AnalysisResult, AnonymizedResult, EntityType};
 use anyhow::Result;
 use std::sync::Arc;
@@ -52,6 +54,7 @@ impl AnalyzerEngine {
         // Add default pattern recognizer
         let pattern_recognizer = Arc::new(PatternRecognizer::new());
         recognizer_registry.add_recognizer(pattern_recognizer);
+        recognizer_registry.add_recognizer(Arc::new(GenericSecretRecognizer::new()));
 
         Self {
             recognizer_registry,

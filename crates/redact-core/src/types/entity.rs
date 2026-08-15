@@ -87,6 +87,7 @@ pub enum EntityType {
     TelegramBotToken,
     HashicorpVaultToken,
     DatabaseConnectionString,
+    GenericSecret,
 
     // Generic
     Custom(String),
@@ -154,6 +155,7 @@ impl EntityType {
             EntityType::TelegramBotToken => "TELEGRAM_BOT_TOKEN",
             EntityType::HashicorpVaultToken => "HASHICORP_VAULT_TOKEN",
             EntityType::DatabaseConnectionString => "DATABASE_CONNECTION_STRING",
+            EntityType::GenericSecret => "GENERIC_SECRET",
             EntityType::Custom(name) => name,
         }
     }
@@ -175,6 +177,32 @@ impl EntityType {
                 | EntityType::UkNino
                 | EntityType::MedicalLicense
                 | EntityType::PrivateKey
+                | EntityType::JwtToken
+                | EntityType::AwsAccessKey
+                | EntityType::GithubToken
+                | EntityType::GitlabToken
+                | EntityType::SlackToken
+                | EntityType::SlackWebhook
+                | EntityType::StripeApiKey
+                | EntityType::GoogleApiKey
+                | EntityType::OpenAiApiKey
+                | EntityType::AnthropicApiKey
+                | EntityType::NpmToken
+                | EntityType::PyPiToken
+                | EntityType::SendGridApiKey
+                | EntityType::TwilioApiKey
+                | EntityType::TelegramBotToken
+                | EntityType::HashicorpVaultToken
+                | EntityType::DatabaseConnectionString
+                | EntityType::GenericSecret
+        )
+    }
+
+    /// Prefixed / structured secret types (not `GENERIC_SECRET`).
+    pub fn is_named_secret(&self) -> bool {
+        matches!(
+            self,
+            EntityType::PrivateKey
                 | EntityType::JwtToken
                 | EntityType::AwsAccessKey
                 | EntityType::GithubToken
@@ -277,6 +305,7 @@ impl EntityType {
             EntityType::TelegramBotToken => 100,
             EntityType::HashicorpVaultToken => 100,
             EntityType::DatabaseConnectionString => 95,
+            EntityType::GenericSecret => 35,
 
             // Custom types default to medium specificity
             EntityType::Custom(_) => 50,
@@ -346,6 +375,21 @@ impl EntityType {
             );
         }
 
+        // GENERIC_SECRET loses to every named secret type.
+        if *self == EntityType::GenericSecret {
+            return other.is_named_secret();
+        }
+
+        // Hash / GUID detections on a secret-keyword assignment lose to
+        // GENERIC_SECRET. Default policy allows hashes and GUIDs, so the
+        // reverse would un-redact `api_key=<32 hex>`.
+        if matches!(
+            self,
+            EntityType::Guid | EntityType::Md5Hash | EntityType::Sha1Hash | EntityType::Sha256Hash
+        ) {
+            return *other == EntityType::GenericSecret;
+        }
+
         false
     }
 }
@@ -374,6 +418,7 @@ impl From<String> for EntityType {
             "US_DRIVER_LICENSE" => EntityType::UsDriverLicense,
             "US_PASSPORT" => EntityType::UsPassport,
             "US_BANK_NUMBER" => EntityType::UsBankNumber,
+            "US_ZIP_CODE" => EntityType::UsZipCode,
             "UK_NHS" => EntityType::UkNhs,
             "UK_NINO" => EntityType::UkNino,
             "UK_POSTCODE" => EntityType::UkPostcode,
@@ -384,6 +429,11 @@ impl From<String> for EntityType {
             "UK_SORT_CODE" => EntityType::UkSortCode,
             "UK_COMPANY_NUMBER" => EntityType::UkCompanyNumber,
             "MEDICAL_LICENSE" => EntityType::MedicalLicense,
+            "MEDICAL_RECORD_NUMBER" => EntityType::MedicalRecordNumber,
+            "PASSPORT_NUMBER" => EntityType::PassportNumber,
+            "AGE" => EntityType::Age,
+            "ISBN" => EntityType::Isbn,
+            "PO_BOX" => EntityType::PoBox,
             "CRYPTO_WALLET" => EntityType::CryptoWallet,
             "BTC_ADDRESS" => EntityType::BtcAddress,
             "ETH_ADDRESS" => EntityType::EthAddress,
@@ -410,6 +460,7 @@ impl From<String> for EntityType {
             "TELEGRAM_BOT_TOKEN" => EntityType::TelegramBotToken,
             "HASHICORP_VAULT_TOKEN" => EntityType::HashicorpVaultToken,
             "DATABASE_CONNECTION_STRING" => EntityType::DatabaseConnectionString,
+            "GENERIC_SECRET" => EntityType::GenericSecret,
             _ => EntityType::Custom(s),
         }
     }
@@ -444,5 +495,77 @@ mod tests {
         assert_eq!(EntityType::from("PERSON".to_string()), EntityType::Person);
         assert_eq!(EntityType::from("person".to_string()), EntityType::Person);
         assert_eq!(EntityType::from("US_SSN".to_string()), EntityType::UsSsn);
+    }
+
+    fn all_named_variants() -> Vec<EntityType> {
+        vec![
+            EntityType::Person,
+            EntityType::Location,
+            EntityType::Organization,
+            EntityType::DateTime,
+            EntityType::EmailAddress,
+            EntityType::PhoneNumber,
+            EntityType::IpAddress,
+            EntityType::Url,
+            EntityType::DomainName,
+            EntityType::CreditCard,
+            EntityType::IbanCode,
+            EntityType::UsBankNumber,
+            EntityType::UsSsn,
+            EntityType::UsDriverLicense,
+            EntityType::UsPassport,
+            EntityType::UsZipCode,
+            EntityType::UkNhs,
+            EntityType::UkNino,
+            EntityType::UkPostcode,
+            EntityType::UkDriverLicense,
+            EntityType::UkPassportNumber,
+            EntityType::UkPhoneNumber,
+            EntityType::UkMobileNumber,
+            EntityType::UkSortCode,
+            EntityType::UkCompanyNumber,
+            EntityType::MedicalLicense,
+            EntityType::MedicalRecordNumber,
+            EntityType::PassportNumber,
+            EntityType::Age,
+            EntityType::Isbn,
+            EntityType::PoBox,
+            EntityType::CryptoWallet,
+            EntityType::BtcAddress,
+            EntityType::EthAddress,
+            EntityType::Guid,
+            EntityType::MacAddress,
+            EntityType::Md5Hash,
+            EntityType::Sha1Hash,
+            EntityType::Sha256Hash,
+            EntityType::PrivateKey,
+            EntityType::JwtToken,
+            EntityType::AwsAccessKey,
+            EntityType::GithubToken,
+            EntityType::GitlabToken,
+            EntityType::SlackToken,
+            EntityType::SlackWebhook,
+            EntityType::StripeApiKey,
+            EntityType::GoogleApiKey,
+            EntityType::OpenAiApiKey,
+            EntityType::AnthropicApiKey,
+            EntityType::NpmToken,
+            EntityType::PyPiToken,
+            EntityType::SendGridApiKey,
+            EntityType::TwilioApiKey,
+            EntityType::TelegramBotToken,
+            EntityType::HashicorpVaultToken,
+            EntityType::DatabaseConnectionString,
+            EntityType::GenericSecret,
+        ]
+    }
+
+    #[test]
+    fn as_str_from_round_trip() {
+        for variant in all_named_variants() {
+            let label = variant.as_str().to_string();
+            let parsed = EntityType::from(label.clone());
+            assert_eq!(parsed, variant, "round-trip failed for {label}");
+        }
     }
 }

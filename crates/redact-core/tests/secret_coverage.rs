@@ -625,6 +625,7 @@ fn test_entity_type_as_str_secrets() {
         EntityType::DatabaseConnectionString.as_str(),
         "DATABASE_CONNECTION_STRING"
     );
+    assert_eq!(EntityType::GenericSecret.as_str(), "GENERIC_SECRET");
 }
 
 #[test]
@@ -648,6 +649,7 @@ fn test_all_secret_types_are_high_sensitivity() {
         EntityType::TelegramBotToken,
         EntityType::HashicorpVaultToken,
         EntityType::DatabaseConnectionString,
+        EntityType::GenericSecret,
     ];
 
     for entity_type in secret_types {
@@ -665,4 +667,52 @@ fn test_private_key_default_replacement() {
         EntityType::PrivateKey.default_replacement(),
         "[PRIVATE_KEY]"
     );
+}
+
+fn sample_generic_hex_secret() -> String {
+    "a1b2c3d4e5f60718293a4b5c6d7e8f90".to_string()
+}
+
+#[test]
+fn test_generic_secret_assignment() {
+    let secret = sample_generic_hex_secret();
+    let text = format!("api_key={secret}");
+    assert_entity_detected(&text, EntityType::GenericSecret, 0.6);
+}
+
+#[test]
+fn test_generic_secret_value_only_span() {
+    let engine = create_engine();
+    let secret = sample_generic_hex_secret();
+    let text = format!("api_key={secret}");
+    let result = engine.analyze(&text, None).unwrap();
+    let hit = result
+        .detected_entities
+        .iter()
+        .find(|e| e.entity_type == EntityType::GenericSecret)
+        .expect("GENERIC_SECRET");
+    assert_eq!(&text[hit.start..hit.end], secret);
+}
+
+#[test]
+fn test_named_github_token_wins_over_generic() {
+    let tok = token("ghp_", &"A".repeat(36));
+    let text = format!("token = {tok}");
+    assert_entity_detected(&text, EntityType::GithubToken, 0.9);
+    assert_entity_not_detected(&text, EntityType::GenericSecret);
+}
+
+#[test]
+fn test_generic_secret_ignores_stopwords_and_lockfile_integrity() {
+    assert_entity_not_detected("password=password", EntityType::GenericSecret);
+    assert_entity_not_detected("api_key=your-key-here", EntityType::GenericSecret);
+    let integrity = format!("integrity=sha512-{}", "A".repeat(64));
+    assert_entity_not_detected(&integrity, EntityType::GenericSecret);
+}
+
+#[test]
+fn test_generic_secret_uuid_under_strong_keyword() {
+    let uuid = "550e8400-e29b-41d4-a716-446655440000";
+    assert_entity_detected(&format!("api_key={uuid}"), EntityType::GenericSecret, 0.6);
+    assert_entity_not_detected(&format!("revision={uuid}"), EntityType::GenericSecret);
 }
