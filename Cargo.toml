@@ -42,8 +42,11 @@ axum = { version = "0.8", features = ["json", "tracing"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["trace", "cors"] }
 
-# ONNX Runtime
-ort = { version = "2.0.0-rc.12", features = ["load-dynamic", "half"] }
+# ONNX Runtime — pin exactly. ^2.0.0-rc.12 resolved to rc.13, which requires
+# ONNX Runtime 1.28; ghcr.io/censgate/redact-ner-base:v2 ships 1.24.4
+# (ort 2.0.0-rc.12). A floating rc.13 is what made the full image panic
+# on v0.10.0-rc.1: BadVersion { version_str: "1.24.4" }.
+ort = { version = "=2.0.0-rc.12", features = ["load-dynamic", "half"] }
 ndarray = "0.17"
 tokenizers = "0.23"
 
