@@ -66,3 +66,5 @@ endpoint (`Authorization: Bearer` when `--api-key` is set;
 `--report-header` may be repeated). There is no default host.
 
 Exit codes: `0` clean, `1` when `--fail-on` matches, `2` on error.
+
+Related: [entity types](entity-types.md) · [secrets detection](secrets-detection.md) · [crate README](../crates/redact-scan/README.md)

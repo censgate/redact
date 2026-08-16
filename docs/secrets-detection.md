@@ -2,7 +2,7 @@
 
 Phase 2 of [#101](https://github.com/censgate/redact/issues/101). The detector is WASM-pure, deterministic, and offline. Precision is the gate: a noisier detector is a regression.
 
-Related: [gateway policy](gateway/policy.md) · [gateway deployment](gateway/deployment.md)
+Related: [entity types](entity-types.md) · [scanning model](scanning-model.md) · [gateway policy](gateway/policy.md) · [gateway deployment](gateway/deployment.md)
 
 ## Pipeline
 

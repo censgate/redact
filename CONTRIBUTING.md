@@ -228,7 +228,7 @@ Preferred path (GitHub Actions):
 4. Merge the PR — **Create Release Tag** creates `vX.Y.Z` and dispatches **Release**
 5. The **Release** workflow will:
    - Build binaries for all platforms (`redact` and `redact-gateway`)
-   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`, `redact-gateway`)
+   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`, `redact-gateway`, `redact-scan`, `redact-verify`)
    - Create a GitHub release
    - Build and push Docker images:
      - default (`Dockerfile`) as `:latest`, `:X.Y.Z`, etc.
@@ -256,8 +256,11 @@ redact/
 ├── scripts/                 # Utility scripts
 ├── examples/                # Usage examples
 ├── docs/
+│   ├── README.md            # Documentation index
 │   ├── PROJECT_SCOPE.md     # What this repository accepts
 │   ├── secrets-detection.md # Entropy model and precision corpora
+│   ├── scanning-model.md    # redact-scan layers and safety rails
+│   ├── entity-types.md      # 61 compiled types (list-entities / facts.json)
 │   ├── gateway/             # Gateway operator documentation
 │   └── benchmarks/          # Benchmark methodology and results
 └── .github/workflows/       # CI/CD pipelines
@@ -277,7 +280,7 @@ Confirm the idea is in [project scope](docs/PROJECT_SCOPE.md) before starting.
 
 ### Medium Priority
 
-- [ ] WASM + inline NER (deferred; see README hybrid architecture)
+- [ ] WASM + inline NER (deferred; see [docs/wasm.md](docs/wasm.md))
 - [ ] Mobile FFI bindings
 - [ ] Additional anonymization strategies
 - [ ] Multi-language pattern support

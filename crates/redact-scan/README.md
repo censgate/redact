@@ -3,6 +3,7 @@
 Read-only Postgres PII discovery scanner. Prefer a replica or staging database.
 
 ```bash
+# Not yet on crates.io — install from a source checkout
 cargo install --path crates/redact-scan
 redact-scan --url postgres://reader@localhost/app --schema public --out report.json
 ```

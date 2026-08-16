@@ -5,7 +5,10 @@ in this checkout. Do not add vendor-specific cloud/VM sections here.
 
 ## Project Overview
 
-**Redact** is a high-performance, open-source PII (Personally Identifiable Information) detection and anonymization engine built in Rust. It serves as a drop-in replacement for Microsoft Presidio with 10-100x better performance.
+**Redact** is an open-source PII and secrets detection engine built in Rust.
+p50 latency vs Presidio was 32× on the 2026-04-18 oha payload
+(`docs/benchmarks/results-20260418-175909.md`). That is a latency measurement,
+not a quality score.
 
 **Key capabilities:**
 - Pattern-based detection (61 compiled entity types via regex, including secrets/credentials and `GENERIC_SECRET`)
