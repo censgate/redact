@@ -9,6 +9,7 @@
 //! pass the Luhn checksum, and IBANs have country-specific formats.
 
 use crate::types::EntityType;
+use chrono::NaiveDate;
 
 /// Validate a detected entity value based on its type.
 ///
@@ -26,6 +27,8 @@ pub fn validate_entity(entity_type: &EntityType, value: &str) -> f32 {
         EntityType::Isbn => validate_isbn(value),
         EntityType::IpAddress => validate_ip_address(value),
         EntityType::HttpBasicAuth => validate_http_basic_auth(value),
+        EntityType::DateTime => validate_date_time(value),
+        EntityType::MacAddress => validate_mac_address(value),
         _ => 1.0, // No validation available
     }
 }
@@ -454,6 +457,65 @@ fn validate_isbn13(isbn: &str) -> f32 {
     }
 }
 
+/// Validate an ISO `YYYY-MM-DD` date, optionally with `HH:MM` or `HH:MM:SS`.
+///
+/// The compiled DATE_TIME pattern is already ISO-shaped. This rejects
+/// impossible calendar dates and out-of-range clock fields. Time-zone
+/// suffixes are not accepted (the pattern does not emit them).
+pub fn validate_date_time(value: &str) -> f32 {
+    let value = value.trim();
+    let date_part = value.split(['T', ' ']).next().unwrap_or(value);
+
+    if NaiveDate::parse_from_str(date_part, "%Y-%m-%d").is_err() {
+        return 0.0;
+    }
+
+    if let Some(rest) = value
+        .strip_prefix(date_part)
+        .map(str::trim_start)
+        .filter(|s| !s.is_empty())
+    {
+        let time = rest.trim_start_matches(['T', ' ']);
+        let ok = matches!(time.len(), 5 | 8)
+            && time.as_bytes().get(2) == Some(&b':')
+            && (time.len() == 5 || time.as_bytes().get(5) == Some(&b':'))
+            && time.chars().all(|c| c.is_ascii_digit() || c == ':');
+        if !ok {
+            return 0.0;
+        }
+        let hh = time.get(0..2).and_then(|s| s.parse().ok()).unwrap_or(99);
+        let mm = time.get(3..5).and_then(|s| s.parse().ok()).unwrap_or(99);
+        if hh > 23 || mm > 59 {
+            return 0.0;
+        }
+        if time.len() == 8 {
+            let ss = time.get(6..8).and_then(|s| s.parse().ok()).unwrap_or(99);
+            if ss > 59 {
+                return 0.0;
+            }
+        }
+    }
+
+    1.0
+}
+
+/// Reject the all-zero (null) and all-`f` (broadcast) MAC addresses.
+pub fn validate_mac_address(value: &str) -> f32 {
+    let cleaned: String = value
+        .chars()
+        .filter(|c| c.is_ascii_hexdigit())
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+
+    if cleaned.len() != 12 {
+        return 0.0;
+    }
+    if cleaned.chars().all(|c| c == '0') || cleaned.chars().all(|c| c == 'f') {
+        return 0.0;
+    }
+    1.0
+}
+
 /// Validate IPv4 address octets are in valid range.
 pub fn validate_ip_address(value: &str) -> f32 {
     let octets: Vec<&str> = value.split('.').collect();
@@ -556,6 +618,23 @@ mod tests {
         assert_eq!(validate_http_basic_auth("not-base64"), 0.0);
         // "::::" is valid base64 alphabet but decodes without a colon pair.
         assert_eq!(validate_http_basic_auth("QQ=="), 0.0);
+    }
+
+    #[test]
+    fn test_date_time_rejects_impossible_calendar() {
+        assert_eq!(validate_date_time("2026-07-13"), 1.0);
+        assert_eq!(validate_date_time("2026-07-13T12:00:00"), 1.0);
+        assert_eq!(validate_date_time("2026-99-13"), 0.0);
+        assert_eq!(validate_date_time("2026-02-31"), 0.0);
+        assert_eq!(validate_date_time("2026-07-13T25:00:00"), 0.0);
+    }
+
+    #[test]
+    fn test_mac_rejects_null_and_broadcast() {
+        assert_eq!(validate_mac_address("02:42:ac:11:00:02"), 1.0);
+        assert_eq!(validate_mac_address("00:00:00:00:00:00"), 0.0);
+        assert_eq!(validate_mac_address("ff:ff:ff:ff:ff:ff"), 0.0);
+        assert_eq!(validate_mac_address("FF-FF-FF-FF-FF-FF"), 0.0);
     }
 
     #[test]

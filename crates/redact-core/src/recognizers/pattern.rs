@@ -631,6 +631,98 @@ impl Default for PatternRecognizer {
     }
 }
 
+fn left_context(text: &str, start: usize, bytes: usize) -> &str {
+    let mut from = start.saturating_sub(bytes);
+    while from < start && !text.is_char_boundary(from) {
+        from += 1;
+    }
+    &text[from..start]
+}
+
+fn tokens(left_lower: &str) -> impl Iterator<Item = &str> {
+    left_lower
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .filter(|tok| !tok.is_empty())
+}
+
+fn has_token(left_lower: &str, needle: &str) -> bool {
+    tokens(left_lower).any(|tok| tok == needle)
+}
+
+fn order_like_context(left_lower: &str) -> bool {
+    left_lower.contains("order_id")
+        || left_lower.contains("orderid")
+        || has_token(left_lower, "order")
+}
+
+fn phone_or_card_cue(left_lower: &str) -> bool {
+    const CUES: &[&str] = &[
+        "phone",
+        "tel",
+        "mobile",
+        "cell",
+        "call",
+        "card",
+        "visa",
+        "mastercard",
+        "amex",
+        "payment",
+        "credit",
+    ];
+    tokens(left_lower).any(|tok| CUES.contains(&tok))
+}
+
+fn junk_domain_fragment(text: &str, start: usize, value: &str) -> bool {
+    if let Some(prev) = text[..start].chars().next_back() {
+        if matches!(prev, '%' | '\\' | '@') {
+            return true;
+        }
+    }
+    let lower = value.to_ascii_lowercase();
+    // Digit-leading domains (1password.com) are valid. Only reject the
+    // `\u00XX` / `u00XX` escaped-@ fragment used in encoded emails.
+    if lower.starts_with("u00") && lower.len() > 6 {
+        let hex = &lower[3..5];
+        if hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Context gates that zero a candidate the regex alone would emit.
+///
+/// Token matching (not substring `contains`) so `commitment`, `hotel`,
+/// and `cartel` do not trip `commit` / `order` / `card` cues.
+fn precision_gate(entity_type: &EntityType, text: &str, start: usize, value: &str) -> f32 {
+    let left = left_context(text, start, 50);
+    let left_lower = left.to_ascii_lowercase();
+    match entity_type {
+        EntityType::PhoneNumber | EntityType::CreditCard => {
+            if order_like_context(&left_lower) && !phone_or_card_cue(&left_lower) {
+                0.0
+            } else {
+                1.0
+            }
+        }
+        EntityType::Sha1Hash => {
+            if has_token(&left_lower, "commit") {
+                0.0
+            } else {
+                1.0
+            }
+        }
+        EntityType::DomainName => {
+            if junk_domain_fragment(text, start, value) {
+                0.0
+            } else {
+                1.0
+            }
+        }
+        _ => 1.0,
+    }
+}
+
 impl Recognizer for PatternRecognizer {
     fn name(&self) -> &str {
         &self.name
@@ -746,6 +838,7 @@ impl Recognizer for PatternRecognizer {
                         // This can reduce or zero out the score for invalid matches
                         let validation_factor = validate_entity(entity_type, matched_text);
                         score *= validation_factor;
+                        score *= precision_gate(entity_type, text, start, matched_text);
 
                         if score >= self.min_score {
                             results.push(
