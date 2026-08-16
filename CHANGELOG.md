@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0-rc.1] - 2026-08-16
 
 ### Added
 
@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--version`. crates.io publish is checked against the index after the
   `continue-on-error` publish steps. A no-checkout stranger-path job
   installs from crates.io and pulls the published gateway image (#137).
+  `publish-crates` now waits for `verify-pushed-images`. Hyphenated
+  (prerelease) versions push only the exact version tag so `:latest` /
+  `:MAJOR` / `:MINOR` / `:full` are not rewritten.
 
 ### Fixed
 
@@ -290,4 +293,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.9.1 or later.
+Those versions are no longer maintained. Please upgrade to v0.10.0-rc.1 or later.

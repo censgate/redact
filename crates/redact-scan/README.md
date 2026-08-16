@@ -23,7 +23,7 @@ See [docs/scanning-model.md](../../docs/scanning-model.md) for the four discover
     "version": "16.4"
   },
   "scanner": {
-    "version": "0.9.1",
+    "version": "0.10.0-rc.1",
     "pattern_pack": "builtin@<supported-entity-count>"
   },
   "sampling": {
