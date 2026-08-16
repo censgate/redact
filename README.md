@@ -86,8 +86,7 @@ Read-only. Prefer a replica or staging database. The report is locations and
 counts — never sample values. Superuser and write grants are refused.
 
 ```bash
-# Not yet on crates.io — install from a source checkout
-cargo install --path crates/redact-scan
+cargo install redact-scan
 redact-scan --url postgres://reader@localhost/app --schema public --out report.json
 ```
 
@@ -113,8 +112,7 @@ curl -s http://127.0.0.1:8080/v1/redact \
 ```
 
 ```bash
-# Not yet on crates.io — install from a source checkout
-cargo install --path crates/redact-verify
+cargo install redact-verify
 redact-verify --pack <file> --pubkey <file> [--online] [--format json]
 ```
 

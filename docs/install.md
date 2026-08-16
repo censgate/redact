@@ -15,13 +15,8 @@ rustup default 1.93.0
 ```bash
 cargo install redact-cli       # `redact` analyze / anonymize
 cargo install redact-gateway   # OpenAI-compatible privacy gateway
-```
-
-`redact-scan` and `redact-verify` are not yet on crates.io. From a source checkout:
-
-```bash
-cargo install --path crates/redact-scan
-cargo install --path crates/redact-verify
+cargo install redact-scan      # read-only Postgres PII discovery
+cargo install redact-verify    # offline ledger evidence-pack verifier
 ```
 
 ## From source
