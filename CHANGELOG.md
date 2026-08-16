@@ -81,6 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the `api_key` → `PRIVATE_KEY` alias (#138).
 - Encrypt nonces adapted for `aes-gcm` 0.11 (`Nonce::from` instead of
   deprecated `Nonce::from_slice`); envelope layout unchanged (#135).
+- Pin `ort` to `=2.0.0-rc.12` so the full image matches
+  `redact-ner-base:v2` (ONNX Runtime 1.24.4). `^2.0.0-rc.12` had
+  resolved to `rc.13`, which requires ONNX Runtime 1.28 and panicked
+  on startup (`BadVersion`). Caught by the `v0.10.0-rc.1` NER smoke.
 - `redact-scan`: upgrade `testcontainers-modules` so CI `cargo audit` is not
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
