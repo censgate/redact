@@ -54,7 +54,7 @@ ENV CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
 RUN case "$TARGETARCH" in \
         arm64) \
             if [ "$BUILDPLATFORM" = "linux/arm64" ]; then \
-                RUSTFLAGS="-C target-cpu=native" cargo build --release --package redact-api; \
+                RUSTFLAGS="-C target-cpu=neoverse-n1" cargo build --release --package redact-api; \
             else \
                 RUSTFLAGS="-C linker=aarch64-linux-gnu-gcc -C target-cpu=neoverse-n1" \
                 cargo build --release --package redact-api --target aarch64-unknown-linux-gnu \
@@ -62,7 +62,7 @@ RUN case "$TARGETARCH" in \
             fi ;; \
         amd64) \
             if [ "$BUILDPLATFORM" = "linux/amd64" ]; then \
-                RUSTFLAGS="-C target-cpu=native" cargo build --release --package redact-api; \
+                RUSTFLAGS="-C target-cpu=x86-64-v3" cargo build --release --package redact-api; \
             else \
                 RUSTFLAGS="-C linker=x86_64-linux-gnu-gcc -C target-cpu=x86-64-v3" \
                 cargo build --release --package redact-api --target x86_64-unknown-linux-gnu \

@@ -40,14 +40,16 @@ wait_for_http() {
       echo "Ready after ${i}s"
       return 0
     fi
-    if ! docker ps -q -f "name=^/${name}$" | grep -q .; then
-      echo "ERROR: container ${name} exited early" >&2
+    if [ "$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || echo false)" != "true" ]; then
+      echo "ERROR: container ${name} exited early (inspect follows)" >&2
+      docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "${name}" >&2 || true
       docker logs "${name}" >&2 || true
       return 1
     fi
     sleep 1
   done
   echo "ERROR: ${url} not ready within ${secs}s" >&2
+  docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "${name}" >&2 || true
   docker logs "${name}" >&2 || true
   return 1
 }

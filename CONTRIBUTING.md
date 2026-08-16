@@ -31,6 +31,16 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 - **Why this enhancement would be useful** to most users
 - **Possible implementation approach** (optional)
 
+### Pattern-pack PRs (provider coverage)
+
+New prefixed provider tokens belong in a YAML pattern pack, not in
+`redact-core`. Core is not taking the full [gitleaks](https://github.com/gitleaks/gitleaks)
+rule set. The opt-in long-tail pack is
+`patterns/optional/providers-v1.yaml` (not on the Docker default path,
+not compiled into WASM). How to load and write a pack:
+[docs/gateway/configuration.md](docs/gateway/configuration.md#pattern-packs).
+Confirm the idea is in [project scope](docs/PROJECT_SCOPE.md).
+
 ### Pull Requests
 
 1. **Fork the repository** and create your branch from `main`
@@ -239,12 +249,15 @@ redact/
 │   ├── redact-api/          # REST API server
 │   ├── redact-cli/          # CLI tool
 │   ├── redact-wasm/         # WASM bindings
-│   └── redact-gateway/      # OpenAI-compatible privacy gateway
+│   ├── redact-gateway/      # OpenAI-compatible privacy gateway
+│   ├── redact-scan/         # Read-only Postgres PII discovery
+│   └── redact-verify/       # Independent ledger pack verifier
 ├── deploy/                  # Gateway Collector config and Kubernetes manifests
 ├── scripts/                 # Utility scripts
 ├── examples/                # Usage examples
 ├── docs/
 │   ├── PROJECT_SCOPE.md     # What this repository accepts
+│   ├── secrets-detection.md # Entropy model and precision corpora
 │   ├── gateway/             # Gateway operator documentation
 │   └── benchmarks/          # Benchmark methodology and results
 └── .github/workflows/       # CI/CD pipelines
@@ -256,7 +269,7 @@ Confirm the idea is in [project scope](docs/PROJECT_SCOPE.md) before starting.
 
 ### High Priority
 
-- [ ] Additional entity type patterns
+- [ ] Additional entity type patterns via **pattern-pack PRs** (see above; core is not taking the full gitleaks set)
 - [ ] Performance optimizations
 - [ ] Documentation improvements
 - [ ] Example applications

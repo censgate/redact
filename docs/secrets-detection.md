@@ -107,3 +107,56 @@ redact --format json list-entities
 In addition to the Phase 1 prefixes: `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`, `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`, `HTTP_BASIC_AUTH` (hand-rolled base64 decode, canonical padding including unused bits, `user:password` both non-empty). GitLab keeps `glpat-` length 20 and adds gitleaks-closed routable / `glcbt-` / `glagent-` / `gloas-` / `gldt-` / `glft-` / `glptt-` shapes. AWS Bedrock (`ABSK…` and the short-lived `bedrock-api-key-YmVk…` literal) is an `AWS_ACCESS_KEY` alternation. Trailing `=` uses a delimiter class rather than `\\b`.
 
 Not compiled-in (pack or later): Azure AD `Q~` infix, GCP SA JSON, Teams webhooks, Discord, Datadog, Azure storage, Cloudflare global, generic-api-key, live API checks.
+
+## Precision corpora (measured)
+
+These figures are from hermetic tests in this repository. They are **not**
+a general precision/recall claim. The meaningful gates are the negative
+corpora. CI prints the numbers; it does not print raw secret values.
+
+### Exclusion / lockfile / digest-keyed corpus
+
+Test: `crates/redact-core/tests/generic_secret_corpus.rs`
+(`exclusion_corpus_has_zero_generic_secret`).
+
+**Gate: 0 `GENERIC_SECRET`.** Measured on this tree:
+`exclusion_generic_secret_count=0`. Covers weak-keyword UUIDs,
+digest-keyed hashes, `password=password`, `api_key=your-key-here`,
+lockfile `integrity=sha512-…`, all-alpha identifiers, prose, `#fff` /
+`#aabbcc`, `data:image;base64,…`.
+
+### Labeled generated positives
+
+Test: `labeled_positive_corpus_precision_recall` in the same file.
+
+Seeded fixtures, assembled at run time (labels and spans only in output).
+This is a labelled set, not a production sample. Do not restate these
+figures as a general result.
+
+Gates: recall **≥ 0.90**; default gateway profile (`replace` @ 0.6) must
+**act on ≥ 90%** of labeled generics. The test also prints
+`generic_secret_precision = tp / (tp + exclusion_fps)` using the same
+exclusion corpus helper as the gate above. That is a labelled-set plus
+negative-corpus ratio, not a general precision result.
+
+Measured on this tree (labelled set + exclusion corpus only):
+`generic_secret_precision=1.0000`, `generic_secret_recall=1.0000`,
+`generic_secret_acted_under_default_profile=1.0000`.
+
+### Vendored OSS slice
+
+Test: `crates/redact-core/tests/oss_slice.rs`.
+
+Hermetic MIT/BSD/Apache slice (pinned SHAs of `facebook/react`,
+`redis/redis` 7.2.4 BSD-3 — not RSALv2/SSPL — `pallets/flask`,
+`clap-rs/clap`). Do not vendor `git/git` (GPL).
+
+- **≤ 5 unreviewed `GENERIC_SECRET` / 100k lines**
+- Secret-named + secret-shaped literals in upstream docs count as true
+  positives, not FPs
+- Every remaining hit is a reviewed fingerprint (`tp` or `waived`)
+
+Measured on this tree: `oss_slice_lines=56201` `generic_hits=0`
+`unreviewed=0` `unreviewed_per_100k=0.0000`.
+
+Exceeding a ceiling is a detector bug. Do not raise N to land a change.

@@ -96,6 +96,23 @@ curl -s http://127.0.0.1:8080/v1/compliance/check \
 
 Health probes work without authentication: `GET /livez`, `GET /readyz`, `GET /health`.
 
+## Disable an entity via policy
+
+The CLI subtracts types with `--disable`. The gateway equivalent is
+`{ action: allow }` on the active profile: the span is detected and
+reported, but the payload is left untouched.
+
+```yaml
+profiles:
+  default:
+    entities:
+      DOMAIN_NAME: { action: allow }
+      GENERIC_SECRET: { action: allow }
+```
+
+See [policy](policy.md) for the full action set. `GENERIC_SECRET` is
+independently disableable the same way.
+
 ## 2. Chat proxy with Ollama
 
 Point the gateway at a local OpenAI-compatible provider. The examples use [Ollama](https://ollama.com/) and the `llama3.2` model.

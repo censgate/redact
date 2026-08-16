@@ -168,7 +168,20 @@ fi
 redact analyze --entities EmailAddress --entities UsSsn \
   "Email: test@example.com, SSN: 123-45-6789, Phone: (555) 123-4567"
 # Only detects EmailAddress and UsSsn, ignores PhoneNumber
+
+# Subtract from the full compiled set, or from --entities when both are set
+redact analyze --disable DomainName -i notes.txt
+redact anonymize --entities EmailAddress,UsSsn --disable UsSsn -i notes.txt
+
+# Empty remaining set is an error. List compiled names:
+redact --format json list-entities
 ```
+
+`--disable` subtracts from `--entities` when both are given, or from the
+full compiled set when `--entities` is omitted. On the gateway the
+equivalent is `{ action: allow }` on the profile — see
+[getting started](docs/gateway/getting-started.md#disable-an-entity-via-policy)
+and [policy](docs/gateway/policy.md).
 
 ## WebAssembly
 
@@ -331,8 +344,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-redact-core = "0.9.1"
-redact-ner = "0.9.1"  # Optional: for ML-based NER
+redact-core = "0.10.0"
+redact-ner = "0.10.0"  # Optional: for ML-based NER
 ```
 
 ### Basic Pattern Detection
@@ -524,6 +537,14 @@ With the bundled `default` profile the provider sees `[EMAIL_ADDRESS]` instead o
 | Auth | `none`, static API keys, or OIDC bearer JWTs |
 | Telemetry | OpenTelemetry traces, metrics, and audit log records (`OTEL_*` + `CENSGATE_TRACE_*`) |
 | Streaming | Buffered (default, in-place SSE rewrite) or incremental with a hold-back window |
+
+To pass an entity through untouched (the gateway equivalent of CLI
+`--disable`), set `{ action: allow }` on that type in the active profile.
+See [getting started](docs/gateway/getting-started.md#disable-an-entity-via-policy).
+
+Pattern packs: load extra YAML with `CENSGATE_PATTERN_PACKS` /
+`--pattern-pack`. How to write one, and where the opt-in long-tail pack
+lives, is in [configuration](docs/gateway/configuration.md#pattern-packs).
 
 Docker / Compose / Kubernetes assets: `Dockerfile.gateway`, `docker-compose.gateway.yml`, `deploy/`. Full docs: [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md), [`crates/redact-gateway/README.md`](crates/redact-gateway/README.md), and [`docs/gateway/`](docs/gateway/).
 
@@ -734,9 +755,13 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [API Documentation](https://docs.rs/redact-core) — Rust API docs
 - [Gateway getting started](/censgate/redact/blob/main/docs/gateway/getting-started.md) — Local redaction, Ollama chat, OpenAI SDK
 - [Gateway Documentation](/censgate/redact/blob/main/docs/gateway) — Configuration, policy, tokenization, auth, telemetry, audit, streaming, deployment
+<<<<<<< HEAD
+- [Secrets detection](/censgate/redact/blob/main/docs/secrets-detection.md) — Entropy model, exclusions, precision corpora
+=======
 - [Postgres scanning model](/censgate/redact/blob/main/docs/scanning-model.md) — `redact-scan` layers, safety rails, report shape
 - [redact-scan](/censgate/redact/blob/main/crates/redact-scan/README.md) — Install and sample report
 - [redact-verify](/censgate/redact/blob/main/crates/redact-verify/README.md) — Offline ledger pack checks
+>>>>>>> origin/main
 - [Test Coverage](/censgate/redact/blob/main/TEST_COVERAGE.md) — Testing details
 - [Contributing Guide](/censgate/redact/blob/main/CONTRIBUTING.md) — How to contribute
 - [Project scope](/censgate/redact/blob/main/docs/PROJECT_SCOPE.md) — What this repository accepts
