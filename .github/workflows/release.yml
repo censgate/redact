@@ -131,6 +131,9 @@ jobs:
       - name: List artifacts
         run: ls -la artifacts/
 
+      - name: Extract CHANGELOG notes
+        run: ./scripts/ci/changelog-notes.sh "${VERSION#v}" > release-notes.md
+
       - name: Create draft GitHub Release and upload assets
         uses: softprops/action-gh-release@v1
         with:
@@ -138,6 +141,7 @@ jobs:
           name: Release ${{ env.VERSION }}
           draft: true
           prerelease: ${{ contains(env.VERSION, '-') }}
+          body_path: release-notes.md
           generate_release_notes: true
           files: artifacts/*
         env:
