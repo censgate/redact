@@ -10,37 +10,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `GENERIC_SECRET`: charset-aware Shannon entropy over assignment-like values
-  (length-aware floor, segment keyword allow/deny, value-only spans). Independently
-  disableable via CLI `--disable`, WASM `analyze_excluding`, or gateway
-  `{ action: allow }`. See `docs/secrets-detection.md`. Phase 2 of #101.
+  only (length-aware floor, segment keyword allow/deny, value-only spans).
+  It will catch `api_key=…` / `export SERVICE_SECRET=…` that pass the
+  charset, length, and keyword gates. It will not catch arbitrary
+  high-entropy blobs, hashes or UUIDs on a digest LHS, lockfile
+  `integrity=` lines, placeholders, or prefixed types (those stay named
+  types). Independently disableable via CLI `--disable`, WASM
+  `analyze_excluding`, or gateway `{ action: allow }`. See
+  `docs/secrets-detection.md`. Phase 2 of #101 (#138).
 - Named secret types: `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`,
   `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`,
   `HTTP_BASIC_AUTH` (decode-validated). GitLab length-closed shapes and AWS
   Bedrock under `AWS_ACCESS_KEY`. Compiled entity count is 61 (60 pattern +
-  `GENERIC_SECRET`).
+  `GENERIC_SECRET`) (#138).
 - Optional long-tail pack `patterns/optional/providers-v1.yaml` (gitleaks MIT,
-  pinned commit). Not on the Docker / compose / Kubernetes default path.
-- CLI `redact --format json list-entities` and host-only
-  `scripts/extract-facts.mjs` → `data/facts.json`.
+  pinned commit). Opt-in only: not on the Docker / compose / Kubernetes
+  default path, and not compiled into WASM. This is not gitleaks parity
+  (#138).
+- CLI `--disable` (subtracts from `--entities`, or from the full compiled
+  set when `--entities` is omitted; empty remaining set is an error),
+  `redact --format json list-entities`, and host-only
+  `scripts/extract-facts.mjs` → `data/facts.json` (#138).
 - `redact-scan`: new workspace crate and `redact-scan` binary for read-only
   Postgres PII discovery. Report types, credential scrubber, CLI preflight,
   a read-only safety session (refuse superuser and write grants), and
   layers 0 / 0.5 / 1 / 2 (catalog, `pg_stats`, bounded `TABLESAMPLE`,
   JSON paths). Optional `--report-url` POSTs the report JSON; `--fail-on`
   exits 1 on matching findings. Reports contain locations and counts
-  only — never sample values. See `docs/scanning-model.md`.
+  only — never sample values. See `docs/scanning-model.md` (#131).
+- `redact-verify`: new workspace crate and `redact-verify` binary for
+  independent offline verification of Censgate ledger evidence packs.
+  No `redact-core` dependency; default path does not dial the network
+  (#132).
+- Contributor License Agreement and Code of Conduct, with a CLA GitHub
+  Action (#119, #120).
 
 ### Changed
 
+- **Gateway default pattern-pack path (migration).** 0.9.x images set
+  `CENSGATE_PATTERN_PACKS=/app/patterns`, which loaded the whole tree
+  including `patterns/security`. Images now set
+  `/app/patterns/compliance:/app/patterns/pii`. Existing gateway users
+  lose `patterns/security` on the default path (including the now-disabled
+  credentials catch-alls). Directories named `optional/` and `quarantine/`
+  are never auto-walked. Restore the old tree with
+  `CENSGATE_PATTERN_PACKS=/app/patterns` only if you accept the catch-all
+  risk; the supported opt-in for long-tail prefixes is
+  `patterns/optional/providers-v1.yaml` (#138).
 - Release: GitHub Release publication waits for all three image jobs and a
   post-push digest smoke on `linux/amd64` and `linux/arm64` (the load-then-push
-  split is what let #114 ship).
-- Release: gateway image smoke asserts `/v1/redact` (email replace + AWS key
-  block), not only `--version`.
-- Release: crates.io publish is checked against the index after the
-  `continue-on-error` publish steps.
-- Release: a no-checkout stranger-path job installs from crates.io and pulls
-  the published gateway image the way a consumer would.
+  split is what let #114 ship). Gateway image smoke asserts `/v1/redact`
+  (email replace + AWS key block on the default profile), not only
+  `--version`. crates.io publish is checked against the index after the
+  `continue-on-error` publish steps. A no-checkout stranger-path job
+  installs from crates.io and pulls the published gateway image (#137).
 
 ### Fixed
 
@@ -51,16 +74,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   delimiter instead of `\\b` after `=`. Pack `entropy: generic` requires
   capture group 1 at analyze time. Non-entropy pack rules keep the full
   match unless they set `value_group`. HTTP Basic matching is
-  case-insensitive.
-- Gateway default pack path is `/app/patterns/compliance:/app/patterns/pii`.
-  Noisy `credentials.yaml` rules are disabled; `optional/` and `quarantine/`
-  directories are not auto-discovered. Removed `api_key` → `PRIVATE_KEY` alias.
+  case-insensitive (#138).
+- Removed the `api_key` → `PRIVATE_KEY` alias (#138).
+- Encrypt nonces adapted for `aes-gcm` 0.11 (`Nonce::from` instead of
+  deprecated `Nonce::from_slice`); envelope layout unchanged (#135).
 - `redact-scan`: upgrade `testcontainers-modules` so CI `cargo audit` is not
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
-  only by unused optional `sqlx-mysql` — this crate enables Postgres only.
+  only by unused optional `sqlx-mysql` — this crate enables Postgres only
+  (#131).
 - `redact-scan`: retry testcontainer start and pre-pull `postgres:16-alpine`
-  in CI so Hub `bytes remaining on stream` flakes do not fail the job.
+  in CI so Hub `bytes remaining on stream` flakes do not fail the job
+  (#131).
+
+### Security
+
+- `patterns/security/credentials.yaml` catch-alls are disabled. In
+  particular `sec_aws_secret_key` was `\b[A-Za-z0-9/+=]{40}\b`, which
+  matched any 40-character blob — including every SHA-1. Combined with
+  the default pack-path change above, those rules are no longer on the
+  Docker path (#138).
 
 ## [0.9.1] - 2026-08-08
 
