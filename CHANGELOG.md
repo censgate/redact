@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Pattern quality harness: hermetic exact-span sets for default PII
+  (`testdata/quality/pattern-v1`), compiled secrets, and the opt-in
+  providers pack. Precision gates reject impossible ISO dates, null and
+  broadcast MACs, order-like phone/card values, commit-shaped SHA-1, and
+  junk `%40` / `u00XX` domain fragments. Token matching keeps
+  `commitment`, digit-leading domains, and hotel/cartel context from
+  being over-suppressed. This is a named-set score, not a general
+  precision result. Supersedes #108.
+
 ## [0.10.0] - 2026-08-16
 
 ### Added

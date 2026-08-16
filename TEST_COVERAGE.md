@@ -27,6 +27,19 @@ Comprehensive test coverage improvements addressing all critical gaps identified
 
 **Run**: `cargo test --package redact-core --test pattern_coverage`
 
+### 1b. Pattern quality harness (hermetic precision)
+
+Not a general precision result. Exact UTF-8 spans; `config.min_score` and
+`ner: false` are enforced. Out-of-scope predictions fail.
+
+| Suite | File | Run |
+|-------|------|-----|
+| pattern-v1 PII | `testdata/quality/pattern-v1.json` + `crates/redact-core/tests/quality_pattern_v1.rs` | `cargo test -p redact-core --test quality_pattern_v1` |
+| secrets-default | `crates/redact-core/tests/quality_secrets_default.rs` | `cargo test -p redact-core --test quality_secrets_default` |
+| optional providers | `crates/redact-gateway/tests/packs.rs` (`quality_optional_providers_exact_spans`) | `cargo test -p redact-gateway --test packs quality_optional` |
+
+See `testdata/quality/README.md` and `docs/secrets-detection.md`.
+
 ### 2. NER End-to-End Tests (10 tests)
 **File**: `crates/redact-ner/tests/ner_e2e.rs`
 

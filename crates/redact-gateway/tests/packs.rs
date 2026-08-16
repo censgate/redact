@@ -345,3 +345,105 @@ fn optional_providers_v1_loads_explicitly_and_stays_off_the_tree_walk() {
         "tree walk must not load providers-v1: {walked_hits:?}"
     );
 }
+
+fn assert_custom_span(text: &str, hits: &[redact_core::types::RecognizerResult], name: &str) {
+    let hit = hits
+        .iter()
+        .find(|h| matches!(&h.entity_type, EntityType::Custom(n) if n == name))
+        .unwrap_or_else(|| panic!("{name} missing from {hits:?}"));
+    assert_eq!(
+        &text[hit.start..hit.end],
+        text.trim(),
+        "{name} span {}..{} on {text}",
+        hit.start,
+        hit.end
+    );
+}
+
+#[test]
+fn quality_optional_providers_exact_spans() {
+    let pack = repo_patterns_dir().join("optional/providers-v1.yaml");
+    let (recognizer, report) = load_packs(&[pack]).expect("explicit optional pack");
+    let recognizer = recognizer.expect("providers-v1 should compile");
+    assert_eq!(report.packs_loaded, 1);
+    assert_eq!(report.patterns_skipped, 0, "errors: {:?}", report.errors);
+
+    let shopify = format!("shpat_{}", "a".repeat(32));
+    let adobe = format!("p8e-{}", "A".repeat(32));
+    let linear = format!("lin_api_{}", "A".repeat(40));
+    let postman = format!("PMAK-{}-{}", "a".repeat(24), "b".repeat(34));
+    let pulumi = format!("pul-{}", "a".repeat(40));
+    let newrelic = format!("NRAK-{}", "A".repeat(27));
+
+    let cases = [
+        (shopify.as_str(), "SHOPIFY_ACCESS_TOKEN"),
+        (adobe.as_str(), "ADOBE_CLIENT_SECRET"),
+        (linear.as_str(), "LINEAR_API_KEY"),
+        (postman.as_str(), "POSTMAN_API_TOKEN"),
+        (pulumi.as_str(), "PULUMI_API_TOKEN"),
+        (newrelic.as_str(), "NEW_RELIC_USER_API_KEY"),
+    ];
+
+    let mut tp = 0u32;
+    for (text, name) in cases {
+        let hits = recognizer.analyze(text, "en").expect("analyze");
+        assert_custom_span(text, &hits, name);
+        tp += 1;
+    }
+
+    let hf = format!("hf_{}", "A".repeat(34));
+    let hf_hits = recognizer.analyze(&hf, "en").expect("analyze");
+    assert!(
+        hf_hits.iter().all(|h| {
+            !matches!(&h.entity_type, EntityType::Custom(n) if n == "HUGGINGFACE_TOKEN")
+                && h.entity_type != EntityType::HuggingFaceToken
+        }),
+        "optional pack must not compile core prefixes: {hf_hits:?}"
+    );
+
+    println!("quality_optional_providers tp={tp} fp=0");
+    assert_eq!(tp, 6);
+}
+
+#[test]
+fn default_compliance_pii_path_does_not_load_optional_or_security() {
+    let patterns = repo_patterns_dir();
+    let paths = [patterns.join("compliance"), patterns.join("pii")];
+    let (recognizer, report) = load_packs(&paths).expect("default packs");
+    let recognizer = recognizer.expect("default packs should yield a recognizer");
+    assert!(
+        report.sources.iter().all(|s| {
+            let p = s.to_string_lossy();
+            !p.contains("/optional/") && !p.contains("/security/") && !p.contains("/quarantine/")
+        }),
+        "default path loaded unexpected sources: {:?}",
+        report.sources
+    );
+
+    let shopify = format!("shpat_{}", "a".repeat(32));
+    let hits = recognizer.analyze(&shopify, "en").expect("analyze");
+    assert!(
+        hits.iter().all(|h| {
+            !matches!(&h.entity_type, EntityType::Custom(n) if n == "SHOPIFY_ACCESS_TOKEN")
+        }),
+        "default compliance+pii must not load providers-v1: {hits:?}"
+    );
+}
+
+#[test]
+fn default_image_pack_env_is_compliance_and_pii_only() {
+    let compose = include_str!("../../../docker-compose.gateway.yml");
+    assert!(
+        compose.contains("CENSGATE_PATTERN_PACKS: /app/patterns/compliance:/app/patterns/pii"),
+        "compose default pack path drifted"
+    );
+    let k8s = include_str!("../../../deploy/kubernetes/redact-gateway.yaml");
+    assert!(
+        k8s.contains("/app/patterns/compliance:/app/patterns/pii"),
+        "k8s default pack path drifted"
+    );
+    assert!(
+        !compose.contains("/app/patterns/optional") && !compose.contains("/app/patterns/security"),
+        "compose must not default-load optional or security"
+    );
+}

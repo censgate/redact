@@ -108,6 +108,23 @@ In addition to the Phase 1 prefixes: `HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`, `D
 
 Not compiled-in (pack or later): Azure AD `Q~` infix, GCP SA JSON, Teams webhooks, Discord, Datadog, Azure storage, Cloudflare global, generic-api-key, live API checks.
 
+## Pattern quality harness
+
+Exact-span precision sets live under `testdata/quality/` and in runtime-
+assembled tests. They are **not** the performance tree in
+`docs/benchmarks/`. A printed precision of 1.0 is hermetic-set-only.
+
+| Set | Command | Scope |
+|-----|---------|-------|
+| `pattern-v1` | `cargo test -p redact-core --test quality_pattern_v1` | 11 default PII types; impossible dates, null/broadcast MACs, order-like phone/card, commit-shaped SHA-1, junk `%40` / `u00XX` domains. Token gates so `commitment`, `hotel`, and `cartel` do not trip `commit` / `order` / `card`. Digit-leading domains stay valid. |
+| `secrets-default` | `cargo test -p redact-core --test quality_secrets_default` | Compiled named types (`HUGGINGFACE_TOKEN`, `DATABRICKS_TOKEN`, `DIGITALOCEAN_TOKEN`, `NOTION_API_KEY`, `PERPLEXITY_API_KEY`, `HTTP_BASIC_AUTH`), AWS Bedrock / GitLab shapes, assignment-only `GENERIC_SECRET`, exclusion overlap vs GUID/hashes. Gateway floor 0.6. |
+| optional providers | `cargo test -p redact-gateway --test packs quality_optional` | `patterns/optional/providers-v1.yaml` only. Not mixed into the default score. |
+
+`CorpusConfig.min_score` and `ner: false` are enforced. Predictions
+outside `entity_types_in_scope` fail the case (they are not ignored).
+NER and formatted-value recall stay out of this harness. Do not claim
+gitleaks parity. Compiled entity count remains **61**.
+
 ## Precision corpora (measured)
 
 These figures are from hermetic tests in this repository. They are **not**
