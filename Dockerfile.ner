@@ -1,4 +1,4 @@
-# Docker image with all entities enabled: pattern-based (54 types) + ONNX NER (PERSON, ORG, LOCATION).
+# Docker image with all entities enabled: pattern-based (61 compiled types) + ONNX NER (PERSON, ORG, LOCATION).
 #
 # Build:
 #   docker build -f Dockerfile.ner -t ghcr.io/censgate/redact:full .

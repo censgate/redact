@@ -28,7 +28,7 @@ struct Args {
     /// Ed25519 public key (hex or PEM) for body_signature
     #[arg(long)]
     pubkey: PathBuf,
-    /// Optionally re-query Rekor (never required; default is offline)
+    /// Accepted and unused. Does not dial the network. Never required for a pass.
     #[arg(long, default_value_t = false)]
     online: bool,
     #[arg(long, default_value = "text")]

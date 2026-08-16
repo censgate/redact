@@ -8,6 +8,8 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 documentation = "https://docs.rs/redact-cli"
 description = "CLI tool for PII detection and anonymization"
 

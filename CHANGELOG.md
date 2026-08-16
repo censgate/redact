@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- README leads with CI secrets, Postgres discovery, and offline evidence
+  verification instead of the gateway-as-headline framing. Project structure,
+  testing, roadmap, and acknowledgments moved under `docs/`.
+- `redact-scan` and `redact-verify` 0.10.0 are on crates.io. Workspace crate
+  keywords/homepage aligned for crates.io discovery. Subsequent tags publish
+  both crates in the Release workflow.
+
 ## [0.10.0] - 2026-08-16
 
 ### Added

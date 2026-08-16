@@ -1,4 +1,4 @@
-/// Comprehensive test coverage for all 36+ pattern-based entity types
+/// Comprehensive test coverage for compiled pattern-based entity types (61).
 ///
 /// This test suite validates detection of every entity type supported by the
 /// pattern recognizer, ensuring complete coverage of the PII detection system.

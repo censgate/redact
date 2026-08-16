@@ -18,9 +18,9 @@ rust-version = "1.88"
 authors = ["Censgate LLC <support@censgate.com>"]
 license = "Apache-2.0"
 repository = "https://github.com/censgate/redact"
-homepage = "https://github.com/censgate/redact"
+homepage = "https://censgate.com"
 readme = "README.md"
-keywords = ["pii", "redaction", "privacy", "gdpr", "hipaa"]
+keywords = ["pii", "redaction", "privacy", "gdpr", "presidio"]
 categories = ["text-processing", "web-programming", "wasm"]
 
 [workspace.dependencies]

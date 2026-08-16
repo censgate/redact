@@ -9,7 +9,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 TAG_VERSION="${TAG_VERSION:?TAG_VERSION is required (semver without leading v)}"
 # Space-separated; override when publishing a subset (publish-crates.yml).
-CRATES="${CRATES:-redact-core redact-ner redact-api redact-cli redact-gateway}"
+CRATES="${CRATES:-redact-core redact-ner redact-api redact-cli redact-gateway redact-scan redact-verify}"
 USER_AGENT="${CRATES_USER_AGENT:-censgate-redact-ci (https://github.com/censgate/redact)}"
 TIMEOUT_SECS="${CRATES_VERIFY_TIMEOUT_SECS:-300}"
 SLEEP_SECS="${CRATES_VERIFY_SLEEP_SECS:-15}"

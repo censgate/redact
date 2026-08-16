@@ -11,7 +11,7 @@ keywords.workspace = true
 categories.workspace = true
 readme.workspace = true
 documentation = "https://docs.rs/redact-core"
-description = "Core PII detection and anonymization engine - Presidio replacement"
+description = "Core PII detection and anonymization engine"
 
 [dependencies]
 regex = { workspace = true }

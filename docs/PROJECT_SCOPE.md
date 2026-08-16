@@ -19,6 +19,7 @@ This Apache-2.0 repository accepts contributions to:
 | `redact-wasm` | WebAssembly bindings |
 | `redact-gateway` | Self-hosted OpenAI-compatible privacy gateway |
 | `redact-scan` | Read-only Postgres PII discovery scanner |
+| `redact-verify` | Offline verifier for Censgate ledger evidence packs (no ledger storage) |
 
 Also in scope: documentation, tests, examples, packaging, and CI for those
 crates.
