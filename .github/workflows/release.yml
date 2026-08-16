@@ -118,11 +118,15 @@ jobs:
         with:
           ref: ${{ env.VERSION }}
 
-      - name: Download all artifacts
+      - name: Download binary artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+          # Binary archives only. buildx also uploads *-dockerbuild cache
+          # artifacts; pulling those here has flaked Create Release after
+          # the images already verified (run 31921441134).
+          pattern: redact-*
 
       - name: List artifacts
         run: ls -la artifacts/
@@ -534,14 +538,17 @@ jobs:
           set -euo pipefail
           docker run --rm --network host \
             -e TAG_VERSION="${TAG_VERSION}" \
-            rust:1.93-bookworm bash -lc '
+            rust:1.93-bookworm bash -c '
               set -euo pipefail
+              # Login shells reset PATH and drop /usr/local/cargo/bin (rc.1
+              # rehearsal: cargo: command not found). Stay non-login.
+              export PATH="/usr/local/cargo/bin:${PATH}"
               apt-get update
               apt-get install -y --no-install-recommends curl
-              cargo install redact-cli
+              cargo install redact-cli --version "${TAG_VERSION}"
               redact --version
               redact --version | grep -F "${TAG_VERSION}"
-              cargo install redact-gateway
+              cargo install redact-gateway --version "${TAG_VERSION}"
               export OTEL_SDK_DISABLED=true
               redact-gateway --host 127.0.0.1 &
               gw_pid=$!

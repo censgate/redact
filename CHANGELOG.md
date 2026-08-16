@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runner (empty logs, ~1s exit). Native amd64 now uses `x86-64-v3`
   and native arm64 uses `neoverse-n1`, matching the existing
   cross-compile flags.
+- `create-release` downloads only `redact-*` binary artifacts so
+  buildx `*-dockerbuild` cache uploads cannot flake the GitHub
+  Release step after images already verified.
+- Stranger-path crate install uses a non-login shell (Cargo stays
+  on `PATH`) and `cargo install --version` so a prerelease tag is
+  what gets installed.
 - `redact-scan`: upgrade `testcontainers-modules` so CI `cargo audit` is not
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
