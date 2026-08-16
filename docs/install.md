@@ -19,6 +19,8 @@ cargo install redact-scan      # read-only Postgres PII discovery
 cargo install redact-verify    # offline ledger evidence-pack verifier
 ```
 
+Published crates: [`redact-scan`](https://crates.io/crates/redact-scan) · [`redact-verify`](https://crates.io/crates/redact-verify) (0.10.0).
+
 ## From source
 
 ```bash
