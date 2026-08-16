@@ -241,4 +241,56 @@ Telemetry **transport** (exporters, endpoints, protocol, sampling, resource attr
 
 ## Pattern packs
 
-`CENSGATE_PATTERN_PACKS` / `packs.paths` load additional YAML pattern packs at startup (same schema as `/patterns/**/*.yaml`). A single bad third-party regex is skipped and reported rather than taking the process down. Set `disable_builtin: true` only when your packs fully replace the compiled engine patterns.
+`CENSGATE_PATTERN_PACKS` / `packs.paths` / `--pattern-pack` load additional
+YAML pattern packs at startup (same schema as `/patterns/**/*.yaml`). A
+single bad third-party regex is skipped and reported rather than taking
+the process down. Set `disable_builtin: true` only when your packs fully
+replace the compiled engine patterns.
+
+### How to load
+
+```bash
+# Colon / comma / semicolon-separated files or directories
+export CENSGATE_PATTERN_PACKS=/app/patterns/compliance:/app/patterns/pii
+
+# CLI (written into the same env before load)
+redact-gateway --pattern-pack ./patterns/optional/providers-v1.yaml
+```
+
+Default Docker / Compose / Kubernetes images set
+`CENSGATE_PATTERN_PACKS=/app/patterns/compliance:/app/patterns/pii`.
+The loader skips directories named `optional/` and `quarantine/` even
+when you point `ENV` at `/app/patterns`.
+
+### How to write one
+
+A pack is a YAML document with a `patterns:` list. Required per rule:
+`id` and `regex`. Optional: `name`, `entity_type`, `confidence`
+(default 0.5), `enabled` (default true), `description`, `examples`,
+`replacement`, `value_group`, `entropy`.
+
+```yaml
+version: "1.0"
+name: "example-pack"
+patterns:
+  - id: "ex_vendor_token"
+    name: "Vendor token"
+    entity_type: "VENDOR_TOKEN"
+    regex: '\bven_[A-Za-z0-9]{32}\b'
+    confidence: 0.95
+    enabled: true
+```
+
+`entropy: generic` is the only accepted entropy gate. Those rules **must**
+expose capture group 1 (the value) and go through
+`evaluate_generic_candidate` — they cannot score a bare value and skip
+the keyword / denylist / exclusion checks. Other rules keep the full
+match unless they set `value_group`.
+
+### Opt-in long-tail pack
+
+`patterns/optional/providers-v1.yaml` holds prefixed provider tokens
+that are not compiled into `redact-core` (gitleaks MIT, pinned commit).
+It is **not** on the Docker default path and is **not** compiled into
+WASM. This is not gitleaks parity; further provider coverage belongs in
+pattern-pack PRs (see [CONTRIBUTING.md](../../CONTRIBUTING.md)).
