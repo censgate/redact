@@ -314,8 +314,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-redact-core = "0.10.0-rc.1"
-redact-ner = "0.10.0-rc.1"  # Optional: for ML-based NER
+redact-core = "0.10.0"
+redact-ner = "0.10.0"  # Optional: for ML-based NER
 ```
 
 ### Basic Pattern Detection
