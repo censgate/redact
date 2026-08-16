@@ -134,11 +134,12 @@ This is a labelled set, not a production sample. Do not restate these
 figures as a general result.
 
 Gates: recall **≥ 0.90**; default gateway profile (`replace` @ 0.6) must
-**act on ≥ 90%** of labeled generics. Precision is computed against the
-exclusion corpus (0 FPs by the gate above), so it is not an independent
-general result.
+**act on ≥ 90%** of labeled generics. The test also prints
+`generic_secret_precision = tp / (tp + exclusion_fps)` using the same
+exclusion corpus helper as the gate above. That is a labelled-set plus
+negative-corpus ratio, not a general precision result.
 
-Measured on this tree (labelled set only):
+Measured on this tree (labelled set + exclusion corpus only):
 `generic_secret_precision=1.0000`, `generic_secret_recall=1.0000`,
 `generic_secret_acted_under_default_profile=1.0000`.
 

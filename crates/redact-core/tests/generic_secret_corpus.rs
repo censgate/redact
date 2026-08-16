@@ -22,12 +22,11 @@ fn generic_hits(text: &str) -> Vec<(usize, usize, f32)> {
         .collect()
 }
 
-#[test]
-fn exclusion_corpus_has_zero_generic_secret() {
+fn exclusion_cases() -> Vec<String> {
     let uuid = "550e8400-e29b-41d4-a716-446655440000";
     let sha256 = "a".repeat(64);
     let md5 = "b".repeat(32);
-    let cases = [
+    vec![
         format!("revision={uuid}"),
         format!("etag={uuid}"),
         format!("checksum={sha256}"),
@@ -47,16 +46,24 @@ fn exclusion_corpus_has_zero_generic_secret() {
         "background: #aabbcc;".to_string(),
         format!("data:image/png;base64,{}", "A".repeat(40)),
         format!("data:application/octet-stream;base64,{}", "B".repeat(40)),
-    ];
+    ]
+}
 
+fn exclusion_generic_secret_count() -> usize {
     let mut fps = 0usize;
-    for text in &cases {
-        let hits = generic_hits(text);
+    for text in exclusion_cases() {
+        let hits = generic_hits(&text);
         if !hits.is_empty() {
             fps += hits.len();
             eprintln!("exclusion FP: spans={hits:?} text_len={}", text.len());
         }
     }
+    fps
+}
+
+#[test]
+fn exclusion_corpus_has_zero_generic_secret() {
+    let fps = exclusion_generic_secret_count();
     println!("exclusion_generic_secret_count={fps}");
     assert_eq!(
         fps, 0,
@@ -152,7 +159,7 @@ fn labeled_positive_corpus_precision_recall() {
         println!("label={label} span={start}..{end} hits={}", hits.len());
     }
 
-    let exclusion_fps = 0usize; // gated by exclusion_corpus_has_zero_generic_secret
+    let exclusion_fps = exclusion_generic_secret_count();
     let precision = if tp + exclusion_fps == 0 {
         1.0
     } else {
