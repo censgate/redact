@@ -213,6 +213,17 @@ jobs:
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-gateway
         continue-on-error: true
 
+      - name: Wait for crates.io index
+        run: sleep 45
+
+      - name: Publish redact-scan
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-scan
+        continue-on-error: true
+
+      - name: Publish redact-verify
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-verify
+        continue-on-error: true
+
       - name: Verify crates.io versions
         run: ./scripts/ci/verify-crates.sh
         env:

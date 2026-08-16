@@ -2,12 +2,16 @@
 name = "redact-verify"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Independent offline verifier for Censgate ledger evidence packs (no redact-core)"
 readme = "README.md"
+documentation = "https://docs.rs/redact-verify"
+description = "Independent offline verifier for Censgate ledger evidence packs (no redact-core)"
+keywords = ["attestation", "ledger", "merkle", "privacy", "cli"]
+categories = ["command-line-utilities", "cryptography"]
 
 [[bin]]
 name = "redact-verify"
