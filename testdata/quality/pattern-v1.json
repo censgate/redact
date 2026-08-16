@@ -1,0 +1,313 @@
+{
+  "version": "pattern-v1",
+  "config": {
+    "language": "en",
+    "min_score": 0.5,
+    "ner": false,
+    "entity_types_in_scope": [
+      "EMAIL_ADDRESS",
+      "PHONE_NUMBER",
+      "CREDIT_CARD",
+      "IBAN_CODE",
+      "IP_ADDRESS",
+      "URL",
+      "GUID",
+      "MAC_ADDRESS",
+      "DATE_TIME",
+      "SHA1_HASH",
+      "DOMAIN_NAME"
+    ]
+  },
+  "cases": [
+    {
+      "id": "negative-date-month",
+      "input": "created_at=2026-99-13",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-impossible-calendar-date",
+      "input": "created_at=2026-02-31",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-mac-null",
+      "input": "device=00:00:00:00:00:00",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-mac-broadcast",
+      "input": "device=ff:ff:ff:ff:ff:ff",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-phone-like-order",
+      "input": "order 202-555-0142",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-card-like-order",
+      "input": "order_id=4111111111111111",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-commit-hash",
+      "input": "commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-card-luhn",
+      "input": "Card: 4111111111111112",
+      "expected": [],
+      "tier": "negative",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "negative-percent-encoded-domain",
+      "input": "ada%40censgate.com",
+      "expected": [],
+      "tier": "negative"
+    },
+    {
+      "id": "negative-escaped-at-domain",
+      "input": "u0040example.com",
+      "expected": [],
+      "tier": "negative"
+    },
+    {
+      "id": "email-basic",
+      "input": "Email ada@example.com",
+      "expected": [
+        {
+          "entity_type": "EMAIL_ADDRESS",
+          "start": 6,
+          "end": 21,
+          "raw": "ada@example.com"
+        }
+      ],
+      "tier": "contract",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "card-visa-compact",
+      "input": "Payment card 4111111111111111",
+      "expected": [
+        {
+          "entity_type": "CREDIT_CARD",
+          "start": 13,
+          "end": 29,
+          "raw": "4111111111111111"
+        }
+      ],
+      "tier": "contract",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "iban-gb-compact",
+      "input": "IBAN GB82WEST12345698765432",
+      "expected": [
+        {
+          "entity_type": "IBAN_CODE",
+          "start": 5,
+          "end": 27,
+          "raw": "GB82WEST12345698765432"
+        }
+      ],
+      "tier": "contract",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "uuid-request-id",
+      "input": "request_id=550e8400-e29b-41d4-a716-446655440000",
+      "expected": [
+        {
+          "entity_type": "GUID",
+          "start": 11,
+          "end": 47,
+          "raw": "550e8400-e29b-41d4-a716-446655440000"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "mac-locally-administered",
+      "input": "MAC 02:42:ac:11:00:02",
+      "expected": [
+        {
+          "entity_type": "MAC_ADDRESS",
+          "start": 4,
+          "end": 21,
+          "raw": "02:42:ac:11:00:02"
+        }
+      ],
+      "tier": "contract",
+      "provenance": {
+        "source": "adapted-from-anon-pii",
+        "commit": "1a22680e43b29c80e141a39b0a66eb3dcafb7522"
+      }
+    },
+    {
+      "id": "url-basic",
+      "input": "See https://example.com/path",
+      "expected": [
+        {
+          "entity_type": "URL",
+          "start": 4,
+          "end": 28,
+          "raw": "https://example.com/path"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "ipv4-documentation",
+      "input": "Host 192.0.2.44",
+      "expected": [
+        {
+          "entity_type": "IP_ADDRESS",
+          "start": 5,
+          "end": 15,
+          "raw": "192.0.2.44"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "phone-us-context",
+      "input": "Call (202) 555-0142",
+      "expected": [
+        {
+          "entity_type": "PHONE_NUMBER",
+          "start": 5,
+          "end": 19,
+          "raw": "(202) 555-0142"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "date-iso-date-only",
+      "input": "created_at=2026-07-13",
+      "expected": [
+        {
+          "entity_type": "DATE_TIME",
+          "start": 11,
+          "end": 21,
+          "raw": "2026-07-13"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "domain-digit-leading",
+      "input": "Visit 1password.com today",
+      "expected": [
+        {
+          "entity_type": "DOMAIN_NAME",
+          "start": 6,
+          "end": 19,
+          "raw": "1password.com"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "sha1-commitment-not-commit",
+      "input": "Our commitment aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa stands",
+      "expected": [
+        {
+          "entity_type": "SHA1_HASH",
+          "start": 15,
+          "end": 55,
+          "raw": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "phone-hotel-not-order",
+      "input": "Hotel desk (202) 555-0142",
+      "expected": [
+        {
+          "entity_type": "PHONE_NUMBER",
+          "start": 11,
+          "end": 25,
+          "raw": "(202) 555-0142"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "card-cartel-not-card-cue",
+      "input": "Cartel invoice 4111111111111111",
+      "expected": [
+        {
+          "entity_type": "CREDIT_CARD",
+          "start": 15,
+          "end": 31,
+          "raw": "4111111111111111"
+        }
+      ],
+      "tier": "contract"
+    },
+    {
+      "id": "email-unicode-context",
+      "input": "José emailed ada@example.com yesterday",
+      "expected": [
+        {
+          "entity_type": "EMAIL_ADDRESS",
+          "start": 14,
+          "end": 29,
+          "raw": "ada@example.com"
+        }
+      ],
+      "tier": "contract"
+    }
+  ]
+}
