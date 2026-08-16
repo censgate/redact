@@ -213,15 +213,18 @@ Before committing:
 - **Rust**: 1.93.0 (see `.tool-versions`)
 - **MSRV**: 1.88
 - **Python**: 3.8+ (for NER model export only)
-- **Native build deps**: `pkg-config`, `cmake`, `g++`, `libssl-dev`
+- **Native build deps**: `pkg-config`, `cmake`, a GNU C++ compiler, OpenSSL
+  headers. Debian/Ubuntu package names: `g++`, `libssl-dev`.
 
 ### Build and run gotchas
 
-These apply on any Linux/macOS checkout, not a particular CI or cloud image.
+Workspace facts (any host). Compiler/library names differ by OS.
 
 - **C++ must be GNU, not clang.** `tokenizers` → `esaxx-rs` fails under clang
-  (`esaxx.cpp: 'cstdint' file not found`). Use `CC=gcc CXX=g++`, or on Debian/
-  Ubuntu point `cc`/`c++` at gcc/g++ (`update-alternatives --set`).
+  (`esaxx.cpp: 'cstdint' file not found`). On Debian/Ubuntu: `CC=gcc CXX=g++`,
+  or point `cc`/`c++` at gcc/g++ (`update-alternatives --set`). On macOS,
+  Homebrew `gcc`/`g++` are versioned (`g++-14`); Apple `gcc` is a clang shim
+  and does not count.
 - **No workspace default-run binary.** From the repo root use
   `cargo run -p <crate> -- …`. `cargo run --bin redact-cli` from the root
   does not select the package.
@@ -235,4 +238,5 @@ These apply on any Linux/macOS checkout, not a particular CI or cloud image.
   `api_key` or `oidc`.
 - **NER is optional.** `redact-ner` builds without a model (`ort` is
   `load-dynamic`). The NER e2e tests are `#[ignore]` and need an exported
-  ONNX model plus `libonnxruntime.so` (`ORT_DYLIB_PATH`).
+  ONNX model plus the ONNX Runtime dylib (`ORT_DYLIB_PATH`:
+  `libonnxruntime.so` on Linux, `libonnxruntime.dylib` on macOS).
