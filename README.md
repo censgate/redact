@@ -25,7 +25,7 @@ redact analyze --fail-on-detect "Email jane@example.com"
 ---
 
 - **Secrets in CI** — `redact analyze --fail-on-detect`. Deterministic, no NER, no network. Adjacent to gitleaks, at runtime rather than at rest. Default compiled set is **61** types (`redact --format json list-entities`); the long tail is an opt-in pack, not gitleaks parity.
-- **Postgres PII discovery** — `redact-scan`. Read-only (replica/staging preferred). Locations and counts only; nothing leaves the network. An input to a records-of-processing inventory (GDPR Art. 30), not a certification.
+- **Postgres PII discovery** — `redact-scan`. Read-only (replica/staging preferred). Locations and counts only; sample values never leave the host. `--report-url` is an explicit opt-in POST of that findings JSON. An input to a records-of-processing inventory (GDPR Art. 30), not a certification.
 - **Prove what left** — gateway + ledger + `redact-verify`. The gateway is the delivery mechanism. The evidence pack is what a third party can check offline.
 - **Embed the engine** — `redact-core` library, REST API, and pattern-only WASM.
 
@@ -40,9 +40,9 @@ is yours, and nothing stops a rewrite.
 
 Censgate ledger evidence packs are a different artifact:
 
-1. **Hash chaining** — each event is bound to the previous tip. `redact-verify` recomputes `body_hash` and checks chain consistency and tip signatures.
+1. **Hash chaining** — each event is bound to the previous tip. `redact-verify` recomputes `body_hash` and checks `prev_hash` chain consistency. Tip-signature fields must be present; Ed25519 verification is applied to `body_signature` (builder-signed), not to each tip.
 2. **External anchoring** — Merkle inclusion plus a Rekor receipt. `pack_anchored` (R2) is **computed** from the receipt and the compiled-in trust set (`src/trust.rs`, EUTL snapshot). Pack-supplied keys cannot pass the offline test. `attestation.status` is a hint, never a pass.
-3. **Offline third-party verification** — `redact-verify` has no `redact-core` dependency and does not dial the network on the default path. Exit 0 only if every check passes **and** R2 is `pass`. Stripped attestation is `unproven`, never pass. `--online` may re-query Rekor; it is never required for a pass.
+3. **Offline third-party verification** — `redact-verify` has no `redact-core` dependency and does not dial the network. `--online` is accepted and unused; it does not re-query Rekor. Exit 0 only if every check passes **and** R2 is `pass`. Stripped attestation is `unproven`, never pass.
 
 Compliance YAML under `patterns/compliance/` is a **mapping input** (which
 entity types a profile treats as in-scope). It is not SOC 2, GDPR, HIPAA, or
@@ -90,6 +90,8 @@ cargo install redact-scan
 redact-scan --url postgres://reader@localhost/app --schema public --out report.json
 ```
 
+Crate: [`redact-scan`](https://crates.io/crates/redact-scan) 0.10.0.
+
 `--fail-on` exits 1 when findings match. `--include-samples` is a local sidecar
 only and cannot be combined with `--report-url`.
 
@@ -115,6 +117,8 @@ curl -s http://127.0.0.1:8080/v1/redact \
 cargo install redact-verify
 redact-verify --pack <file> --pubkey <file> [--online] [--format json]
 ```
+
+Crate: [`redact-verify`](https://crates.io/crates/redact-verify) 0.10.0. `--online` does not dial the network.
 
 Exit **0** only if every check passes and R2 (`pack_anchored`) is `pass`.
 **1** on any fail or R2 unproven. **2** if the pack is malformed.
