@@ -240,6 +240,7 @@ jobs:
         run: ./scripts/check-docker-base-compat.sh
 
   # Build and smoke-test publishable images so GLIBC mismatches fail in CI.
+  # Gateway smoke asserts /v1/redact (email replace + AWS key block), not --version.
   docker-images:
     name: Docker image smoke tests
     runs-on: ubuntu-latest
@@ -254,34 +255,13 @@ jobs:
         run: docker build -f Dockerfile.gateway -t redact-gateway:ci .
 
       - name: Smoke test gateway image
-        run: docker run --rm redact-gateway:ci --version
+        run: IMAGE=redact-gateway:ci ./scripts/ci/smoke-gateway.sh
 
       - name: Build API image
         run: docker build -f Dockerfile -t redact-api:ci .
 
       - name: Smoke test API image
-        run: |
-          set -euo pipefail
-          docker run -d --name api-smoke -p 8080:8080 redact-api:ci
-          cleanup() { docker rm -f api-smoke >/dev/null 2>&1 || true; }
-          trap cleanup EXIT
-          echo "Waiting for API to become healthy..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/healthz > /dev/null 2>&1; then
-              echo "API ready after ${i}s"
-              curl -sf http://localhost:8080/healthz | python3 -m json.tool
-              exit 0
-            fi
-            if ! docker ps -q -f name=api-smoke | grep -q .; then
-              echo "ERROR: API container exited early"
-              docker logs api-smoke || true
-              exit 1
-            fi
-            sleep 1
-          done
-          echo "ERROR: API failed to become healthy within 30s"
-          docker logs api-smoke || true
-          exit 1
+        run: IMAGE=redact-api:ci ./scripts/ci/smoke-api.sh
 
   redact-scan-integration:
     name: redact-scan Postgres integration
@@ -298,6 +278,19 @@ jobs:
         with:
           cache-on-failure: true
           key: redact-scan-integration
+
+      - name: Pre-pull Postgres test image
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if docker pull postgres:16-alpine; then
+              exit 0
+            fi
+            echo "docker pull failed (attempt ${i}), retrying..."
+            sleep $((i * 2))
+          done
+          echo "ERROR: could not pull postgres:16-alpine" >&2
+          exit 1
 
       - name: Run gated Postgres tests
         env:

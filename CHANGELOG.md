@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exits 1 on matching findings. Reports contain locations and counts
   only — never sample values. See `docs/scanning-model.md`.
 
+### Changed
+
+- Release: GitHub Release publication waits for all three image jobs and a
+  post-push digest smoke on `linux/amd64` and `linux/arm64` (the load-then-push
+  split is what let #114 ship).
+- Release: gateway image smoke asserts `/v1/redact` (email replace + AWS key
+  block), not only `--version`.
+- Release: crates.io publish is checked against the index after the
+  `continue-on-error` publish steps.
+- Release: a no-checkout stranger-path job installs from crates.io and pulls
+  the published gateway image the way a consumer would.
+
 ### Fixed
 
 - `GENERIC_SECRET` rejects SCREAMING_SNAKE and path-shaped values instead of
@@ -47,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
   only by unused optional `sqlx-mysql` — this crate enables Postgres only.
+- `redact-scan`: retry testcontainer start and pre-pull `postgres:16-alpine`
+  in CI so Hub `bytes remaining on stream` flakes do not fail the job.
 
 ## [0.9.1] - 2026-08-08
 
