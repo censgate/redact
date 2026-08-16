@@ -31,6 +31,22 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 - **Why this enhancement would be useful** to most users
 - **Possible implementation approach** (optional)
 
+### Pattern packs
+
+Long-tail provider tokens belong in YAML pattern packs, not in `redact-core`, unless they have a distinctive length-closed prefix that should ship on every surface (CLI, WASM, and gateway).
+
+We welcome pull requests that add **opt-in** packs under [`patterns/optional/`](patterns/optional/):
+
+- Prefix or structured shapes only. Do not add `api_key=…` / `password=…` catch-alls; those go through `GENERIC_SECRET` entropy scoring ([#139](https://github.com/censgate/redact/issues/139)).
+- Keep regexes length-closed. If a token can end in `=`, do not use a trailing `\b`; use a delimiter class and set `value_group: 1` so the delimiter is not part of the span.
+- `entropy: generic` rules must expose capture group 1 (the value) and go through `evaluate_generic_candidate`.
+- Packs under `optional/` are **not** on the Docker / compose / Kubernetes default path (`/app/patterns/compliance:/app/patterns/pii`). The loader also skips directories named `optional/` and `quarantine/` when walking a tree.
+- WASM has no filesystem; optional packs are not compiled into the WASM build.
+- If you adapt rules from [gitleaks](https://github.com/gitleaks/gitleaks), keep the MIT attribution and pin the upstream commit in the pack header.
+- Precision over recall. A noisier detector is a regression. See [docs/secrets-detection.md](docs/secrets-detection.md).
+
+Open an issue before adding a new compiled-in `EntityType`.
+
 ### Pull Requests
 
 1. **Fork the repository** and create your branch from `main`
@@ -256,7 +272,7 @@ Confirm the idea is in [project scope](docs/PROJECT_SCOPE.md) before starting.
 
 ### High Priority
 
-- [ ] Additional entity type patterns
+- [ ] Additional entity type patterns (prefer an opt-in pack under `patterns/optional/`; see [Pattern packs](#pattern-packs))
 - [ ] Performance optimizations
 - [ ] Documentation improvements
 - [ ] Example applications

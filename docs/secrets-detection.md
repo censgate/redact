@@ -1,6 +1,6 @@
 # Secrets detection
 
-Phase 2 of [#101](https://github.com/censgate/redact/issues/101). The detector is WASM-pure, deterministic, and offline. Precision is the gate: a noisier detector is a regression.
+Entropy-gated `GENERIC_SECRET` ([#139](https://github.com/censgate/redact/issues/139)). Prefixed and named secret types shipped under [#101](https://github.com/censgate/redact/issues/101). The detector is WASM-pure, deterministic, and offline. Precision is the gate: a noisier detector is a regression.
 
 Related: [gateway policy](gateway/policy.md) · [gateway deployment](gateway/deployment.md)
 
