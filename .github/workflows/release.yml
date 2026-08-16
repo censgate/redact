@@ -147,6 +147,9 @@ jobs:
 
   publish-crates:
     name: Publish to crates.io
+    # Least reversible publish step: wait until every image family has been
+    # pushed and smoke-tested on the digest a stranger would pull.
+    needs: [build-binaries, verify-pushed-images]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -232,12 +235,11 @@ jobs:
       - name: Compute Docker tags
         id: meta
         run: |
+          set -euo pipefail
           VER="${VERSION#v}"
-          MAJOR="${VER%%.*}"
-          MINOR="${VER%.*}"
           IMAGE="ghcr.io/${{ github.repository }}"
-          TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          TAGS="$(./scripts/ci/docker-tags.sh api "${VER}" "${IMAGE}")"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build API image for smoke test (amd64)
         uses: docker/build-push-action@v7
@@ -299,12 +301,11 @@ jobs:
       - name: Compute Docker tags (full)
         id: meta-full
         run: |
+          set -euo pipefail
           VER="${VERSION#v}"
-          MAJOR="${VER%%.*}"
-          MINOR="${VER%.*}"
           IMAGE="ghcr.io/${{ github.repository }}"
-          TAGS="${IMAGE}:full,${IMAGE}:${VER}-full,${IMAGE}:${MINOR}-full,${IMAGE}:${MAJOR}-full"
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          TAGS="$(./scripts/ci/docker-tags.sh full "${VER}" "${IMAGE}")"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build full image for smoke test (amd64)
         uses: docker/build-push-action@v7
@@ -377,12 +378,11 @@ jobs:
       - name: Compute Docker tags (gateway)
         id: meta-gateway
         run: |
+          set -euo pipefail
           VER="${VERSION#v}"
-          MAJOR="${VER%%.*}"
-          MINOR="${VER%.*}"
           IMAGE="ghcr.io/${{ github.repository }}-gateway"
-          TAGS="${IMAGE}:${VER},${IMAGE}:${MINOR},${IMAGE}:${MAJOR},${IMAGE}:latest"
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+          TAGS="$(./scripts/ci/docker-tags.sh gateway "${VER}" "${IMAGE}")"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build gateway image for smoke test (amd64)
         uses: docker/build-push-action@v7
@@ -458,30 +458,28 @@ jobs:
         run: |
           set -euo pipefail
           VER="${VERSION#v}"
-          MAJOR="${VER%%.*}"
-          MINOR="${VER%.*}"
           REPO="ghcr.io/${{ github.repository }}"
-          case "${{ matrix.family }}" in
+          FAMILY="${{ matrix.family }}"
+          TAGS="$(./scripts/ci/docker-tags.sh "${FAMILY}" "${VER}")"
+          case "${FAMILY}" in
             api)
               echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
-              echo "tags=${VER},${MINOR},${MAJOR},latest" >> "$GITHUB_OUTPUT"
               echo "smoke=api" >> "$GITHUB_OUTPUT"
               ;;
             full)
               echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
-              echo "tags=${VER}-full,${MINOR}-full,${MAJOR}-full,full" >> "$GITHUB_OUTPUT"
               echo "smoke=ner" >> "$GITHUB_OUTPUT"
               ;;
             gateway)
               echo "repo=${REPO}-gateway" >> "$GITHUB_OUTPUT"
-              echo "tags=${VER},${MINOR},${MAJOR},latest" >> "$GITHUB_OUTPUT"
               echo "smoke=gateway" >> "$GITHUB_OUTPUT"
               ;;
             *)
-              echo "unknown family ${{ matrix.family }}" >&2
+              echo "unknown family ${FAMILY}" >&2
               exit 1
               ;;
           esac
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Assert tags share one digest
         id: digest
