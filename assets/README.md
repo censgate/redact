@@ -2,6 +2,10 @@
 
 This folder contains the official Censgate logo files for use in open source and community projects.
 
+`og-preview.png` is a 1280×640 canvas with the unmodified logo centered, for
+GitHub’s repository social preview (Settings → General → Social preview).
+Uploading it requires admin on the repository.
+
 ## Usage Guidelines
 
 - You are free to use the Censgate logo in unmodified form to reference, promote, or integrate with the Censgate project.
