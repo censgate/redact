@@ -85,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `redact-ner-base:v2` (ONNX Runtime 1.24.4). `^2.0.0-rc.12` had
   resolved to `rc.13`, which requires ONNX Runtime 1.28 and panicked
   on startup (`BadVersion`). Caught by the `v0.10.0-rc.1` NER smoke.
+- Published images no longer compile the native-arch path with
+  `target-cpu=native`. That baked the builder runner's µarch and
+  SIGILL'd `verify-pushed-images` on a different GitHub Actions
+  runner (empty logs, ~1s exit). Native amd64 now uses `x86-64-v3`
+  and native arm64 uses `neoverse-n1`, matching the existing
+  cross-compile flags.
 - `redact-scan`: upgrade `testcontainers-modules` so CI `cargo audit` is not
   failed by `astral-tokio-tar` advisories in the Postgres acceptance-test
   tree. Ignore unfixed `RUSTSEC-2023-0071` (`rsa` / Marvin) which is pulled
