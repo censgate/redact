@@ -9,9 +9,9 @@
 
 **OpenAI-compatible AI privacy gateway**
 
-Redact sits between your application and a model provider: it redacts prompts on the way out and model answers on the way back — with policy profiles, reversible tokenization, auth, and OpenTelemetry. Under the hood, a high-performance Rust detection engine (61 compiled entity types including secrets and `GENERIC_SECRET`, plus optional ONNX NER) powers the gateway, CLI, REST API, and WebAssembly builds.
+Redact sits between your application and a model provider: it redacts prompts on the way out and model answers on the way back — with policy profiles, reversible tokenization, auth, and OpenTelemetry. Under the hood, a high-performance Rust detection engine (61 compiled entity types including secrets and `GENERIC_SECRET`, plus optional ONNX NER) powers the gateway, CLI, REST API, and WebAssembly builds. Separate binaries discover PII in Postgres (`redact-scan`) and independently verify Censgate ledger evidence packs (`redact-verify`).
 
-[Quick Start](#quick-start) · [Privacy Gateway](#privacy-gateway) · [Documentation](#documentation) · [Examples](#examples) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [Privacy Gateway](#privacy-gateway) · [Postgres scan](#postgres-pii-discovery-redact-scan) · [Ledger verify](#ledger-evidence-packs-redact-verify) · [Documentation](#documentation) · [Examples](#examples) · [Contributing](#contributing)
 
 </div>
 
@@ -20,11 +20,13 @@ Redact sits between your application and a model provider: it redacts prompts on
 ## Features
 
 - **AI Privacy Gateway** — OpenAI-compatible proxy (`redact-gateway`) with policy profiles, reversible tokenization, API key/OIDC auth, OpenTelemetry, and buffered/incremental streaming redaction
+- **Postgres PII discovery** — `redact-scan` is a read-only scanner (replica/staging preferred). Layers 0 / 0.5 / 1 / 2 (catalog, `pg_stats`, bounded `TABLESAMPLE`, JSON paths). Reports list locations and counts only — never sample values. Superuser and write grants are refused.
+- **Ledger pack verification** — `redact-verify` checks Censgate ledger evidence packs offline. No `redact-core` dependency; the default path does not dial the network. `--online` may re-query Rekor and is never required for a pass.
 - **Engine-Powered** — In-process `redact-core` detection and anonymization (drop-in Presidio-class accuracy at Rust speed)
 - **Production Ready** — 61 compiled entity types with validation (including secrets/credentials and entropy-gated `GENERIC_SECRET`), plus transformer-based NER
 - **High Performance** — 10-100x faster than Python-based solutions with sub-millisecond inference
 - **Memory Safe** — Rust's borrow checker eliminates entire classes of security vulnerabilities
-- **Multi-Platform** — Privacy gateway, REST API, CLI, and WebAssembly (pattern-only)
+- **Multi-Platform** — Privacy gateway, REST API, CLI, `redact-scan`, `redact-verify`, and WebAssembly (pattern-only)
 - **ML-Powered** — Full ONNX Runtime integration for transformer models (BERT, RoBERTa, DistilBERT)
 - **Lightweight** — ~20-50MB memory footprint vs ~300MB for Presidio
 - **Extensible** — Plugin architecture for custom recognizers and anonymization strategies
@@ -57,6 +59,34 @@ curl -s http://127.0.0.1:8080/v1/redact \
 ```
 
 Full walkthrough (Ollama chat, OpenAI SDK, policy profiles): [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md). Docker image: `ghcr.io/censgate/redact-gateway:latest`. Crates.io: [`redact-gateway`](https://crates.io/crates/redact-gateway).
+
+### Postgres PII discovery (`redact-scan`)
+
+Read-only discovery against Postgres. Prefer a replica or staging database. The report is locations and counts — never sample values.
+
+```bash
+# Not yet on crates.io — install from a source checkout
+cargo install --path crates/redact-scan
+redact-scan --url postgres://reader@localhost/app --schema public --out report.json
+```
+
+`--fail-on` exits 1 when findings match. Optional `--report-url` POSTs the report JSON (still without sample values). `--include-samples` writes a local sidecar only and cannot be combined with `--report-url`.
+
+Safety rails, layers, and what a finding means: [`docs/scanning-model.md`](docs/scanning-model.md). Crate README: [`crates/redact-scan/README.md`](crates/redact-scan/README.md).
+
+### Ledger evidence packs (`redact-verify`)
+
+Independent offline verifier for Censgate ledger evidence packs. It does not depend on `redact-core` and does not call the evidence API on the default path.
+
+```bash
+# Not yet on crates.io — install from a source checkout
+cargo install --path crates/redact-verify
+redact-verify --pack <file> --pubkey <file> [--online] [--format json]
+```
+
+Exit **0** only if every check passes and R2 (`pack_anchored`) is `pass`. **1** on any fail or R2 unproven. **2** if the pack is malformed. `--online` may re-query Rekor; it is off by default and never required for a pass.
+
+Crate README: [`crates/redact-verify/README.md`](crates/redact-verify/README.md).
 
 ### Analyze Text for PII
 
@@ -683,9 +713,11 @@ redact/
 │   ├── redact-api/       # REST API service (Axum) over the same engine
 │   ├── redact-cli/       # Command-line tool
 │   ├── redact-scan/      # Read-only Postgres PII discovery scanner
+│   ├── redact-verify/    # Offline ledger evidence-pack verifier (no redact-core)
 │   └── redact-wasm/      # WebAssembly bindings (pattern engine)
 ├── docs/
 │   ├── gateway/          # Gateway operator documentation
+│   ├── scanning-model.md # redact-scan layers and safety rails
 │   └── benchmarks/       # Benchmark methodology and results
 ├── deploy/               # Gateway Collector config and Kubernetes manifests
 ├── Dockerfile.gateway
@@ -723,7 +755,13 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
 - [API Documentation](https://docs.rs/redact-core) — Rust API docs
 - [Gateway getting started](/censgate/redact/blob/main/docs/gateway/getting-started.md) — Local redaction, Ollama chat, OpenAI SDK
 - [Gateway Documentation](/censgate/redact/blob/main/docs/gateway) — Configuration, policy, tokenization, auth, telemetry, audit, streaming, deployment
+<<<<<<< HEAD
 - [Secrets detection](/censgate/redact/blob/main/docs/secrets-detection.md) — Entropy model, exclusions, precision corpora
+=======
+- [Postgres scanning model](/censgate/redact/blob/main/docs/scanning-model.md) — `redact-scan` layers, safety rails, report shape
+- [redact-scan](/censgate/redact/blob/main/crates/redact-scan/README.md) — Install and sample report
+- [redact-verify](/censgate/redact/blob/main/crates/redact-verify/README.md) — Offline ledger pack checks
+>>>>>>> origin/main
 - [Test Coverage](/censgate/redact/blob/main/TEST_COVERAGE.md) — Testing details
 - [Contributing Guide](/censgate/redact/blob/main/CONTRIBUTING.md) — How to contribute
 - [Project scope](/censgate/redact/blob/main/docs/PROJECT_SCOPE.md) — What this repository accepts
@@ -770,6 +808,12 @@ See [TEST_COVERAGE.md](/censgate/redact/blob/main/TEST_COVERAGE.md) for detailed
       published gateway/API images; #114)
 - [x] CI/release guards: Dockerfile builder/runtime Debian pairing check and
       gateway/API image smoke tests before publish
+
+#### v0.10.0
+
+- [x] `redact-scan`: read-only Postgres PII discovery (locations and counts only)
+- [x] `redact-verify`: independent offline ledger evidence-pack verifier
+- [x] CLI `--disable` / `list-entities`; entropy-gated `GENERIC_SECRET` (61 compiled types)
 
 ## Contributing
 
