@@ -1,6 +1,7 @@
 # Agent Instructions
 
-Concise guidance for AI agents working with the Redact codebase.
+Concise, harness-agnostic guidance for anyone (human or automated) working
+in this checkout. Do not add vendor-specific cloud/VM sections here.
 
 ## Project Overview
 
@@ -75,11 +76,12 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Benchmarks
 cargo bench --package redact-core
 
-# Run API server
-cargo run --release --bin redact-api
-
-# Run CLI
-cargo run --bin redact-cli -- analyze "test@example.com"
+# Run binaries from the workspace root via -p (no default-run package)
+cargo run -p redact-cli -- analyze "test@example.com"
+cargo run -p redact-api
+cargo run -p redact-gateway -- --host 127.0.0.1
+cargo run -p redact-scan -- --help
+cargo run -p redact-verify -- --help
 ```
 
 ## Code Conventions
@@ -211,3 +213,26 @@ Before committing:
 - **Rust**: 1.93.0 (see `.tool-versions`)
 - **MSRV**: 1.88
 - **Python**: 3.8+ (for NER model export only)
+- **Native build deps**: `pkg-config`, `cmake`, `g++`, `libssl-dev`
+
+### Build and run gotchas
+
+These apply on any Linux/macOS checkout, not a particular CI or cloud image.
+
+- **C++ must be GNU, not clang.** `tokenizers` → `esaxx-rs` fails under clang
+  (`esaxx.cpp: 'cstdint' file not found`). Use `CC=gcc CXX=g++`, or on Debian/
+  Ubuntu point `cc`/`c++` at gcc/g++ (`update-alternatives --set`).
+- **No workspace default-run binary.** From the repo root use
+  `cargo run -p <crate> -- …`. `cargo run --bin redact-cli` from the root
+  does not select the package.
+- **`redact-api` and `redact-gateway` both default to port 8080.** Run one
+  of them on 8080, or override: API uses `HOST`/`PORT`; gateway uses
+  `--host`/`--port` (or `CENSGATE_HOST`/`CENSGATE_PORT`).
+- **Gateway.** `OTEL_SDK_DISABLED=true` silences telemetry-export noise.
+  Health: `GET /healthz`. Redact: `POST /v1/redact` with a `profile`
+  (`strict` blocks, `reversible` tokenizes). `POST /v1/restore` is `403`
+  under the default no-auth config — expected until `auth.mode` is
+  `api_key` or `oidc`.
+- **NER is optional.** `redact-ner` builds without a model (`ort` is
+  `load-dynamic`). The NER e2e tests are `#[ignore]` and need an exported
+  ONNX model plus `libonnxruntime.so` (`ORT_DYLIB_PATH`).
