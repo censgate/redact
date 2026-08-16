@@ -698,27 +698,13 @@ fn precision_gate(entity_type: &EntityType, text: &str, start: usize, value: &st
     let left = left_context(text, start, 50);
     let left_lower = left.to_ascii_lowercase();
     match entity_type {
-        EntityType::PhoneNumber | EntityType::CreditCard => {
-            if order_like_context(&left_lower) && !phone_or_card_cue(&left_lower) {
-                0.0
-            } else {
-                1.0
-            }
+        EntityType::PhoneNumber | EntityType::CreditCard
+            if order_like_context(&left_lower) && !phone_or_card_cue(&left_lower) =>
+        {
+            0.0
         }
-        EntityType::Sha1Hash => {
-            if has_token(&left_lower, "commit") {
-                0.0
-            } else {
-                1.0
-            }
-        }
-        EntityType::DomainName => {
-            if junk_domain_fragment(text, start, value) {
-                0.0
-            } else {
-                1.0
-            }
-        }
+        EntityType::Sha1Hash if has_token(&left_lower, "commit") => 0.0,
+        EntityType::DomainName if junk_domain_fragment(text, start, value) => 0.0,
         _ => 1.0,
     }
 }
