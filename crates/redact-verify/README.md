@@ -4,7 +4,8 @@ Independent offline verifier for Censgate ledger evidence packs.
 
 Apache-2.0. **No `redact-core` dependency.** Default path does not dial the network and does not call `GET /v1/evidence/{id}/attestation`.
 
-```text
+```bash
+cargo install redact-verify
 redact-verify --pack <file> --pubkey <file> [--online] [--format json]
 ```
 
