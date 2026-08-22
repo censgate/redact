@@ -135,7 +135,7 @@ jobs:
         run: ./scripts/ci/changelog-notes.sh "${VERSION#v}" > release-notes.md
 
       - name: Create draft GitHub Release and upload assets
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.VERSION }}
           name: Release ${{ env.VERSION }}
