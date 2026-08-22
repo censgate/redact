@@ -11,7 +11,19 @@ updates:
       cargo:
         patterns:
           - "*"
+    ignore:
+      # sqlx 0.9's MSRV is 1.94; this workspace stays on 1.88.
+      - dependency-name: sqlx
+        versions: [">=0.9"]
+      # rc.13 needs ONNX Runtime 1.28; ghcr.io/censgate/redact-ner-base:v2
+      # still ships 1.24.4 (ort 2.0.0-rc.12). See workspace Cargo.toml.
+      - dependency-name: ort
+        versions: [">=2.0.0-rc.13"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # dtolnay/rust-toolchain refs are toolchain versions (e.g. 1.88 MSRV),
+      # not action releases. Dependabot treats @1.88 as stale.
+      - dependency-name: dtolnay/rust-toolchain
