@@ -188,6 +188,8 @@ Each setting has exactly one environment name under the `CENSGATE_` prefix. The 
 | `CENSGATE_ALLOW_PROFILE_HEADER` | `false` | Honor profile header |
 | `CENSGATE_PATTERN_PACKS` | unset | Pack paths (`:` / `,` / `;`) |
 | `CENSGATE_DISABLE_BUILTIN_PATTERNS` | `false` | Skip built-in patterns |
+| `CENSGATE_NER_MODEL_PATH` | unset | Path to ONNX `model.onnx` (tokenizer beside it) |
+| `CENSGATE_NER_REQUIRED` | `false` | Fail startup if NER cannot load |
 | `CENSGATE_VAULT_BACKEND` | `off` | Token map backend (`off`, `memory`, `vault_kv2`) |
 | `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 address |
 | `CENSGATE_VAULT_TOKEN` / `VAULT_TOKEN` / `BAO_TOKEN` | unset | KV v2 token |

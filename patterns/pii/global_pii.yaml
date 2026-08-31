@@ -7,19 +7,10 @@ description: "Universal patterns for detecting common personally identifiable in
 last_updated: "2024-01-15"
 
 patterns:
-  # Names
-  - id: "global_full_name"
-    name: "Full Name"
-    category: "personal_name"
-    regex: '\b[A-Z][a-z]{1,20}\s+[A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20})?\b'
-    confidence: 0.7
-    description: "Detects full names (first and last, optionally middle)"
-    examples:
-      - "John Smith"
-      - "Mary Jane Watson"
-      - "José García"
-    replacement: "[NAME_REDACTED]"
-    enabled: true
+  # Personal names are detected by the gateway IdentityRecognizer
+  # (contextual cues + ONNX NER). A Title-case regex is not used: it
+  # false-positives on "Cedar Hollow" / "Mondays and Fridays" and misses
+  # single-token names such as Nola.
 
   - id: "global_email"
     name: "Email Address"
@@ -261,10 +252,10 @@ metadata:
     - "identifier"
     - "security"
   risk_levels:
-    high: ["global_full_name", "global_email", "global_credit_card", "global_iban"]
+    high: ["global_email", "global_credit_card", "global_iban"]
     medium: ["global_phone_intl", "global_phone_common", "global_coordinates", "global_api_key"]
     low: ["global_date_iso", "global_ipv4", "global_mac_address", "global_uuid", "global_hash_md5"]
   validation:
-    pattern_count: 17
+    pattern_count: 16
     categories_covered: 8
     compliance_score: 0.94

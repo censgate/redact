@@ -412,6 +412,15 @@ pub struct PackSettings {
     pub disable_builtin: bool,
 }
 
+/// ONNX named-entity recognition loaded at startup.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NerSettings {
+    /// Path to `model.onnx`. Tokenizer is discovered in the same directory.
+    pub model_path: Option<PathBuf>,
+    /// Fail startup when the model is missing or cannot be loaded.
+    pub required: bool,
+}
+
 /// Token map backend settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultSettings {
@@ -562,6 +571,8 @@ pub struct ResolvedConfig {
     pub redaction: RedactionSettings,
     /// Pattern pack loading.
     pub packs: PackSettings,
+    /// ONNX NER (optional locally; required in production images).
+    pub ner: NerSettings,
     /// Token map backend.
     pub vault: VaultSettings,
     /// Inbound authentication.
@@ -586,6 +597,7 @@ impl Default for ResolvedConfig {
             provider: ProviderSettings::default(),
             redaction: RedactionSettings::default(),
             packs: PackSettings::default(),
+            ner: NerSettings::default(),
             vault: VaultSettings::default(),
             auth: AuthSettings::default(),
             audit: AuditSettings::default(),
@@ -758,6 +770,7 @@ impl ResolvedConfig {
         next.provider.forward_client_authorization = self.provider.forward_client_authorization;
         next.provider.name = self.provider.name.clone();
         next.packs = self.packs.clone();
+        next.ner = self.ner.clone();
         next.vault = self.vault.clone();
         next.auth = self.auth.clone();
         next.audit.export = self.audit.export;
@@ -813,6 +826,9 @@ impl ResolvedConfig {
         }
         if self.packs.disable_builtin != next.packs.disable_builtin {
             changed.push("packs.disable_builtin");
+        }
+        if self.ner.model_path != next.ner.model_path || self.ner.required != next.ner.required {
+            changed.push("ner.*");
         }
         if self.vault.backend != next.vault.backend {
             changed.push("vault.backend");
@@ -896,6 +912,10 @@ impl ResolvedConfig {
             "packs": {
                 "paths": self.packs.paths,
                 "disable_builtin": self.packs.disable_builtin,
+            },
+            "ner": {
+                "model_path": self.ner.model_path,
+                "required": self.ner.required,
             },
             "vault": {
                 "backend": self.vault.backend.as_str(),

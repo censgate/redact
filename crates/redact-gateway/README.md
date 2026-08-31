@@ -203,6 +203,8 @@ Every gateway knob uses the `CENSGATE_` prefix (one name per setting). The only 
 | `CENSGATE_ALLOW_PROFILE_HEADER` | `false` | Honor the profile header |
 | `CENSGATE_PATTERN_PACKS` | unset | Pack files/dirs (`:` / `,` / `;` separated) |
 | `CENSGATE_DISABLE_BUILTIN_PATTERNS` | `false` | Skip patterns compiled into the engine |
+| `CENSGATE_NER_MODEL_PATH` | unset | Path to ONNX `model.onnx` |
+| `CENSGATE_NER_REQUIRED` | `false` | Fail startup if NER cannot load |
 | `CENSGATE_VAULT_BACKEND` | `off` | Token map backend: `off`, `memory`, or `vault_kv2` |
 | `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 server address |
 | `CENSGATE_VAULT_TOKEN` / `VAULT_TOKEN` / `BAO_TOKEN` | unset | KV v2 auth token |
@@ -239,6 +241,7 @@ server:      # host, port, enable_http_trace, metrics_endpoint
 provider:    # name, base_url, api_key, timeouts, max_body_bytes, forward_client_authorization
 redaction:   # stream_mode, stream_holdback_bytes, session_header, profile_header, allow_profile_header
 packs:       # paths, disable_builtin
+ner:         # model_path, required
 vault:       # token map: backend, address, token, mount, path_prefix, namespace, ttl_secs, data_encryption_key
 auth:        # mode, api_keys, oidc: { … }
 audit:       # export, file_path, queue_capacity, include_entity_types

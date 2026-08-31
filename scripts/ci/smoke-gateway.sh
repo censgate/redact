@@ -81,4 +81,23 @@ if email_replace < 1:
 print('OK: blocked=true, original text preserved, email counted as replace')
 "
 
+echo "--- Identity (contextual; ONNX when baked in) ---"
+IDENTITY_BODY="$(curl -sf "${BASE}/v1/redact" \
+  -H 'content-type: application/json' \
+  -d '{"text":"Hi Ada. I have two female cats: Nola and Pip. We live in Cedar Hollow, Caledonia."}')"
+echo "${IDENTITY_BODY}" | python3 -m json.tool
+echo "${IDENTITY_BODY}" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+text = data.get('text', '')
+if data.get('blocked') is not False:
+    raise SystemExit('ERROR: identity request must set blocked=false, got ' + repr(data.get('blocked')))
+for leaked in ('Ada', 'Nola', 'Pip', 'Cedar Hollow', 'Caledonia'):
+    if leaked in text:
+        raise SystemExit('ERROR: plaintext %s still present: %s' % (leaked, text))
+if '[PERSON' not in text or '[LOCATION' not in text:
+    raise SystemExit('ERROR: expected PERSON and LOCATION placeholders, got: ' + text)
+print('OK: identity names and places replaced')
+"
+
 echo "OK: gateway smoke passed (${IMAGE})"

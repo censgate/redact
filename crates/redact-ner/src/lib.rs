@@ -32,9 +32,12 @@
 //! }
 //! ```
 
+mod contextual_identity;
+mod identity;
 mod recognizer;
 mod tokenizer_wrapper;
 
+pub use identity::{IdentityNerOptions, IdentityRecognizer};
 pub use recognizer::{NerConfig, NerRecognizer};
 
 #[cfg(test)]

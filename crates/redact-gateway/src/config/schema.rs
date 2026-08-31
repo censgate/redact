@@ -33,6 +33,9 @@ pub struct GatewayDocument {
     /// Pattern pack loading.
     #[serde(default)]
     pub packs: Option<PacksDocument>,
+    /// ONNX NER.
+    #[serde(default)]
+    pub ner: Option<NerDocument>,
     /// Token map backend.
     #[serde(default)]
     pub vault: Option<VaultDocument>,
@@ -111,6 +114,16 @@ pub struct PacksDocument {
     pub paths: Option<Vec<PathBuf>>,
     /// Skip patterns compiled into the engine.
     pub disable_builtin: Option<bool>,
+}
+
+/// ONNX NER section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NerDocument {
+    /// Path to `model.onnx`, relative to the document.
+    pub model_path: Option<PathBuf>,
+    /// Fail startup when the model cannot be loaded.
+    pub required: Option<bool>,
 }
 
 /// Token map section.
@@ -283,6 +296,13 @@ impl GatewayDocument {
                     .collect();
             }
             apply_opt(&mut config.packs.disable_builtin, packs.disable_builtin);
+        }
+
+        if let Some(ner) = self.ner {
+            if let Some(path) = ner.model_path {
+                config.ner.model_path = Some(resolve_path(base_dir, path));
+            }
+            apply_opt(&mut config.ner.required, ner.required);
         }
 
         if let Some(vault) = self.vault {
