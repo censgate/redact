@@ -65,6 +65,7 @@ On Unix, the binary listens for `SIGHUP` and reloads configuration from the same
 | `audit.include_entity_types` | All auth settings (`auth.mode`, `auth.api_keys`, `auth.oidc.*`) |
 | | Audit sink and queue (`audit.export`, `audit.file_path`, `audit.queue_capacity`) |
 | | Telemetry span filter (`telemetry.filter`) |
+| | NER model load (`ner.model_path`, `ner.required`, `CENSGATE_NER_MODEL_PATH`, `CENSGATE_NER_REQUIRED`) |
 
 Reload installs an **effective** snapshot: hot fields from the new document, startup-only fields forced from the running process. That keeps `/readyz` auth mode and `forward_client_authorization` aligned with the frozen authenticator and provider client. Treat sealing-key rotation and token-map address changes as a rolling restart when you need a hard cutover.
 
@@ -133,6 +134,10 @@ telemetry:
   operations: basic                # off | basic | detailed
   filter: null
   genai_attributes: false
+
+ner:
+  model_path: null                 # or CENSGATE_NER_MODEL_PATH; restart-required
+  required: false                  # CENSGATE_NER_REQUIRED; fail startup if model missing
 
 # Choose one of:
 policy:                            # inline PolicySet

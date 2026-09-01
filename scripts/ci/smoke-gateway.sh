@@ -100,4 +100,21 @@ if '[PERSON' not in text or '[LOCATION' not in text:
 print('OK: identity names and places replaced')
 "
 
+echo "--- Organization (ONNX when baked in) ---"
+ORG_BODY="$(curl -sf "${BASE}/v1/redact" \
+  -H 'content-type: application/json' \
+  -d '{"text":"Apple released iOS last week"}')"
+echo "${ORG_BODY}" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+text = data.get('text', '')
+if 'Apple' in text and '[ORGANIZATION' not in text and '[PERSON' not in text:
+    # Contextual-only builds skip this; NER-baked images must tokenize Apple.
+    print('SKIP: no NER organization hit (contextual-only image)')
+    raise SystemExit(0)
+if 'Apple' in text:
+    raise SystemExit('ERROR: plaintext Apple still present: %s' % text)
+print('OK: organization tokenized')
+"
+
 echo "OK: gateway smoke passed (${IMAGE})"

@@ -316,9 +316,10 @@ fn names_in_list(text: &str, after_pet_end: usize) -> Vec<(usize, usize)> {
             idx = token_end;
             continue;
         }
-        if accept_name(word, NameRule::strong_with_calendar()) {
-            out.push((idx, token_end));
+        if !accept_name(word, NameRule::strong_with_calendar()) {
+            break;
         }
+        out.push((idx, token_end));
         idx = token_end;
         idx = skip_ws(text, idx);
         if text[idx..].starts_with('(') {
@@ -430,7 +431,7 @@ fn accept_name(word: &str, rule: NameRule) -> bool {
     if word.chars().count() < 2 {
         return false;
     }
-    if is_function_word(word) || is_name_keyword(word) {
+    if is_function_word(word) || is_name_keyword(word) || is_common_non_name(word) {
         return false;
     }
     if is_calendar(word) && !rule.allow_calendar {
@@ -644,6 +645,94 @@ fn is_function_word(word: &str) -> bool {
             | "today"
             | "tomorrow"
             | "yesterday"
+    )
+}
+
+/// Ordinary English that identity cues must not treat as a name or place.
+fn is_common_non_name(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "starts"
+            | "start"
+            | "started"
+            | "starting"
+            | "school"
+            | "schools"
+            | "constant"
+            | "fear"
+            | "fears"
+            | "loud"
+            | "quiet"
+            | "quietly"
+            | "always"
+            | "never"
+            | "still"
+            | "also"
+            | "very"
+            | "just"
+            | "only"
+            | "even"
+            | "really"
+            | "about"
+            | "into"
+            | "over"
+            | "under"
+            | "after"
+            | "before"
+            | "because"
+            | "while"
+            | "though"
+            | "although"
+            | "unless"
+            | "until"
+            | "since"
+            | "during"
+            | "without"
+            | "within"
+            | "between"
+            | "through"
+            | "across"
+            | "around"
+            | "against"
+            | "along"
+            | "behind"
+            | "go"
+            | "goes"
+            | "going"
+            | "went"
+            | "come"
+            | "comes"
+            | "coming"
+            | "came"
+            | "get"
+            | "gets"
+            | "getting"
+            | "got"
+            | "make"
+            | "makes"
+            | "made"
+            | "take"
+            | "takes"
+            | "took"
+            | "see"
+            | "sees"
+            | "saw"
+            | "know"
+            | "knows"
+            | "think"
+            | "thinks"
+            | "want"
+            | "wants"
+            | "need"
+            | "needs"
+            | "work"
+            | "works"
+            | "working"
+            | "play"
+            | "plays"
+            | "sleep"
+            | "sleeps"
+            | "sleeping"
     )
 }
 
