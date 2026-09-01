@@ -108,13 +108,13 @@ echo "${ORG_BODY}" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 text = data.get('text', '')
+if '[ORGANIZATION' in text and 'Apple' not in text:
+    print('OK: organization tokenized')
+    raise SystemExit(0)
 if 'Apple' in text and '[ORGANIZATION' not in text and '[PERSON' not in text:
-    # Contextual-only builds skip this; NER-baked images must tokenize Apple.
     print('SKIP: no NER organization hit (contextual-only image)')
     raise SystemExit(0)
-if 'Apple' in text:
-    raise SystemExit('ERROR: plaintext Apple still present: %s' % text)
-print('OK: organization tokenized')
+raise SystemExit('ERROR: expected Apple as ORGANIZATION, got: %s' % text)
 "
 
 echo "OK: gateway smoke passed (${IMAGE})"

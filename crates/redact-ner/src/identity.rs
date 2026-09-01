@@ -72,7 +72,18 @@ impl IdentityRecognizer {
             return Ok(Self::contextual_only());
         }
 
-        let ner = NerRecognizer::from_file(&path)?;
+        let ner = match NerRecognizer::from_file(&path) {
+            Ok(ner) => ner,
+            Err(err) if !opts.required => {
+                warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "ONNX NER failed to load; identity recognizer is contextual only"
+                );
+                return Ok(Self::contextual_only());
+            }
+            Err(err) => return Err(err),
+        };
         if !ner.is_available() {
             if opts.required {
                 bail!(

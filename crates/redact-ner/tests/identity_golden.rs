@@ -112,7 +112,10 @@ fn capitalization_alone_never_creates_an_entity() {
 fn common_words_after_identity_cues_are_not_names() {
     let rec = IdentityRecognizer::contextual_only();
     assert!(spans(&rec, "my daughter starts school").is_empty());
+    assert!(spans(&rec, "my daughter loves school").is_empty());
     assert!(spans(&rec, "we live in constant fear").is_empty());
+    assert!(spans(&rec, "we live in peace now").is_empty());
+    assert!(spans(&rec, "my cat eats tuna").is_empty());
     assert_eq!(
         types_of(&rec, "my pets: Nola and Pip are loud", EntityType::Person),
         vec!["Nola".to_string(), "Pip".to_string()]

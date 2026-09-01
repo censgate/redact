@@ -733,6 +733,21 @@ fn is_common_non_name(word: &str) -> bool {
             | "sleep"
             | "sleeps"
             | "sleeping"
+            | "love"
+            | "loves"
+            | "loved"
+            | "loving"
+            | "like"
+            | "likes"
+            | "liked"
+            | "eat"
+            | "eats"
+            | "eating"
+            | "ate"
+            | "peace"
+            | "happy"
+            | "sad"
+            | "angry"
     )
 }
 
