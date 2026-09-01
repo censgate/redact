@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-01
+
+### Added
+
+- Hybrid identity detection in `redact-ner` / `redact-gateway`: a contextual
+  parser plus optional ONNX NER. Pet-context names emit `PERSON`. Location
+  cues emit `LOCATION`. Capitalization alone never creates an entity.
+- Gateway image (`Dockerfile.gateway`) bakes the NER model and ONNX Runtime
+  and sets `CENSGATE_NER_REQUIRED=true`. Local and tests stay contextual-only
+  when no model is present.
+- Config: `CENSGATE_NER_MODEL_PATH`, `CENSGATE_NER_REQUIRED`, YAML `ner:`.
+  NER load is restart-required.
+
+### Changed
+
+- Removed the Title-case `global_full_name` regex from `global_pii.yaml`
+  (false positives on multi-word places; missed single-token given names).
+- Shipped pack pattern count is 81 (enabled 70).
+- Default policy names `PERSON` / `LOCATION` / `ORGANIZATION` (replace).
+  The `reversible` profile tokenizes those types.
+
 ### Changed
 
 - README leads with CI secrets, Postgres discovery, and offline evidence
