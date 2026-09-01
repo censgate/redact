@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use redact_core::AnalyzerEngine;
+use redact_ner::{IdentityNerOptions, IdentityRecognizer};
 use tower_http::trace::TraceLayer;
 use tracing::{info, warn};
 
@@ -224,6 +225,20 @@ fn build_engine(config: &ResolvedConfig) -> Result<AnalyzerEngine> {
         }
     }
 
+    let identity = IdentityRecognizer::from_options(IdentityNerOptions {
+        model_path: config.ner.model_path.clone(),
+        required: config.ner.required,
+    })
+    .context("could not initialize the identity recognizer")?;
+    info!(
+        ner = identity.ner_available(),
+        required = config.ner.required,
+        "registered identity recognizer"
+    );
+    engine
+        .recognizer_registry_mut()
+        .add_recognizer(Arc::new(identity));
+
     if config.packs.disable_builtin && engine.recognizer_registry().recognizers().is_empty() {
         anyhow::bail!(
             "built-in patterns are disabled and no pattern packs were loaded, so nothing would be detected"
@@ -378,14 +393,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabling_builtin_patterns_without_packs_fails_startup() {
+    async fn disabling_builtin_patterns_without_packs_still_has_identity() {
         let mut config = ResolvedConfig::default();
         config.packs.disable_builtin = true;
-        let err = match GatewayServer::new(config).await {
-            Ok(_) => panic!("expected startup to fail"),
-            Err(err) => err,
-        };
-        assert!(err.to_string().contains("nothing would be detected"));
+        let server = GatewayServer::new(config).await.unwrap();
+        let hits = server.state().engine.analyze("Hi Ada", Some("en")).unwrap();
+        assert!(
+            hits.detected_entities
+                .iter()
+                .any(|e| e.entity_type == redact_core::EntityType::Person
+                    && &"Hi Ada"[e.start..e.end] == "Ada"),
+            "expected Ada as PERSON, got {:?}",
+            hits.detected_entities
+        );
     }
 
     #[tokio::test]
@@ -418,5 +438,34 @@ mod tests {
         config.vault.backend = crate::config::VaultBackend::Memory;
         let server = GatewayServer::new(config).await.unwrap();
         assert_eq!(server.token_store().backend_name(), "memory");
+    }
+
+    #[tokio::test]
+    async fn required_ner_without_a_model_fails_startup() {
+        let mut config = ResolvedConfig::default();
+        config.ner.required = true;
+        let err = match GatewayServer::new(config).await {
+            Ok(_) => panic!("expected startup to fail"),
+            Err(err) => err,
+        };
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("CENSGATE_NER_REQUIRED") || msg.contains("identity recognizer"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_engine_registers_contextual_identity() {
+        let server = GatewayServer::new(ResolvedConfig::default()).await.unwrap();
+        let hits = server.state().engine.analyze("Hi Ada", Some("en")).unwrap();
+        assert!(
+            hits.detected_entities
+                .iter()
+                .any(|e| e.entity_type == redact_core::EntityType::Person
+                    && &"Hi Ada"[e.start..e.end] == "Ada"),
+            "expected Ada as PERSON, got {:?}",
+            hits.detected_entities
+        );
     }
 }

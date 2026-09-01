@@ -54,6 +54,12 @@ profiles:
       UK_NINO: { action: mask, min_confidence: 0.7 }
       MEDICAL_RECORD_NUMBER: { action: mask, min_confidence: 0.7 }
 
+      # Identity: tokenize-or-replace via default_action. Named here so a
+      # future default_action change cannot silently allow names and places.
+      PERSON: { action: replace }
+      LOCATION: { action: replace }
+      ORGANIZATION: { action: replace }
+
       # Very common false positives stay untouched unless highly confident.
       DATE_TIME: { action: allow }
       AGE: { action: allow }
@@ -93,6 +99,9 @@ profiles:
       PERPLEXITY_API_KEY: { action: block }
       HTTP_BASIC_AUTH: { action: block }
       GENERIC_SECRET: { action: replace, min_confidence: 0.6 }
+      PERSON: { action: tokenize }
+      LOCATION: { action: tokenize }
+      ORGANIZATION: { action: tokenize }
       DATE_TIME: { action: allow }
       AGE: { action: allow }
       URL: { action: allow }

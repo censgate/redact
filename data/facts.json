@@ -70,8 +70,8 @@
     "patterns/pii/global_pii.yaml",
     "patterns/security/credentials.yaml"
   ],
-  "pattern_count": 82,
-  "pattern_count_enabled": 71,
+  "pattern_count": 81,
+  "pattern_count_enabled": 70,
   "optional_pack_rule_count": 25,
   "optional_pack_rule_count_enabled": 25
 }

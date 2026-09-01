@@ -1044,3 +1044,51 @@ async fn well_formed_and_malformed_traceparent_headers_both_succeed() {
     .await;
     assert_eq!(malformed.status, StatusCode::OK);
 }
+
+const CATS_PARAGRAPH: &str = "I have two female cats: Nola ( black American short hair, 12 ) and Pip ( ginger tabby, 3 ). We live in Cedar Hollow, Caledonia ( Riverton metro area ). I have a wife and a daughter ( 11 ).";
+
+#[tokio::test]
+async fn identity_redact_tokenizes_pet_and_place_names() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let router = router_for(memory_tokenize_api_keys(&upstream, &["secret-key"])).await;
+    let auth = [("authorization", "Bearer secret-key")];
+
+    let response = post_json_with_headers(
+        router.clone(),
+        "/v1/redact",
+        json!({"text": CATS_PARAGRAPH, "session_id": "identity-cats"}),
+        &auth,
+    )
+    .await;
+
+    assert_eq!(response.status, StatusCode::OK);
+    let text = response.json()["text"].as_str().unwrap().to_string();
+    for leaked in ["Nola", "Pip", "Cedar Hollow", "Caledonia", "Riverton"] {
+        assert!(
+            !text.contains(leaked),
+            "plaintext {leaked:?} survived: {text}"
+        );
+    }
+    assert!(
+        text.contains("American"),
+        "breed adjective must stay plaintext: {text}"
+    );
+    assert!(
+        text.contains("[PERSON_") && text.contains("[LOCATION_"),
+        "expected PERSON and LOCATION tokens: {text}"
+    );
+    assert!(
+        upstream.captured.lock().unwrap().is_none(),
+        "standalone /v1/redact must not call the provider"
+    );
+
+    let restored = post_json_with_headers(
+        router,
+        "/v1/restore",
+        json!({"text": text, "session_id": "identity-cats"}),
+        &auth,
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK);
+    assert_eq!(restored.json()["text"], CATS_PARAGRAPH);
+}

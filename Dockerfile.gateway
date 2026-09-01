@@ -10,6 +10,13 @@
 # Distroless has no shell, so there is no HEALTHCHECK instruction. Probe
 # /livez (liveness) and /readyz (readiness) from the orchestrator instead —
 # the same approach as the main API image in ./Dockerfile.
+#
+# NER: the runtime stage copies ONNX Runtime + model from redact-ner-base
+# and fail-closes when they are missing (`CENSGATE_NER_REQUIRED=true`).
+
+# NER artifacts that change only when the model or ORT version is bumped.
+ARG NER_BASE=ghcr.io/censgate/redact-ner-base:v2
+FROM ${NER_BASE} AS ner-base
 
 # Stage 1: Build
 # Pin to bookworm so the linked glibc matches the distroless cc-debian12 runtime.
@@ -90,9 +97,16 @@ COPY patterns /app/patterns
 # Copy binary from builder
 COPY --from=builder /app/target/release/redact-gateway /usr/local/bin/redact-gateway
 
+# ONNX Runtime + NER model/tokenizer (same layout as Dockerfile.ner)
+COPY --from=ner-base /app/lib/libonnxruntime.so /app/lib/libonnxruntime.so
+COPY --from=ner-base /app/model/ /app/model/
+
 # Load reviewed compliance/PII packs only. patterns/security and
 # patterns/optional are opt-in (override with CENSGATE_PATTERN_PACKS).
 ENV CENSGATE_PATTERN_PACKS=/app/patterns/compliance:/app/patterns/pii
+ENV CENSGATE_NER_MODEL_PATH=/app/model/model.onnx
+ENV CENSGATE_NER_REQUIRED=true
+ENV ORT_DYLIB_PATH=/app/lib/libonnxruntime.so
 
 # Expose gateway port
 EXPOSE 8080

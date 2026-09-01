@@ -20,12 +20,10 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
 use http_body_util::BodyExt;
-use redact_core::AnalyzerEngine;
-use redact_gateway::config::{ConfigHandle, ResolvedConfig};
+use redact_gateway::config::ResolvedConfig;
 use redact_gateway::policy::{EntityAction, PolicySet, Profile};
-use redact_gateway::proxy::ProviderClient;
-use redact_gateway::redact::token::Dek;
 use redact_gateway::routes::{create_router, AppState};
+use redact_gateway::GatewayServer;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -217,30 +215,10 @@ pub fn config_for(upstream: &MockUpstream) -> ResolvedConfig {
 
 /// Build handler state for a configuration.
 pub async fn state_for(config: ResolvedConfig) -> AppState {
-    let provider = ProviderClient::from_settings(&config.provider).unwrap();
-    let telemetry =
-        Arc::new(redact_gateway::telemetry::init(&config.telemetry).expect("telemetry"));
-    let audit = Arc::new(
-        redact_gateway::audit::build_dispatcher(&config.audit, telemetry.logger_provider())
-            .expect("audit"),
-    );
-    let tokens = redact_gateway::vault::build_store(&config.vault)
+    GatewayServer::new(config)
         .await
-        .expect("token map");
-    let auth = redact_gateway::auth::build_authenticator(&config.auth)
-        .await
-        .expect("authenticator");
-
-    AppState {
-        config: ConfigHandle::new(config),
-        engine: Arc::new(AnalyzerEngine::new()),
-        provider,
-        dek: Arc::new(Dek::generate().unwrap()),
-        tokens,
-        auth,
-        audit,
-        telemetry,
-    }
+        .expect("gateway server")
+        .state()
 }
 
 /// Build a router for a configuration.

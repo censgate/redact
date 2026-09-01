@@ -81,4 +81,40 @@ if email_replace < 1:
 print('OK: blocked=true, original text preserved, email counted as replace')
 "
 
+echo "--- Identity (contextual; ONNX when baked in) ---"
+IDENTITY_BODY="$(curl -sf "${BASE}/v1/redact" \
+  -H 'content-type: application/json' \
+  -d '{"text":"Hi Ada. I have two female cats: Nola and Pip. We live in Cedar Hollow, Caledonia."}')"
+echo "${IDENTITY_BODY}" | python3 -m json.tool
+echo "${IDENTITY_BODY}" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+text = data.get('text', '')
+if data.get('blocked') is not False:
+    raise SystemExit('ERROR: identity request must set blocked=false, got ' + repr(data.get('blocked')))
+for leaked in ('Ada', 'Nola', 'Pip', 'Cedar Hollow', 'Caledonia'):
+    if leaked in text:
+        raise SystemExit('ERROR: plaintext %s still present: %s' % (leaked, text))
+if '[PERSON' not in text or '[LOCATION' not in text:
+    raise SystemExit('ERROR: expected PERSON and LOCATION placeholders, got: ' + text)
+print('OK: identity names and places replaced')
+"
+
+echo "--- Organization (ONNX when baked in) ---"
+ORG_BODY="$(curl -sf "${BASE}/v1/redact" \
+  -H 'content-type: application/json' \
+  -d '{"text":"Apple released iOS last week"}')"
+echo "${ORG_BODY}" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+text = data.get('text', '')
+if '[ORGANIZATION' in text and 'Apple' not in text:
+    print('OK: organization tokenized')
+    raise SystemExit(0)
+if 'Apple' in text and '[ORGANIZATION' not in text and '[PERSON' not in text:
+    print('SKIP: no NER organization hit (contextual-only image)')
+    raise SystemExit(0)
+raise SystemExit('ERROR: expected Apple as ORGANIZATION, got: %s' % text)
+"
+
 echo "OK: gateway smoke passed (${IMAGE})"

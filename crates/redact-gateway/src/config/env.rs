@@ -73,6 +73,10 @@ pub const ALLOW_PROFILE_HEADER: &str = "CENSGATE_ALLOW_PROFILE_HEADER";
 pub const PATTERN_PACKS: &str = "CENSGATE_PATTERN_PACKS";
 /// Disable the patterns compiled into the engine.
 pub const DISABLE_BUILTIN_PATTERNS: &str = "CENSGATE_DISABLE_BUILTIN_PATTERNS";
+/// Path to the ONNX NER model (`model.onnx`).
+pub const NER_MODEL_PATH: &str = "CENSGATE_NER_MODEL_PATH";
+/// When true, a missing or unloadable NER model fails gateway startup.
+pub const NER_REQUIRED: &str = "CENSGATE_NER_REQUIRED";
 /// Token map backend.
 pub const VAULT_BACKEND: &str = "CENSGATE_VAULT_BACKEND";
 /// Token map server address.
@@ -277,6 +281,12 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     }
     if let Some(value) = first(&[DISABLE_BUILTIN_PATTERNS]) {
         config.packs.disable_builtin = parse_bool(DISABLE_BUILTIN_PATTERNS, &value)?;
+    }
+    if let Some(value) = first(&[NER_MODEL_PATH]) {
+        config.ner.model_path = Some(PathBuf::from(value));
+    }
+    if let Some(value) = first(&[NER_REQUIRED]) {
+        config.ner.required = parse_bool(NER_REQUIRED, &value)?;
     }
 
     if let Some(value) = first(&[VAULT_BACKEND]) {
