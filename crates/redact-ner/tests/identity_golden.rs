@@ -123,6 +123,18 @@ fn common_words_after_identity_cues_are_not_names() {
 }
 
 #[test]
+fn existing_vault_tokens_are_not_identity() {
+    let rec = IdentityRecognizer::contextual_only();
+    let text = "I have two female cats: [PERSON_1] ( black American short hair, 12 ) and [PERSON_2] ( ginger tabby, 3 ). We live in [LOCATION_1], [LOCATION_2] ( [LOCATION_3] metro area ).";
+    assert!(
+        spans(&rec, text).is_empty(),
+        "sealed tokens must not be re-detected as PERSON/LOCATION: {:?}",
+        spans(&rec, text)
+    );
+    assert!(spans(&rec, "[PERSON_6] lives in [LOCATION_4]").is_empty());
+}
+
+#[test]
 fn named_and_called_are_strong_person_context() {
     let rec = IdentityRecognizer::contextual_only();
     assert_eq!(

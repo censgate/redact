@@ -147,7 +147,7 @@ impl Recognizer for IdentityRecognizer {
             Some(ner) if ner.is_available() => ner.analyze(text, language)?,
             _ => Vec::new(),
         };
-        Ok(merge_identity(contextual, ner))
+        Ok(merge_identity(text, contextual, ner))
     }
 
     fn supports_language(&self, language: &str) -> bool {
@@ -161,9 +161,11 @@ impl Recognizer for IdentityRecognizer {
 /// Context detections win on overlap. NER-only spans (ORG, uncovered names)
 /// are kept. DATE_TIME from NER is dropped here — pattern packs own dates.
 fn merge_identity(
+    text: &str,
     contextual: Vec<RecognizerResult>,
     ner: Vec<RecognizerResult>,
 ) -> Vec<RecognizerResult> {
+    let sealed = crate::contextual_identity::vault_token_spans(text);
     let mut out = contextual;
     for candidate in ner {
         match candidate.entity_type {
@@ -173,6 +175,12 @@ fn merge_identity(
         if out
             .iter()
             .any(|existing| existing.overlaps_with(&candidate))
+        {
+            continue;
+        }
+        if sealed
+            .iter()
+            .any(|(s, e)| candidate.start < *e && candidate.end > *s)
         {
             continue;
         }
@@ -228,7 +236,7 @@ mod tests {
             0.99,
             "ner",
         )];
-        let merged = merge_identity(contextual, ner);
+        let merged = merge_identity("we live in jordan", contextual, ner);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].entity_type, EntityType::Location);
         assert_eq!(merged[0].recognizer_name, "ctx");
