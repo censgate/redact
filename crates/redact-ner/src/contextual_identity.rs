@@ -41,8 +41,10 @@ pub fn detect_contextual_identities(text: &str) -> Vec<RecognizerResult> {
     collect_locations(text, &tokens, &mut hits);
     collect_metro_areas(text, &tokens, &mut hits);
 
+    let sealed = vault_token_spans(text);
     merge_hits(hits)
         .into_iter()
+        .filter(|h| !sealed.iter().any(|(s, e)| h.start < *e && h.end > *s))
         .map(|h| {
             let ty = match h.kind {
                 Kind::Person => EntityType::Person,
@@ -51,6 +53,38 @@ pub fn detect_contextual_identities(text: &str) -> Vec<RecognizerResult> {
             RecognizerResult::new(ty, h.start, h.end, h.score, SOURCE)
         })
         .collect()
+}
+
+/// Spans of already-minted vault tokens such as `[PERSON_1]` or `[EMAIL_ADDRESS_2]`.
+pub(crate) fn vault_token_spans(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(rel) = text[i + 1..].find(']') {
+                let inner = &text[i + 1..i + 1 + rel];
+                if is_vault_token_inner(inner) {
+                    let end = i + 1 + rel + 1;
+                    out.push((i, end));
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+fn is_vault_token_inner(inner: &str) -> bool {
+    let Some((ty, num)) = inner.rsplit_once('_') else {
+        return false;
+    };
+    !ty.is_empty()
+        && ty.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+        && !num.is_empty()
+        && num.chars().all(|c| c.is_ascii_digit())
 }
 
 fn tokenize(text: &str) -> Vec<Token<'_>> {
@@ -652,7 +686,12 @@ fn is_function_word(word: &str) -> bool {
 fn is_common_non_name(word: &str) -> bool {
     matches!(
         word.to_ascii_lowercase().as_str(),
-        "starts"
+        "person"
+            | "location"
+            | "organization"
+            | "email"
+            | "address"
+            | "starts"
             | "start"
             | "started"
             | "starting"
