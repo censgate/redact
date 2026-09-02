@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-02
+
+### Fixed
+
+- Identity detection skips spans that already sit inside a vault token
+  (`[PERSON_1]`, `[LOCATION_2]`, `[EMAIL_ADDRESS_3]`, and the same shape
+  for other uppercase types). Re-redacting tokenized text no longer mints
+  nested placeholders such as `[[PERSON_3]_1]`.
+
 ## [0.11.0] - 2026-09-01
 
 ### Added
