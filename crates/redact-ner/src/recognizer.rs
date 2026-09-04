@@ -507,7 +507,6 @@ fn load_session_pool(model_path: &str) -> Option<SessionPool> {
 }
 
 impl NerRecognizer {
-
     /// Get the configuration
     pub fn config(&self) -> &NerConfig {
         &self.config
