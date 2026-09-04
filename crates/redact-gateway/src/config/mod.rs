@@ -175,6 +175,41 @@ impl std::str::FromStr for VaultBackend {
     }
 }
 
+/// How the gateway authenticates to a KV v2 server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultAuthMethod {
+    /// Static `X-Vault-Token`. Local-dev and compose only.
+    Token,
+    /// Kubernetes auth against `openbao-tokens`. Required for HPA.
+    Kubernetes,
+}
+
+impl VaultAuthMethod {
+    /// Stable name for telemetry and `print-config`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Token => "token",
+            Self::Kubernetes => "kubernetes",
+        }
+    }
+}
+
+impl std::str::FromStr for VaultAuthMethod {
+    type Err = ConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "token" | "static" => Ok(Self::Token),
+            "kubernetes" | "k8s" => Ok(Self::Kubernetes),
+            other => Err(ConfigError::InvalidValue {
+                key: env::VAULT_AUTH.to_string(),
+                message: format!("expected token or kubernetes, got `{other}`"),
+            }),
+        }
+    }
+}
+
 /// Inbound authentication mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -431,6 +466,14 @@ pub struct VaultSettings {
     /// Authentication token. Never logged or exported.
     #[serde(skip_serializing)]
     pub token: Option<String>,
+    /// How to obtain the KV v2 token. `token` is local-dev only.
+    pub auth: VaultAuthMethod,
+    /// Kubernetes auth role on the tokens cluster (never `external-secrets`).
+    pub kubernetes_role: Option<String>,
+    /// Kubernetes auth mount (default `kubernetes`).
+    pub kubernetes_mount: String,
+    /// Projected ServiceAccount JWT path.
+    pub jwt_path: PathBuf,
     /// KV v2 mount point.
     pub mount: String,
     /// Path prefix under the mount.
@@ -450,6 +493,10 @@ impl Default for VaultSettings {
             backend: VaultBackend::Off,
             address: None,
             token: None,
+            auth: VaultAuthMethod::Token,
+            kubernetes_role: None,
+            kubernetes_mount: "kubernetes".to_string(),
+            jwt_path: PathBuf::from("/var/run/secrets/kubernetes.io/serviceaccount/token"),
             mount: "secret".to_string(),
             path_prefix: "redact-gateway".to_string(),
             namespace: None,
@@ -666,6 +713,21 @@ impl ResolvedConfig {
                 "token map backend is vault_kv2 but no address is configured".to_string(),
             ));
         }
+        if self.vault.backend == VaultBackend::VaultKv2
+            && self.vault.auth == VaultAuthMethod::Kubernetes
+            && self
+                .vault
+                .kubernetes_role
+                .as_deref()
+                .map(str::trim)
+                .is_none_or(str::is_empty)
+        {
+            return Err(ConfigError::Invalid(
+                "vault_kv2 kubernetes auth requires vault.kubernetes_role \
+                 (dedicated redact-gateway role on openbao-tokens; never external-secrets)"
+                    .to_string(),
+            ));
+        }
         if self.audit.export == AuditExport::File && self.audit.file_path.is_none() {
             return Err(ConfigError::Invalid(
                 "audit export is file but no path is configured".to_string(),
@@ -835,6 +897,10 @@ impl ResolvedConfig {
         }
         if self.vault.address != next.vault.address
             || self.vault.token != next.vault.token
+            || self.vault.auth != next.vault.auth
+            || self.vault.kubernetes_role != next.vault.kubernetes_role
+            || self.vault.kubernetes_mount != next.vault.kubernetes_mount
+            || self.vault.jwt_path != next.vault.jwt_path
             || self.vault.mount != next.vault.mount
             || self.vault.path_prefix != next.vault.path_prefix
             || self.vault.namespace != next.vault.namespace
@@ -920,6 +986,9 @@ impl ResolvedConfig {
             "vault": {
                 "backend": self.vault.backend.as_str(),
                 "address": self.vault.address,
+                "auth": self.vault.auth.as_str(),
+                "kubernetes_role": self.vault.kubernetes_role,
+                "kubernetes_mount": self.vault.kubernetes_mount,
                 "mount": self.vault.mount,
                 "path_prefix": self.vault.path_prefix,
                 "ttl_secs": self.vault.ttl_secs,
@@ -1011,6 +1080,18 @@ mod tests {
         config.vault.backend = VaultBackend::VaultKv2;
         assert!(config.validate().is_err());
         config.vault.address = Some("http://127.0.0.1:8200".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn vault_kv2_kubernetes_auth_requires_a_role() {
+        let mut config = ResolvedConfig::default();
+        config.vault.backend = VaultBackend::VaultKv2;
+        config.vault.address = Some("http://openbao-tokens.openbao-tokens.svc:8200".into());
+        config.vault.auth = VaultAuthMethod::Kubernetes;
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("kubernetes_role"), "{err}");
+        config.vault.kubernetes_role = Some("redact-gateway".into());
         assert!(config.validate().is_ok());
     }
 

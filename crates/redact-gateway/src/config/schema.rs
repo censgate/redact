@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AuditExport, ConfigError, ResolvedConfig, StreamMode, TraceLevel, VaultBackend};
+use super::{
+    AuditExport, ConfigError, ResolvedConfig, StreamMode, TraceLevel, VaultAuthMethod, VaultBackend,
+};
 use crate::config::AuthMode;
 use crate::policy::PolicySet;
 
@@ -136,6 +138,14 @@ pub struct VaultDocument {
     pub address: Option<String>,
     /// Authentication token.
     pub token: Option<String>,
+    /// `token` (local-dev) or `kubernetes` (HPA / openbao-tokens).
+    pub auth: Option<VaultAuthMethod>,
+    /// Kubernetes auth role. Never `external-secrets`.
+    pub kubernetes_role: Option<String>,
+    /// Kubernetes auth mount.
+    pub kubernetes_mount: Option<String>,
+    /// Projected ServiceAccount JWT path.
+    pub jwt_path: Option<PathBuf>,
     /// KV v2 mount point.
     pub mount: Option<String>,
     /// Path prefix under the mount.
@@ -312,6 +322,14 @@ impl GatewayDocument {
             }
             if vault.token.is_some() {
                 config.vault.token = vault.token.filter(|v| !v.is_empty());
+            }
+            apply_opt(&mut config.vault.auth, vault.auth);
+            if vault.kubernetes_role.is_some() {
+                config.vault.kubernetes_role = vault.kubernetes_role.filter(|v| !v.is_empty());
+            }
+            apply_opt(&mut config.vault.kubernetes_mount, vault.kubernetes_mount);
+            if let Some(path) = vault.jwt_path {
+                config.vault.jwt_path = resolve_path(base_dir, path);
             }
             apply_opt(&mut config.vault.mount, vault.mount);
             apply_opt(&mut config.vault.path_prefix, vault.path_prefix);

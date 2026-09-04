@@ -5,7 +5,7 @@
 //! Token map store backends: memory, disabled, and KV v2 against a mock Vault.
 
 use chrono::{Duration, Utc};
-use redact_gateway::config::{VaultBackend, VaultSettings};
+use redact_gateway::config::{VaultAuthMethod, VaultBackend, VaultSettings};
 use redact_gateway::redact::token::{Dek, TokenMapping};
 use redact_gateway::vault::{
     build_store, session_path, DisabledStore, MemoryStore, TokenMapError, TokenMapStore,
@@ -201,7 +201,7 @@ mod kv2_mock {
     use axum::extract::{Path, State};
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
-    use axum::routing::get;
+    use axum::routing::{get, post};
     use axum::{Json, Router};
     use redact_gateway::vault::Kv2Store;
     use serde_json::{json, Value};
@@ -226,6 +226,8 @@ mod kv2_mock {
         concurrent_data_on_cas_fail: Arc<Mutex<Option<Value>>>,
         /// Counts POST attempts that reached the CAS check (for assertions).
         write_attempts: Arc<Mutex<u32>>,
+        /// Kubernetes auth logins recorded (role + jwt).
+        logins: Arc<Mutex<Vec<(String, String)>>>,
     }
 
     impl MockVaultState {
@@ -242,6 +244,41 @@ mod kv2_mock {
                 "errors": [
                     "check-and-set parameter did not match the current version"
                 ]
+            })),
+        )
+            .into_response()
+    }
+
+    async fn mock_k8s_login(State(state): State<MockVaultState>, body: Bytes) -> impl IntoResponse {
+        let body: Value = match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(err) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "errors": [err.to_string()] })),
+                )
+                    .into_response();
+            }
+        };
+        let role = body
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let jwt = body
+            .get("jwt")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        state.logins.lock().await.push((role, jwt));
+        (
+            StatusCode::OK,
+            Json(json!({
+                "auth": {
+                    "client_token": "k8s-issued-token",
+                    "lease_duration": 3600,
+                    "renewable": true
+                }
             })),
         )
             .into_response()
@@ -403,6 +440,7 @@ mod kv2_mock {
         let state = MockVaultState::default();
         let app = Router::new()
             .route("/v1/sys/health", get(mock_health))
+            .route("/v1/auth/{mount}/login", post(mock_k8s_login))
             .route(
                 "/v1/{mount}/data/{*path}",
                 get(mock_read_secret)
@@ -426,11 +464,7 @@ mod kv2_mock {
             backend: VaultBackend::VaultKv2,
             address: Some(format!("http://{addr}")),
             token: Some("test-token".to_string()),
-            mount: "secret".to_string(),
-            path_prefix: "redact-gateway".to_string(),
-            namespace: None,
-            ttl_secs: 3600,
-            data_encryption_key: None,
+            ..VaultSettings::default()
         }
     }
 
@@ -645,5 +679,44 @@ mod kv2_mock {
 
         assert!(store.get("../victim", "sess").await.unwrap().is_empty());
         assert_eq!(store.get("victim", "sess").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn kv2_skips_put_when_mappings_are_empty() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        store.put("t", "s", &[]).await.unwrap();
+        assert_eq!(*state.write_attempts.lock().await, 0);
+        assert!(state.last_write.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn kv2_kubernetes_auth_logins_and_caches_the_token() {
+        let (addr, state) = start_mock_vault().await;
+        let jwt_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(jwt_file.path(), "projected-sa-jwt").unwrap();
+
+        let settings = VaultSettings {
+            backend: VaultBackend::VaultKv2,
+            address: Some(format!("http://{addr}")),
+            auth: VaultAuthMethod::Kubernetes,
+            kubernetes_role: Some("redact-gateway".into()),
+            jwt_path: jwt_file.path().to_path_buf(),
+            token: None,
+            ..VaultSettings::default()
+        };
+        let store = Kv2Store::from_settings(&settings).unwrap();
+        let (_dek, sealed) = sealed_email("k8s@example.com");
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+        store.get("t", "s").await.unwrap();
+
+        let logins = state.logins.lock().await.clone();
+        assert_eq!(logins.len(), 1, "login should be cached across put+get");
+        assert_eq!(logins[0].0, "redact-gateway");
+        assert_eq!(logins[0].1, "projected-sa-jwt");
+        assert_eq!(store.get("t", "s").await.unwrap().len(), 1);
     }
 }
