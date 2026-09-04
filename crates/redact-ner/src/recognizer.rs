@@ -10,8 +10,83 @@ use redact_core::{EntityType, Recognizer, RecognizerResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use tracing::{debug, info, warn};
+
+/// Pad buckets used when the ONNX `input_ids` sequence dim is dynamic.
+/// Fixed-length exports keep `max_seq_length` (default 512).
+const PAD_BUCKETS: &[usize] = &[32, 64, 128, 256, 512];
+const DEFAULT_SESSION_POOL: usize = 2;
+const MAX_SESSION_POOL: usize = 4;
+
+/// Bounded ONNX session pool. `try_lock` round-robin, then block.
+struct SessionPool {
+    sessions: Vec<Mutex<Session>>,
+    next: AtomicUsize,
+}
+
+impl SessionPool {
+    fn lock(&self) -> Result<MutexGuard<'_, Session>> {
+        let n = self.sessions.len();
+        if n == 0 {
+            return Err(anyhow!("ONNX session not loaded"));
+        }
+        let start = self.next.fetch_add(1, Ordering::Relaxed);
+        for i in 0..n {
+            if let Ok(g) = self.sessions[(start + i) % n].try_lock() {
+                return Ok(g);
+            }
+        }
+        self.sessions[start % n]
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock session: {}", e))
+    }
+}
+
+/// Parse `CENSGATE_NER_SESSION_POOL` (default 2, cap 4).
+pub(crate) fn clamp_session_pool_size(raw: Option<&str>) -> usize {
+    match raw {
+        None => DEFAULT_SESSION_POOL,
+        Some(s) => match s.trim().parse::<usize>() {
+            Ok(n) if n >= 1 => n.min(MAX_SESSION_POOL),
+            _ => DEFAULT_SESSION_POOL,
+        },
+    }
+}
+
+fn session_pool_size() -> usize {
+    clamp_session_pool_size(std::env::var("CENSGATE_NER_SESSION_POOL").ok().as_deref())
+}
+
+/// Target pad length: bucketed when the model seq dim is dynamic, else `max_seq`.
+pub(crate) fn pad_length(token_len: usize, max_seq: usize, dynamic: bool) -> usize {
+    if !dynamic {
+        return max_seq;
+    }
+    let cap = max_seq;
+    for &b in PAD_BUCKETS {
+        if token_len <= b && b <= cap {
+            return b;
+        }
+    }
+    cap
+}
+
+fn input_seq_is_dynamic(session: &Session) -> bool {
+    for input in session.inputs().iter() {
+        if input.name() != "input_ids" {
+            continue;
+        }
+        if let Some(shape) = input.dtype().tensor_shape() {
+            let dims: &[i64] = shape.as_ref();
+            if let Some(&seq) = dims.last() {
+                return seq < 0;
+            }
+        }
+    }
+    false
+}
 
 use crate::tokenizer_wrapper::TokenizerWrapper;
 
@@ -110,11 +185,13 @@ impl Default for NerConfig {
 pub struct NerRecognizer {
     config: NerConfig,
     tokenizer: Option<TokenizerWrapper>,
-    session: Option<Mutex<Session>>,
+    session: Option<SessionPool>,
     /// Whether the ONNX model accepts `token_type_ids` as an input.
     /// BERT-family models require it; DistilBERT and others do not.
     /// Determined at model-load time by inspecting `Session::inputs()`.
     needs_token_type_ids: bool,
+    /// True when `input_ids` last dim is dynamic (`-1`). Enables bucketed pad.
+    dynamic_seq: bool,
 }
 
 impl std::fmt::Debug for NerRecognizer {
@@ -122,8 +199,15 @@ impl std::fmt::Debug for NerRecognizer {
         f.debug_struct("NerRecognizer")
             .field("config", &self.config)
             .field("tokenizer", &self.tokenizer)
-            .field("session", &self.session.as_ref().map(|_| "Session"))
+            .field(
+                "session",
+                &self
+                    .session
+                    .as_ref()
+                    .map(|p| format!("SessionPool({})", p.sessions.len())),
+            )
             .field("needs_token_type_ids", &self.needs_token_type_ids)
+            .field("dynamic_seq", &self.dynamic_seq)
             .finish()
     }
 }
@@ -313,30 +397,12 @@ impl NerRecognizer {
             None
         };
 
-        // Try to load ONNX model if path is provided
+        // Try to load a bounded ONNX session pool if a model path is provided.
         let session = if !config.model_path.is_empty() {
             let model_path = Path::new(&config.model_path);
             if model_path.exists() {
                 debug!("Loading ONNX model from: {}", config.model_path);
-                match Session::builder()?
-                    .with_optimization_level(GraphOptimizationLevel::Level3)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?
-                    .with_intra_threads(4)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?
-                    .commit_from_file(&config.model_path)
-                {
-                    Ok(s) => {
-                        info!("✓ ONNX model loaded successfully: {}", config.model_path);
-                        Some(Mutex::new(s))
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to load ONNX model: {}. NER will not be available.",
-                            e
-                        );
-                        None
-                    }
-                }
+                load_session_pool(&config.model_path)
             } else {
                 debug!(
                     "Model path provided but file does not exist: {}",
@@ -350,20 +416,27 @@ impl NerRecognizer {
         };
 
         // Inspect model inputs at construction time to determine whether the
-        // model expects token_type_ids (BERT-family) or not (DistilBERT, etc.).
-        let needs_token_type_ids = session.as_ref().is_some_and(|s| {
-            let guard = s.lock().expect("session lock poisoned during init");
-            let has_it = guard
-                .inputs()
-                .iter()
-                .any(|input| input.name() == "token_type_ids");
-            if has_it {
-                debug!("Model declares token_type_ids input — will include in inference");
-            } else {
-                debug!("Model does not declare token_type_ids — omitting from inference");
-            }
-            has_it
-        });
+        // model expects token_type_ids (BERT-family) or not (DistilBERT, etc.),
+        // and whether the sequence dim is dynamic (bucketed pad vs fixed 512).
+        let (needs_token_type_ids, dynamic_seq) = session
+            .as_ref()
+            .and_then(|pool| pool.sessions.first())
+            .map(|s| {
+                let guard = s.lock().expect("session lock poisoned during init");
+                let has_it = guard
+                    .inputs()
+                    .iter()
+                    .any(|input| input.name() == "token_type_ids");
+                if has_it {
+                    debug!("Model declares token_type_ids input — will include in inference");
+                } else {
+                    debug!("Model does not declare token_type_ids — omitting from inference");
+                }
+                let dynamic = input_seq_is_dynamic(&guard);
+                debug!(dynamic_seq = dynamic, "ONNX input_ids sequence dim");
+                (has_it, dynamic)
+            })
+            .unwrap_or((false, false));
 
         let is_available = tokenizer.is_some() && session.is_some();
         if is_available {
@@ -383,9 +456,57 @@ impl NerRecognizer {
             tokenizer,
             session,
             needs_token_type_ids,
+            dynamic_seq,
         })
     }
 
+    fn load_one_session(model_path: &str) -> Result<Session> {
+        Session::builder()?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_intra_threads(4)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .commit_from_file(model_path)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }
+}
+
+fn load_session_pool(model_path: &str) -> Option<SessionPool> {
+    let n = session_pool_size();
+    let mut sessions = Vec::with_capacity(n);
+    for i in 0..n {
+        match NerRecognizer::load_one_session(model_path) {
+            Ok(s) => sessions.push(Mutex::new(s)),
+            Err(e) => {
+                if sessions.is_empty() {
+                    warn!(
+                        "Failed to load ONNX model: {}. NER will not be available.",
+                        e
+                    );
+                    return None;
+                }
+                warn!(
+                    "ONNX session pool slot {} failed ({}); using {} session(s)",
+                    i,
+                    e,
+                    sessions.len()
+                );
+                break;
+            }
+        }
+    }
+    info!(
+        "✓ ONNX model loaded successfully: {} (pool={})",
+        model_path,
+        sessions.len()
+    );
+    Some(SessionPool {
+        sessions,
+        next: AtomicUsize::new(0),
+    })
+}
+
+impl NerRecognizer {
     /// Get the configuration
     pub fn config(&self) -> &NerConfig {
         &self.config
@@ -411,9 +532,7 @@ impl NerRecognizer {
         let mut session = {
             let _wait = redact_core::operations_enabled()
                 .then(|| tracing::info_span!("redact.gateway.detect.onnx.lock_wait").entered());
-            session_mutex
-                .lock()
-                .map_err(|e| anyhow!("Failed to lock session: {}", e))?
+            session_mutex.lock()?
         };
 
         // Create 2D arrays with shape [1, seq_len]
@@ -582,6 +701,35 @@ impl NerRecognizer {
     }
 }
 
+impl NerRecognizer {
+    /// Run NER with an explicit pad length. Used to prove bucketed pad matches
+    /// fixed-512 detections on the same model.
+    pub fn analyze_padded(&self, text: &str, pad: usize) -> Result<Vec<RecognizerResult>> {
+        if !self.is_available() {
+            return Ok(vec![]);
+        }
+        let tokenizer = self.tokenizer.as_ref().unwrap();
+        let mut encoding = tokenizer.encode(text, true)?;
+        let pad_id = tokenizer.get_padding_id().unwrap_or(0);
+        let target = pad.max(encoding.ids.len()).min(self.config.max_seq_length);
+        encoding.pad_to_length(target, pad_id);
+        let logits = self.infer(&encoding.ids, &encoding.attention_mask)?;
+        let mut predictions = Vec::new();
+        let mut probabilities = Vec::new();
+        for token_logits in &logits {
+            let probs = Self::softmax(token_logits);
+            let (pred_id, &max_prob) = probs
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .unwrap();
+            predictions.push(pred_id);
+            probabilities.push(max_prob);
+        }
+        Ok(self.parse_bio_tags(text, &predictions, &probabilities, &encoding.offsets))
+    }
+}
+
 impl Recognizer for NerRecognizer {
     fn name(&self) -> &str {
         "NerRecognizer"
@@ -609,7 +757,12 @@ impl Recognizer for NerRecognizer {
                 .then(|| tracing::info_span!("redact.gateway.detect.tokenizer").entered());
             let mut encoding = tokenizer.encode(text, true)?;
             let pad_id = tokenizer.get_padding_id().unwrap_or(0);
-            encoding.pad_to_length(self.config.max_seq_length, pad_id);
+            let target = pad_length(
+                encoding.ids.len(),
+                self.config.max_seq_length,
+                self.dynamic_seq,
+            );
+            encoding.pad_to_length(target, pad_id);
             encoding
         };
 
@@ -697,6 +850,41 @@ mod tests {
 
         // No session loaded → flag defaults to false
         assert!(!recognizer.needs_token_type_ids);
+        assert!(!recognizer.dynamic_seq);
+    }
+
+    #[test]
+    fn test_pad_length_fixed_uses_max() {
+        assert_eq!(pad_length(3, 512, false), 512);
+        assert_eq!(pad_length(400, 512, false), 512);
+    }
+
+    #[test]
+    fn test_pad_length_dynamic_buckets() {
+        assert_eq!(pad_length(1, 512, true), 32);
+        assert_eq!(pad_length(32, 512, true), 32);
+        assert_eq!(pad_length(33, 512, true), 64);
+        assert_eq!(pad_length(64, 512, true), 64);
+        assert_eq!(pad_length(65, 512, true), 128);
+        assert_eq!(pad_length(200, 512, true), 256);
+        assert_eq!(pad_length(257, 512, true), 512);
+        assert_eq!(pad_length(512, 512, true), 512);
+        assert_eq!(pad_length(600, 512, true), 512);
+        assert_eq!(pad_length(10, 64, true), 32);
+        assert_eq!(pad_length(40, 64, true), 64);
+        assert_eq!(pad_length(80, 64, true), 64);
+    }
+
+    #[test]
+    fn test_session_pool_size_default_and_cap() {
+        assert_eq!(clamp_session_pool_size(None), 2);
+        assert_eq!(clamp_session_pool_size(Some("")), 2);
+        assert_eq!(clamp_session_pool_size(Some("0")), 2);
+        assert_eq!(clamp_session_pool_size(Some("1")), 1);
+        assert_eq!(clamp_session_pool_size(Some("2")), 2);
+        assert_eq!(clamp_session_pool_size(Some("4")), 4);
+        assert_eq!(clamp_session_pool_size(Some("8")), 4);
+        assert_eq!(clamp_session_pool_size(Some("nope")), 2);
     }
 
     // ---- load_config_from_file tests ----

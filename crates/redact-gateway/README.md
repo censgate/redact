@@ -205,6 +205,7 @@ Every gateway knob uses the `CENSGATE_` prefix (one name per setting). The only 
 | `CENSGATE_DISABLE_BUILTIN_PATTERNS` | `false` | Skip patterns compiled into the engine |
 | `CENSGATE_NER_MODEL_PATH` | unset | Path to ONNX `model.onnx` |
 | `CENSGATE_NER_REQUIRED` | `false` | Fail startup if NER cannot load |
+| `CENSGATE_NER_SESSION_POOL` | `2` | Bounded ONNX session pool (cap 4). Same exported model; `try_lock` then block. |
 | `CENSGATE_VAULT_BACKEND` | `off` | Token map backend: `off`, `memory`, or `vault_kv2` |
 | `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 server address |
 | `CENSGATE_VAULT_TOKEN` / `VAULT_TOKEN` / `BAO_TOKEN` | unset | KV v2 auth token |

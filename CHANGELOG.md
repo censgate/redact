@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contextual identity, tokenizer, ONNX lock wait, ONNX exec, and decode.
   No text attributes. Detection and token bytes are unchanged from 0.11.1.
 
+### Changed
+
+- Same exported ONNX model: when `input_ids` sequence dim is dynamic, pad
+  to 32/64/128/256/512 instead of always 512. A bounded session pool
+  (`CENSGATE_NER_SESSION_POOL`, default 2, cap 4) acquires with try_lock
+  round-robin then block. Detection and token bytes stay 0.11.1-identical.
+
 ## [0.11.1] - 2026-09-02
 
 ### Fixed

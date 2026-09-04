@@ -21,7 +21,6 @@ if [[ -n "${KEY}" ]]; then
 fi
 
 short='{"text":"Ada Lovelace","session_id":"bench-short"}'
-long_text
 long_text="$(python3 - <<'PY'
 print("Ada Lovelace " * 80)
 PY
