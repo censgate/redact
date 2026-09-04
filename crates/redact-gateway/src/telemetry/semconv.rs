@@ -166,6 +166,18 @@ pub mod span_name {
     pub const STREAM_REDACT: &str = "redact.gateway.stream.redact";
     /// Configuration reload.
     pub const CONFIG_RELOAD: &str = "redact.gateway.config.reload";
+    /// Regex / pack pattern pass (child of detect).
+    pub const DETECT_PATTERNS: &str = "redact.gateway.detect.patterns";
+    /// Contextual identity pass (child of detect).
+    pub const DETECT_CONTEXTUAL: &str = "redact.gateway.detect.contextual";
+    /// NER tokenizer + pad (child of detect).
+    pub const DETECT_TOKENIZER: &str = "redact.gateway.detect.tokenizer";
+    /// Time waiting for the ONNX session mutex.
+    pub const DETECT_ONNX_LOCK_WAIT: &str = "redact.gateway.detect.onnx.lock_wait";
+    /// ONNX session.run (lock held).
+    pub const DETECT_ONNX_EXEC: &str = "redact.gateway.detect.onnx.exec";
+    /// Softmax + BIO decode (child of detect).
+    pub const DETECT_DECODE: &str = "redact.gateway.detect.decode";
 }
 
 /// `tracing` targets so operators can filter per subsystem.

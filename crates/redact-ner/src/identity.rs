@@ -142,7 +142,10 @@ impl Recognizer for IdentityRecognizer {
     }
 
     fn analyze(&self, text: &str, language: &str) -> Result<Vec<RecognizerResult>> {
-        let contextual = detect_contextual_identities(text);
+        let contextual = {
+            let _span = tracing::info_span!("redact.gateway.detect.contextual").entered();
+            detect_contextual_identities(text)
+        };
         let ner = match &self.ner {
             Some(ner) if ner.is_available() => ner.analyze(text, language)?,
             _ => Vec::new(),

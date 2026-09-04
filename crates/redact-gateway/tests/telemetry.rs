@@ -180,6 +180,12 @@ fn operation_spans_respect_trace_level_and_nest() {
         assert!(spans::detect(TraceLevel::Off, 10).is_none());
         assert!(spans::anonymize(TraceLevel::Off).is_none());
         assert!(spans::policy_evaluate(TraceLevel::Off, "default").is_none());
+        assert!(spans::detect_patterns(TraceLevel::Off).is_none());
+        assert!(spans::detect_contextual(TraceLevel::Off).is_none());
+        assert!(spans::detect_tokenizer(TraceLevel::Off).is_none());
+        assert!(spans::detect_onnx_lock_wait(TraceLevel::Off).is_none());
+        assert!(spans::detect_onnx_exec(TraceLevel::Off).is_none());
+        assert!(spans::detect_decode(TraceLevel::Off).is_none());
     }
 
     // Detailed: stream chunk attribute is recorded.

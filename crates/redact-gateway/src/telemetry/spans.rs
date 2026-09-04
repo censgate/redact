@@ -464,3 +464,87 @@ pub fn finish_config_reload(span: &Span, outcome: &str, error_type: Option<&str>
         record_error(span, err);
     }
 }
+
+/// `redact.gateway.detect.patterns`.
+pub fn detect_patterns(level: TraceLevel) -> Option<Span> {
+    if !level.records_operations() {
+        return None;
+    }
+    Some(tracing::info_span!(
+        target: semconv::target::DETECT,
+        { semconv::span_name::DETECT_PATTERNS },
+        { semconv::ERROR_TYPE } = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+    ))
+}
+
+/// `redact.gateway.detect.contextual`.
+pub fn detect_contextual(level: TraceLevel) -> Option<Span> {
+    if !level.records_operations() {
+        return None;
+    }
+    Some(tracing::info_span!(
+        target: semconv::target::DETECT,
+        { semconv::span_name::DETECT_CONTEXTUAL },
+        { semconv::ERROR_TYPE } = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+    ))
+}
+
+/// `redact.gateway.detect.tokenizer`.
+pub fn detect_tokenizer(level: TraceLevel) -> Option<Span> {
+    if !level.records_operations() {
+        return None;
+    }
+    Some(tracing::info_span!(
+        target: semconv::target::DETECT,
+        { semconv::span_name::DETECT_TOKENIZER },
+        { semconv::ERROR_TYPE } = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+    ))
+}
+
+/// `redact.gateway.detect.onnx.lock_wait`.
+pub fn detect_onnx_lock_wait(level: TraceLevel) -> Option<Span> {
+    if !level.records_operations() {
+        return None;
+    }
+    Some(tracing::info_span!(
+        target: semconv::target::DETECT,
+        { semconv::span_name::DETECT_ONNX_LOCK_WAIT },
+        { semconv::ERROR_TYPE } = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+    ))
+}
+
+/// `redact.gateway.detect.onnx.exec`.
+pub fn detect_onnx_exec(level: TraceLevel) -> Option<Span> {
+    if !level.records_operations() {
+        return None;
+    }
+    Some(tracing::info_span!(
+        target: semconv::target::DETECT,
+        { semconv::span_name::DETECT_ONNX_EXEC },
+        { semconv::ERROR_TYPE } = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+    ))
+}
+
+/// `redact.gateway.detect.decode`.
+pub fn detect_decode(level: TraceLevel) -> Option<Span> {
+    if !level.records_operations() {
+        return None;
+    }
+    Some(tracing::info_span!(
+        target: semconv::target::DETECT,
+        { semconv::span_name::DETECT_DECODE },
+        { semconv::ERROR_TYPE } = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+        otel.status_description = tracing::field::Empty,
+    ))
+}

@@ -330,7 +330,8 @@ pub struct TestTelemetry {
     pub telemetry: Telemetry,
     /// In-memory collectors.
     pub handles: TestHandles,
-    _guard: Option<tracing::subscriber::DefaultGuard>,
+    /// Thread-local subscriber guard; keep this alive for the test.
+    pub _guard: Option<tracing::subscriber::DefaultGuard>,
 }
 
 impl TestTelemetry {

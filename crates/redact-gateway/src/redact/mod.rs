@@ -19,7 +19,9 @@ use redact_core::{AnalyzerEngine, EntityType, RecognizerResult};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::config::TraceLevel;
 use crate::policy::{EntityAction, MaskOptions, Profile};
+use crate::telemetry::spans;
 use token::{TokenError, TokenSession};
 
 /// Redaction failures.
@@ -137,6 +139,8 @@ pub struct RedactionContext<'a> {
     profile: &'a Profile,
     session: Option<&'a mut TokenSession>,
     tokenize_as_replace: bool,
+    /// When set, emit detect/policy child spans (standalone `/v1/redact`).
+    trace_level: Option<TraceLevel>,
     /// Accumulated result across every field touched by this context.
     pub outcome: RedactionOutcome,
 }
@@ -153,6 +157,7 @@ impl<'a> RedactionContext<'a> {
             profile,
             session: None,
             tokenize_as_replace: false,
+            trace_level: None,
             outcome: RedactionOutcome::default(),
         }
     }
@@ -169,6 +174,7 @@ impl<'a> RedactionContext<'a> {
             profile,
             session: None,
             tokenize_as_replace: true,
+            trace_level: None,
             outcome: RedactionOutcome::default(),
         }
     }
@@ -184,8 +190,15 @@ impl<'a> RedactionContext<'a> {
             profile,
             session: Some(session),
             tokenize_as_replace: false,
+            trace_level: None,
             outcome: RedactionOutcome::default(),
         }
+    }
+
+    /// Enable detect/policy child spans for this pass.
+    pub fn with_trace_level(mut self, level: TraceLevel) -> Self {
+        self.trace_level = Some(level);
+        self
     }
 
     /// The profile driving this pass.
@@ -204,13 +217,34 @@ impl<'a> RedactionContext<'a> {
             return Ok(text.to_string());
         }
 
-        let analysis = self
-            .engine
-            .analyze(text, None)
-            .map_err(|e| RedactError::Detection(e.to_string()))?;
+        let level = self.trace_level.unwrap_or(TraceLevel::Off);
+        let detect = spans::detect(level, text.len());
+        let analysis = {
+            let _enter = detect.as_ref().map(|s| s.enter());
+            self.engine
+                .analyze(text, None)
+                .map_err(|e| RedactError::Detection(e.to_string()))
+        };
+        let analysis = match analysis {
+            Ok(a) => {
+                if let Some(span) = &detect {
+                    spans::finish_detect(span, a.detected_entities.len(), level, None);
+                }
+                a
+            }
+            Err(err) => {
+                if let Some(span) = &detect {
+                    spans::finish_detect(span, 0, level, Some("detect_error"));
+                }
+                return Err(err);
+            }
+        };
         if analysis.detected_entities.is_empty() {
             return Ok(text.to_string());
         }
+
+        let policy = spans::policy_evaluate(level, &self.profile.name);
+        let _policy_enter = policy.as_ref().map(|s| s.enter());
 
         // Decide every span first: tokenization needs fallible work that
         // `apply_anonymization` cannot perform inside its closure.
@@ -228,7 +262,16 @@ impl<'a> RedactionContext<'a> {
                     let original = slice(text, &entity);
                     match self.session.as_deref_mut() {
                         Some(session) => Some(session.token_for(&entity.entity_type, original)?),
-                        None => return Err(RedactError::TokenizationUnavailable),
+                        None => {
+                            if let Some(span) = &policy {
+                                spans::finish_policy_evaluate(
+                                    span,
+                                    "error",
+                                    Some("tokenization_unavailable"),
+                                );
+                            }
+                            return Err(RedactError::TokenizationUnavailable);
+                        }
                     }
                 }
                 _ => None,
@@ -237,6 +280,9 @@ impl<'a> RedactionContext<'a> {
         }
 
         if self.outcome.is_blocked() {
+            if let Some(span) = &policy {
+                spans::finish_policy_evaluate(span, "block", None);
+            }
             // The caller refuses the request, so the rewritten text is never used.
             return Ok(text.to_string());
         }
@@ -247,6 +293,9 @@ impl<'a> RedactionContext<'a> {
             .map(|(entity, _, _)| entity.clone())
             .collect();
         if rewrites.is_empty() {
+            if let Some(span) = &policy {
+                spans::finish_policy_evaluate(span, "allow", None);
+            }
             return Ok(text.to_string());
         }
 
@@ -271,6 +320,9 @@ impl<'a> RedactionContext<'a> {
             }
         });
 
+        if let Some(span) = &policy {
+            spans::finish_policy_evaluate(span, "allow", None);
+        }
         Ok(redacted)
     }
 

@@ -1254,23 +1254,48 @@ async fn redact_endpoint(
         Some(subject) => subject_bound_session_key(&session_id, subject),
         None => session_id.clone(),
     };
+    let level = config.telemetry.operations;
     // Resume prior mappings so sequential /v1/redact calls with one session
     // continue the counter instead of reminting `[ENTITY_1]` and clobbering.
     let mut session = if state.tokens.backend_name() != "off" {
-        match state.tokens.get(&auth.tenant, &token_map_session).await {
-            Ok(existing) => TokenSession::resume(
-                session_id.clone(),
-                &auth.tenant,
-                state.dek.clone(),
-                existing,
-            ),
+        let get_span = spans::tokenmap_get(
+            level,
+            state.tokens.backend_name(),
+            0,
+            config.vault.address.as_deref(),
+            None,
+        );
+        let get_fut = state.tokens.get(&auth.tenant, &token_map_session);
+        let got = if let Some(span) = get_span.clone() {
+            get_fut.instrument(span).await
+        } else {
+            get_fut.await
+        };
+        match got {
+            Ok(existing) => {
+                if let Some(span) = &get_span {
+                    spans::finish_tokenmap(span, existing.len(), None);
+                }
+                TokenSession::resume(
+                    session_id.clone(),
+                    &auth.tenant,
+                    state.dek.clone(),
+                    existing,
+                )
+            }
             Err(err) if profile.fail_closed => {
+                if let Some(span) = &get_span {
+                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                }
                 return GatewayError::DependencyUnavailable(format!(
                     "token map read failed: {err}"
                 ))
                 .into_response();
             }
             Err(err) => {
+                if let Some(span) = &get_span {
+                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                }
                 warn!(error = %err, "token map read failed; starting a fresh session");
                 TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
             }
@@ -1278,7 +1303,8 @@ async fn redact_endpoint(
     } else {
         TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
     };
-    let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
+    let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session)
+        .with_trace_level(level);
     let text = match ctx.redact(&request.text) {
         Ok(text) => text,
         Err(err) => return redaction_error(err).into_response(),
@@ -1287,11 +1313,25 @@ async fn redact_endpoint(
 
     let minted = session.take_new_mappings();
     if !minted.is_empty() && state.tokens.backend_name() != "off" {
-        if let Err(err) = state
+        let put_span = spans::tokenmap_put(
+            level,
+            state.tokens.backend_name(),
+            minted.len(),
+            config.vault.address.as_deref(),
+            None,
+        );
+        let put_fut = state
             .tokens
-            .put(&auth.tenant, &token_map_session, &minted)
-            .await
-        {
+            .put(&auth.tenant, &token_map_session, &minted);
+        let put_result = if let Some(span) = put_span.clone() {
+            put_fut.instrument(span).await
+        } else {
+            put_fut.await
+        };
+        if let Err(err) = put_result {
+            if let Some(span) = &put_span {
+                spans::finish_tokenmap(span, 0, Some("token_map_error"));
+            }
             use crate::vault::TokenMapError;
             // Conflicts are integrity failures even when fail_closed is off:
             // returning a colliding token that was not persisted is unsafe.
@@ -1302,6 +1342,8 @@ async fn redact_endpoint(
                 .into_response();
             }
             warn!(error = %err, "token map write failed");
+        } else if let Some(span) = &put_span {
+            spans::finish_tokenmap(span, minted.len(), None);
         }
     }
 

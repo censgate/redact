@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Standalone `POST /v1/redact` emits the same detect / policy / tokenmap
+  child spans as the proxy path, plus stage spans for patterns,
+  contextual identity, tokenizer, ONNX lock wait, ONNX exec, and decode.
+  No text attributes. Detection and token bytes are unchanged from 0.11.1.
+
 ## [0.11.1] - 2026-09-02
 
 ### Fixed

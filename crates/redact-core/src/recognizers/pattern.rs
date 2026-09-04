@@ -714,6 +714,7 @@ impl Recognizer for PatternRecognizer {
     }
 
     fn analyze(&self, text: &str, _language: &str) -> Result<Vec<RecognizerResult>> {
+        let _span = tracing::info_span!("redact.gateway.detect.patterns").entered();
         let mut results = Vec::new();
 
         for (entity_type, patterns) in &self.patterns {
