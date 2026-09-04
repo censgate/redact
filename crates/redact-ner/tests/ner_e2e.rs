@@ -596,3 +596,36 @@ fn test_ner_entity_types() -> Result<()> {
 
     Ok(())
 }
+
+/// Bucketed pad must return the same entity types and spans as fixed 512.
+#[test]
+#[ignore] // Requires model
+fn test_bucketed_pad_matches_fixed_512() -> Result<()> {
+    let model_dir = "tests/fixtures/models/bert-base-ner";
+    if !model_exists(model_dir) {
+        return Ok(());
+    }
+    let recognizer = NerRecognizer::from_config(NerConfig {
+        model_path: format!("{}/model.onnx", model_dir),
+        tokenizer_path: Some(format!("{}/tokenizer.json", model_dir)),
+        min_confidence: 0.5,
+        ..Default::default()
+    })?;
+    for case in get_test_cases() {
+        let bucket = recognizer.analyze(case.text, "en")?;
+        let fixed = recognizer.analyze_padded(case.text, 512)?;
+        let key = |r: &redact_core::RecognizerResult| {
+            format!("{:?}:{}:{}:{:?}", r.entity_type, r.start, r.end, r.text)
+        };
+        let mut a: Vec<_> = bucket.iter().map(key).collect();
+        let mut b: Vec<_> = fixed.iter().map(key).collect();
+        a.sort();
+        b.sort();
+        assert_eq!(
+            a, b,
+            "bucketed pad != 512 pad for {:?}\nbucket={:?}\nfixed={:?}",
+            case.text, bucket, fixed
+        );
+    }
+    Ok(())
+}

@@ -701,6 +701,35 @@ impl NerRecognizer {
     }
 }
 
+impl NerRecognizer {
+    /// Run NER with an explicit pad length. Used to prove bucketed pad matches
+    /// fixed-512 detections on the same model.
+    pub fn analyze_padded(&self, text: &str, pad: usize) -> Result<Vec<RecognizerResult>> {
+        if !self.is_available() {
+            return Ok(vec![]);
+        }
+        let tokenizer = self.tokenizer.as_ref().unwrap();
+        let mut encoding = tokenizer.encode(text, true)?;
+        let pad_id = tokenizer.get_padding_id().unwrap_or(0);
+        let target = pad.max(encoding.ids.len()).min(self.config.max_seq_length);
+        encoding.pad_to_length(target, pad_id);
+        let logits = self.infer(&encoding.ids, &encoding.attention_mask)?;
+        let mut predictions = Vec::new();
+        let mut probabilities = Vec::new();
+        for token_logits in &logits {
+            let probs = Self::softmax(token_logits);
+            let (pred_id, &max_prob) = probs
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .unwrap();
+            predictions.push(pred_id);
+            probabilities.push(max_prob);
+        }
+        Ok(self.parse_bio_tags(text, &predictions, &probabilities, &encoding.offsets))
+    }
+}
+
 impl Recognizer for NerRecognizer {
     fn name(&self) -> &str {
         "NerRecognizer"
