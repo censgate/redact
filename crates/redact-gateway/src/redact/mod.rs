@@ -24,6 +24,26 @@ use crate::policy::{EntityAction, MaskOptions, Profile};
 use crate::telemetry::spans;
 use token::{TokenError, TokenSession};
 
+/// Run engine analyze off the tokio worker when we are on a multi-thread
+/// runtime (same blocking pool as `spawn_blocking`). Current-thread tests
+/// and non-tokio callers stay in-place.
+fn analyze_off_async_worker(
+    engine: &AnalyzerEngine,
+    text: &str,
+) -> Result<redact_core::AnalysisResult, RedactError> {
+    let run = || {
+        engine
+            .analyze(text, None)
+            .map_err(|e| RedactError::Detection(e.to_string()))
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(run)
+        }
+        _ => run(),
+    }
+}
+
 /// Redaction failures.
 #[derive(Debug, thiserror::Error)]
 pub enum RedactError {
@@ -222,9 +242,7 @@ impl<'a> RedactionContext<'a> {
         let analysis = {
             let _enter = detect.as_ref().map(|s| s.enter());
             redact_core::with_operation_spans(level.records_operations(), || {
-                self.engine
-                    .analyze(text, None)
-                    .map_err(|e| RedactError::Detection(e.to_string()))
+                analyze_off_async_worker(self.engine, text)
             })
         };
         let analysis = match analysis {
@@ -344,10 +362,7 @@ impl<'a> RedactionContext<'a> {
             return Ok((String::new(), text.to_string()));
         }
 
-        let analysis = self
-            .engine
-            .analyze(text, None)
-            .map_err(|e| RedactError::Detection(e.to_string()))?;
+        let analysis = analyze_off_async_worker(self.engine, text)?;
 
         let mut cut = text.len() - holdback;
         // Never split a detected entity: move the cut back to its start.

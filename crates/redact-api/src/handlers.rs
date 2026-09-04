@@ -70,6 +70,27 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
+fn analyze_off_async_worker(
+    engine: &AnalyzerEngine,
+    request: &AnalyzeRequest,
+    entity_types: Option<&Vec<EntityType>>,
+) -> Result<redact_core::AnalysisResult, ApiError> {
+    let run = || {
+        if let Some(entities) = entity_types {
+            engine.analyze_with_entities(&request.text, entities, Some(&request.language))
+        } else {
+            engine.analyze(&request.text, Some(&request.language))
+        }
+        .map_err(ApiError::from)
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(run)
+        }
+        _ => run(),
+    }
+}
+
 /// Analyze endpoint - detect PII entities
 pub async fn analyze(
     State(state): State<AppState>,
@@ -103,18 +124,8 @@ async fn analyze_request(
             .collect()
     });
 
-    // Analyze text
-    let result = if let Some(entities) = entity_types.as_ref() {
-        state
-            .engine
-            .analyze_with_entities(&request.text, entities, Some(&request.language))
-            .map_err(ApiError::from)?
-    } else {
-        state
-            .engine
-            .analyze(&request.text, Some(&request.language))
-            .map_err(ApiError::from)?
-    };
+    // Analyze text off the tokio worker (same blocking pool as spawn_blocking).
+    let result = analyze_off_async_worker(&state.engine, &request, entity_types.as_ref())?;
 
     // Filter by min_score if provided
     let mut results: Vec<EntityResult> = result
