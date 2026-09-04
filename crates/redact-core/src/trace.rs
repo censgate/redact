@@ -17,12 +17,15 @@ thread_local! {
 
 /// Run `f` with stage spans enabled or disabled for this thread.
 pub fn with_operation_spans<R>(enabled: bool, f: impl FnOnce() -> R) -> R {
-    OPERATIONS.with(|flag| {
-        let prev = flag.replace(enabled);
-        let out = f();
-        flag.set(prev);
-        out
-    })
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OPERATIONS.with(|flag| flag.set(self.0));
+        }
+    }
+    let prev = OPERATIONS.with(|flag| flag.replace(enabled));
+    let _restore = Restore(prev);
+    f()
 }
 
 /// Whether the current pass should emit detect-stage child spans.
@@ -44,6 +47,14 @@ mod tests {
         with_operation_spans(true, || {
             assert!(operations_enabled());
         });
+        assert!(!operations_enabled());
+    }
+
+    #[test]
+    fn restores_after_panic() {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_operation_spans(true, || panic!("boom"));
+        }));
         assert!(!operations_enabled());
     }
 }
