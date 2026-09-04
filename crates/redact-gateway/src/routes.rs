@@ -1320,9 +1320,7 @@ async fn redact_endpoint(
             config.vault.address.as_deref(),
             None,
         );
-        let put_fut = state
-            .tokens
-            .put(&auth.tenant, &token_map_session, &minted);
+        let put_fut = state.tokens.put(&auth.tenant, &token_map_session, &minted);
         let put_result = if let Some(span) = put_span.clone() {
             put_fut.instrument(span).await
         } else {
