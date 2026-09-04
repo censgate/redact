@@ -49,9 +49,17 @@ Further provider coverage belongs in a pack PR, not in `redact-core`.
 | `PERSON` | Person names in prose |
 | `ORGANIZATION` | Organization names in prose |
 | `LOCATION` | Location names in prose |
-| `DATE_TIME` | Date/time expressions in context (also a compiled pattern type) |
 
 Requires an ONNX model. See [NER](ner.md).
+
+`DATE_TIME` is a **compiled pattern type**, not a NER product. The default
+CoNLL model does not annotate dates. `IdentityRecognizer` drops NER
+`DATE_TIME` / `MISC` date-like spans — “pattern packs own dates.” The
+compiled pattern is ISO-only (`YYYY-MM-DD` with optional time); pack
+`global_date_common` adds slash dates. Relative phrases (“next Friday”,
+“January 15”, “3pm”) are **not** redacted by default. The gateway default
+policy allows `DATE_TIME` because date NER is a known FP firehose. Do not
+map `B-MISC` → `DATE_TIME`.
 
 ## Anonymization strategies
 

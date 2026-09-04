@@ -62,29 +62,43 @@ curl -s http://localhost:8080/readyz
 
 Collector config: [`deploy/otel-collector.yaml`](../../deploy/otel-collector.yaml).
 
-With `vault_kv2`, concurrent writers to the same session use KV v2 check-and-set with up to five read-merge-write retries. Under sustained contention on a single session a write can still exhaust those retries and fail the request; each attempt costs a read plus a write.
+With `vault_kv2`, concurrent writers to the same session use KV v2 check-and-set with up to eight jittered read-merge-write retries. Empty incoming mapping sets skip the write. Under sustained contention on a single session a write can still exhaust those retries and fail the request; each attempt costs a read plus a write. Production maps belong on **`openbao-tokens`**, not the ESO secrets OpenBao. See [openbao-tokens SPIKE](openbao-tokens-spike.md).
+
+Compose `--profile vault` is OpenBao **dev mode** + a static token. Local only. It is neither AKS cluster.
 
 ## Kubernetes
 
 Manifests: [`deploy/kubernetes/redact-gateway.yaml`](../../deploy/kubernetes/redact-gateway.yaml).
 
+Production / beta shape is **n replicas + HPA + `vault_kv2` against
+`openbao-tokens`**. `replica=1` / `vault.backend=off` is not a supported
+production topology.
+
 ```bash
-# Create secrets (do not commit real values)
+# Provider key + inbound API keys (do not commit real values).
+# CENSGATE_TOKEN_DEK should come from the secrets OpenBao via ESO
+# (ExternalSecret in the sample). For a local cluster without ESO:
 kubectl create secret generic redact-gateway-secrets \
   --from-literal=CENSGATE_PROVIDER_API_KEY='…' \
+  --from-literal=CENSGATE_API_KEYS='…' \
   --from-literal=CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
 
 kubectl apply -f deploy/kubernetes/redact-gateway.yaml
 ```
 
-The Deployment:
+The sample:
 
-- Mounts a ConfigMap gateway YAML at `/etc/redact-gateway`
-- Injects secrets via env
-- Sets OTLP exporter env vars toward a collector service
-- Uses HTTP liveness (`/livez`) and readiness (`/readyz`) probes
-- Runs non-root with a read-only root filesystem and dropped capabilities
-- Defaults to **one** replica. Scale out only after configuring `vault_kv2` and a shared `CENSGATE_TOKEN_DEK`
+- ServiceAccount `redact-gateway` with a projected JWT for Kubernetes auth
+- ConfigMap: `vault.backend=vault_kv2`, address
+  `http://openbao-tokens.openbao-tokens.svc.cluster.local:8200`,
+  `auth=kubernetes`, role `redact-gateway` (never `external-secrets`)
+- ExternalSecret merges `CENSGATE_TOKEN_DEK` from secrets OpenBao path
+  `censgate/aks-censgate-beta/redact-gateway/dek`
+- Deployment `replicas: 2`, Guaranteed QoS 4 CPU / 4Gi, startupProbe on
+  `/readyz` (NER load + OpenBao health), topology spread
+- HPA minReplicas 2 / maxReplicas 8; ClusterIP **without** session affinity
+- NetworkPolicy: egress to `openbao-tokens:8200` only for KV
+- `auth.mode: api_key` (not `none`)
 
 ## Hardening checklist
 
@@ -92,10 +106,10 @@ The Deployment:
 |------|----------|
 | Enable auth | Set `CENSGATE_AUTH_MODE` to `api_key` or `oidc` before any untrusted edge. Mode `none` is only for trusted networks. |
 | Sealing key | Set `CENSGATE_TOKEN_DEK` (base64 32 bytes) whenever tokenization is used. Share the same value across replicas. |
-| Shared token map | Use `vault_kv2` (Vault or OpenBao) for multi-replica deployments. The `memory` and `off` backends are not HashiCorp Vault; `memory` is process-local. |
+| Shared token map | Production must use `vault_kv2` against **openbao-tokens** plus a shared `CENSGATE_TOKEN_DEK` from the secrets OpenBao via ESO. `off` / `memory` are local-dev only. Do not point the gateway at `openbao.openbao.svc`. |
 | Fail-closed profiles | Keep `fail_closed: true` on production profiles so dependency failures reject rather than forward unprotected content. |
 | Audit sink | Set `CENSGATE_AUDIT_EXPORT` to `otlp` (preferred) or `file`, and retain records in a collector / object store with your retention policy. |
-| Resource limits | Set CPU/memory requests and limits (the sample Deployment uses 100m–2 CPU and 256Mi–1Gi as a starting point). Cap bodies with `CENSGATE_PROVIDER_MAX_BODY_BYTES`. |
+| Resource limits | Guaranteed QoS: integer CPU request = limit (sample is 4/4 CPU, 4Gi). Cap bodies with `CENSGATE_PROVIDER_MAX_BODY_BYTES`. Set `CENSGATE_NER_SESSION_POOL` × `CENSGATE_NER_INTRA_THREADS` to match those cores. |
 | Upstream TLS | Prefer `https://` upstream URLs. Inject provider keys via secrets, not ConfigMaps. |
 | Profile selection | `allow_profile_header` defaults to `false`. Leave it off when profiles come from JWT claims; enabling it without inbound auth lets any caller choose any profile. |
 | Session restore | `/v1/restore` requires `api_key` or `oidc`. With `auth.mode = none`, chat-surface session resumption keys only on `x-censgate-session-id` — safe only on a trusted network. |

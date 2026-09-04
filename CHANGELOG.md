@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `vault_kv2` Kubernetes auth (`CENSGATE_VAULT_AUTH=kubernetes`) against
+  `openbao-tokens`, with in-process token cache/renew. Static
+  `CENSGATE_VAULT_TOKEN` is local-dev only. Role `external-secrets` is
+  refused. CAS retries are jittered (8 attempts); empty puts are skipped;
+  `/readyz` caches OpenBao health for 2s.
+- Sample `deploy/kubernetes/redact-gateway.yaml`: min 2 replicas, HPA,
+  PDB, startupProbe, ServiceAccount, Guaranteed 4 CPU / 4Gi, NetworkPolicy
+  to `openbao-tokens`, ESO ExternalSecret for `CENSGATE_TOKEN_DEK`.
+- `scripts/bench-gateway-ner.sh` and `docs/gateway/openbao-tokens-spike.md`
+  (do not quote the 32× Presidio redact-api number on the NER gateway).
+- `scripts/validate-distilbert-ner.sh` (gated; default model unchanged).
+- `export_ner_model.py --quantize` now runs dynamic INT8.
+- `CENSGATE_NER_INTRA_THREADS` (default 1). Gateway/API analyze uses the
+  tokio blocking pool.
+
+### Added
+
 - Standalone `POST /v1/redact` emits the same detect / policy / tokenmap
   child spans as the proxy path, plus stage spans for patterns,
   contextual identity, tokenizer, ONNX lock wait, ONNX exec, and decode.

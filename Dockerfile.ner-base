@@ -43,6 +43,8 @@ RUN case "$TARGETARCH" in \
 # Stage 1: Export NER model to ONNX
 # -----------------------------------------------------------------------------
 FROM python:3.11-slim AS model-exporter
+# Gated: do not change this default to dslim/distilbert-NER without CoNLL
+# PER/ORG/LOC F1 + fixture numbers (scripts/validate-distilbert-ner.sh).
 ARG NER_MODEL=dslim/bert-base-NER
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
