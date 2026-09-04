@@ -1,24 +1,31 @@
-# Kubernetes manifests for redact-gateway.
+# Kubernetes manifests for redact-gateway (production / beta shape).
 #
-# This sample is deliberately single-replica and authenticated-by-default-off,
-# because those two choices interact. Read the checklist before exposing it
-# beyond a trusted network:
+# Required topology: n replicas + HPA + vault_kv2 against **openbao-tokens**
+# (not the ESO secrets OpenBao) + a shared CENSGATE_TOKEN_DEK from the secrets
+# OpenBao via ESO. replica=1 / vault.backend=off is local-dev only.
 #
-#   1. auth.mode below is `none`, which accepts any caller that can reach the
-#      Service. Set it to `api_key` or `oidc` before the gateway is reachable
-#      by anything you do not control. See docs/gateway/authentication.md.
-#   2. replicas is 1. Token mappings live in the gateway process unless
-#      vault.backend is vault_kv2, so a second replica cannot restore a token
-#      the first one minted. Scale out only after configuring a shared token
-#      map, and give every replica the same CENSGATE_TOKEN_DEK.
-#   3. The Secret below contains placeholders that the gateway REFUSES to
-#      start with. Create the real Secret yourself; do not apply the template.
+# Checklist:
+#   1. auth.mode is api_key. Replace the Secret keys before the Service is
+#      reachable by callers you do not control. OIDC is also fine.
+#   2. Token maps live in openbao-tokens. Any replica must restore any token.
+#      Service has no session affinity.
+#   3. CENSGATE_TOKEN_DEK is a secret (ESO from openbao / ClusterSecretStore
+#      censgate-openbao). Token **blobs** never land on the secrets cluster.
+#   4. Kubernetes auth role is `redact-gateway`. Never `external-secrets`.
 #
-# Apply (after creating secrets):
-#   kubectl apply -f deploy/kubernetes/
+# Apply (after creating secrets / ESO):
+#   kubectl apply -f deploy/kubernetes/redact-gateway.yaml
 #
 # Image naming matches release.yml: ghcr.io/<org>/redact-gateway:<tag>
-# (suffix form, same pattern as ghcr.io/<org>/redact-ner-base).
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redact-gateway
+  labels:
+    app.kubernetes.io/name: redact-gateway
+automountServiceAccountToken: true
 
 ---
 # Non-secret gateway configuration. Mounted read-only at /etc/redact-gateway.
@@ -45,14 +52,16 @@ data:
       paths:
         - /app/patterns
     vault:
-      # "off" keeps token mappings inside the request that minted them. Use
-      # vault_kv2 (with vault.address) for tokens that survive a restart or
-      # need to be restored by another replica.
-      backend: "off"
+      backend: vault_kv2
+      address: http://openbao-tokens.openbao-tokens.svc.cluster.local:8200
+      auth: kubernetes
+      kubernetes_role: redact-gateway
+      kubernetes_mount: kubernetes
+      mount: tokens
+      path_prefix: redact-gateway
     auth:
-      # LOCAL / TRUSTED-NETWORK ONLY. Change to api_key or oidc before this
-      # Service is reachable by callers you do not control.
-      mode: none
+      # Internet-facing Services must not use none.
+      mode: api_key
     audit:
       export: otlp
       queue_capacity: 1024
@@ -62,15 +71,15 @@ data:
       genai_attributes: false
 
 ---
-# Secret TEMPLATE — the values below are placeholders and will NOT start the
-# gateway. Create the real Secret out of band instead of applying this:
+# Secret TEMPLATE — placeholders will NOT start the gateway. Prefer ESO for
+# CENSGATE_TOKEN_DEK (see ExternalSecret below). Create the provider key
+# out of band:
 #
 #   kubectl create secret generic redact-gateway-secrets \
 #     --from-literal=CENSGATE_PROVIDER_API_KEY='sk-...' \
-#     --from-literal=CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
+#     --from-literal=CENSGATE_API_KEYS='gw-...'
 #
-# A sealing key of all zero bytes is rejected at startup precisely so a
-# copied template cannot become a production key.
+# A sealing key of all zero bytes is rejected at startup.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -79,13 +88,33 @@ metadata:
     app.kubernetes.io/name: redact-gateway
 type: Opaque
 stringData:
-  # Bearer token sent to the OpenAI-compatible provider.
   CENSGATE_PROVIDER_API_KEY: "REPLACE_ME"
-  # Base64-encoded 32-byte key sealing reversible token mappings, shared by
-  # every replica. Generate with: openssl rand -base64 32
-  # Leaving this unset is safer than leaving it wrong: the gateway then
-  # generates an ephemeral key and logs that tokens will not outlive the pod.
+  CENSGATE_API_KEYS: "REPLACE_ME"
+  # Prefer ExternalSecret from secrets OpenBao. Leave unset rather than zeros.
   CENSGATE_TOKEN_DEK: "REPLACE_ME_openssl_rand_base64_32"
+
+---
+# DEK from the **secrets** OpenBao via ESO. Token blobs stay on openbao-tokens.
+# Requires ClusterSecretStore/censgate-openbao. Path must exist before apply.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: redact-gateway-dek
+  labels:
+    app.kubernetes.io/name: redact-gateway
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: censgate-openbao
+    kind: ClusterSecretStore
+  target:
+    name: redact-gateway-secrets
+    creationPolicy: Merge
+  data:
+    - secretKey: CENSGATE_TOKEN_DEK
+      remoteRef:
+        key: censgate/aks-censgate-beta/redact-gateway/dek
+        property: CENSGATE_TOKEN_DEK
 
 ---
 apiVersion: apps/v1
@@ -95,9 +124,7 @@ metadata:
   labels:
     app.kubernetes.io/name: redact-gateway
 spec:
-  # Keep at 1 unless vault.backend is vault_kv2: without a shared token map a
-  # second replica cannot restore tokens minted by the first.
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: redact-gateway
@@ -106,7 +133,15 @@ spec:
       labels:
         app.kubernetes.io/name: redact-gateway
     spec:
-      # Distroless nonroot UID (matches USER nonroot:nonroot in Dockerfile.gateway)
+      serviceAccountName: redact-gateway
+      automountServiceAccountToken: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: redact-gateway
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -127,10 +162,22 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
-            # Reviewed compliance/PII packs only; security/optional are opt-in.
             - name: CENSGATE_PATTERN_PACKS
               value: /app/patterns/compliance:/app/patterns/pii
-            # OTLP transport (not part of the YAML schema — use OTEL_* vars).
+            - name: CENSGATE_NER_SESSION_POOL
+              value: "2"
+            - name: CENSGATE_NER_INTRA_THREADS
+              value: "2"
+            - name: CENSGATE_VAULT_BACKEND
+              value: vault_kv2
+            - name: CENSGATE_VAULT_ADDR
+              value: http://openbao-tokens.openbao-tokens.svc.cluster.local:8200
+            - name: CENSGATE_VAULT_AUTH
+              value: kubernetes
+            - name: CENSGATE_VAULT_K8S_ROLE
+              value: redact-gateway
+            - name: CENSGATE_VAULT_MOUNT
+              value: tokens
             - name: OTEL_SERVICE_NAME
               value: redact-gateway
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -142,32 +189,38 @@ spec:
                 secretKeyRef:
                   name: redact-gateway-secrets
                   key: CENSGATE_PROVIDER_API_KEY
-            # Optional: omit entirely to run with an ephemeral per-pod key.
+            - name: CENSGATE_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: redact-gateway-secrets
+                  key: CENSGATE_API_KEYS
             - name: CENSGATE_TOKEN_DEK
               valueFrom:
                 secretKeyRef:
                   name: redact-gateway-secrets
                   key: CENSGATE_TOKEN_DEK
-                  optional: true
           resources:
             requests:
-              cpu: 100m
-              memory: 256Mi
+              cpu: "4"
+              memory: 4Gi
             limits:
-              cpu: "2"
-              memory: 1Gi
-          # Distroless has no shell — use HTTP probes against the binary.
+              cpu: "4"
+              memory: 4Gi
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
           livenessProbe:
             httpGet:
               path: /livez
               port: http
-            initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
-            initialDelaySeconds: 3
             periodSeconds: 5
           securityContext:
             allowPrivilegeEscalation: false
@@ -178,7 +231,6 @@ spec:
             - name: config
               mountPath: /etc/redact-gateway
               readOnly: true
-            # Writable scratch for any temporary needs under a read-only root.
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -197,6 +249,8 @@ metadata:
     app.kubernetes.io/name: redact-gateway
 spec:
   type: ClusterIP
+  # Any replica must restore any token (maps live in openbao-tokens).
+  sessionAffinity: None
   selector:
     app.kubernetes.io/name: redact-gateway
   ports:
@@ -204,3 +258,88 @@ spec:
       port: 8080
       targetPort: http
       protocol: TCP
+
+---
+# HPA on CPU only after the ONNX mutex is gone and requests are realistic.
+# Prefer queue / onnx.lock_wait / p99 when those metrics are scraped.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: redact-gateway
+  labels:
+    app.kubernetes.io/name: redact-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: redact-gateway
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redact-gateway
+  labels:
+    app.kubernetes.io/name: redact-gateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redact-gateway
+
+---
+# Gateway talks to openbao-tokens only. ESO stays on the secrets OpenBao.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redact-gateway
+  labels:
+    app.kubernetes.io/name: redact-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redact-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao-tokens
+      ports:
+        - protocol: TCP
+          port: 8200
+    - to: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 11434
+        - protocol: TCP
+          port: 4317
