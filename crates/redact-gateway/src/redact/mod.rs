@@ -221,9 +221,11 @@ impl<'a> RedactionContext<'a> {
         let detect = spans::detect(level, text.len());
         let analysis = {
             let _enter = detect.as_ref().map(|s| s.enter());
-            self.engine
-                .analyze(text, None)
-                .map_err(|e| RedactError::Detection(e.to_string()))
+            redact_core::with_operation_spans(level.records_operations(), || {
+                self.engine
+                    .analyze(text, None)
+                    .map_err(|e| RedactError::Detection(e.to_string()))
+            })
         };
         let analysis = match analysis {
             Ok(a) => {

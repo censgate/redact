@@ -409,7 +409,8 @@ impl NerRecognizer {
             .ok_or_else(|| anyhow!("ONNX session not loaded"))?;
 
         let mut session = {
-            let _wait = tracing::info_span!("redact.gateway.detect.onnx.lock_wait").entered();
+            let _wait = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.onnx.lock_wait").entered());
             session_mutex
                 .lock()
                 .map_err(|e| anyhow!("Failed to lock session: {}", e))?
@@ -437,7 +438,8 @@ impl NerRecognizer {
         }
 
         let outputs = {
-            let _exec = tracing::info_span!("redact.gateway.detect.onnx.exec").entered();
+            let _exec = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.onnx.exec").entered());
             session.run(inputs)?
         };
 
@@ -603,7 +605,8 @@ impl Recognizer for NerRecognizer {
         let tokenizer = self.tokenizer.as_ref().unwrap();
 
         let encoding = {
-            let _tok = tracing::info_span!("redact.gateway.detect.tokenizer").entered();
+            let _tok = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.tokenizer").entered());
             let mut encoding = tokenizer.encode(text, true)?;
             let pad_id = tokenizer.get_padding_id().unwrap_or(0);
             encoding.pad_to_length(self.config.max_seq_length, pad_id);
@@ -614,7 +617,8 @@ impl Recognizer for NerRecognizer {
         let logits = self.infer(&encoding.ids, &encoding.attention_mask)?;
 
         let results = {
-            let _decode = tracing::info_span!("redact.gateway.detect.decode").entered();
+            let _decode = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.decode").entered());
             let mut predictions = Vec::new();
             let mut probabilities = Vec::new();
 
