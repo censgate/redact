@@ -408,9 +408,13 @@ impl NerRecognizer {
             .as_ref()
             .ok_or_else(|| anyhow!("ONNX session not loaded"))?;
 
-        let mut session = session_mutex
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock session: {}", e))?;
+        let mut session = {
+            let _wait = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.onnx.lock_wait").entered());
+            session_mutex
+                .lock()
+                .map_err(|e| anyhow!("Failed to lock session: {}", e))?
+        };
 
         // Create 2D arrays with shape [1, seq_len]
         let seq_len = input_ids.len();
@@ -433,7 +437,11 @@ impl NerRecognizer {
             inputs.push(("token_type_ids".into(), token_type_ids_value.into()));
         }
 
-        let outputs = session.run(inputs)?;
+        let outputs = {
+            let _exec = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.onnx.exec").entered());
+            session.run(inputs)?
+        };
 
         // Extract logits - shape should be [1, seq_len, num_labels]
         let (shape, logits_data) = outputs["logits"].try_extract_tensor::<f32>()?;
@@ -596,35 +604,37 @@ impl Recognizer for NerRecognizer {
 
         let tokenizer = self.tokenizer.as_ref().unwrap();
 
-        // Tokenize input
-        let mut encoding = tokenizer.encode(text, true)?;
-
-        // Get padding token ID
-        let pad_id = tokenizer.get_padding_id().unwrap_or(0);
-
-        // Pad/truncate to max sequence length
-        encoding.pad_to_length(self.config.max_seq_length, pad_id);
+        let encoding = {
+            let _tok = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.tokenizer").entered());
+            let mut encoding = tokenizer.encode(text, true)?;
+            let pad_id = tokenizer.get_padding_id().unwrap_or(0);
+            encoding.pad_to_length(self.config.max_seq_length, pad_id);
+            encoding
+        };
 
         // Run inference
         let logits = self.infer(&encoding.ids, &encoding.attention_mask)?;
 
-        // Convert logits to predictions
-        let mut predictions = Vec::new();
-        let mut probabilities = Vec::new();
+        let results = {
+            let _decode = redact_core::operations_enabled()
+                .then(|| tracing::info_span!("redact.gateway.detect.decode").entered());
+            let mut predictions = Vec::new();
+            let mut probabilities = Vec::new();
 
-        for token_logits in &logits {
-            let probs = Self::softmax(token_logits);
-            let (pred_id, &max_prob) = probs
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .unwrap();
-            predictions.push(pred_id);
-            probabilities.push(max_prob);
-        }
+            for token_logits in &logits {
+                let probs = Self::softmax(token_logits);
+                let (pred_id, &max_prob) = probs
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                    .unwrap();
+                predictions.push(pred_id);
+                probabilities.push(max_prob);
+            }
 
-        // Parse BIO tags to extract entities
-        let results = self.parse_bio_tags(text, &predictions, &probabilities, &encoding.offsets);
+            self.parse_bio_tags(text, &predictions, &probabilities, &encoding.offsets)
+        };
 
         Ok(results)
     }

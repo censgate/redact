@@ -308,6 +308,8 @@ impl Recognizer for GenericSecretRecognizer {
     }
 
     fn analyze(&self, text: &str, _language: &str) -> Result<Vec<RecognizerResult>> {
+        let _span = crate::operations_enabled()
+            .then(|| tracing::info_span!("redact.gateway.detect.patterns").entered());
         let mut results = Vec::new();
         for caps in ASSIGNMENT.captures_iter(text) {
             let Some(key) = caps.name("key") else {

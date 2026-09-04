@@ -47,12 +47,14 @@ pub mod anonymizers;
 pub mod engine;
 pub mod policy;
 pub mod recognizers;
+pub mod trace;
 pub mod types;
 
 // Re-export commonly used types
 pub use anonymizers::{AnonymizationStrategy, AnonymizerConfig, AnonymizerRegistry};
 pub use engine::AnalyzerEngine;
 pub use recognizers::{evaluate_generic_candidate, Recognizer, RecognizerRegistry};
+pub use trace::{operations_enabled, with_operation_spans};
 pub use types::{
     AnalysisMetadata, AnalysisResult, AnonymizedResult, EntityType, RecognizerResult, Token,
 };
