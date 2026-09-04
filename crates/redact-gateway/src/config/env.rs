@@ -77,6 +77,8 @@ pub const DISABLE_BUILTIN_PATTERNS: &str = "CENSGATE_DISABLE_BUILTIN_PATTERNS";
 pub const NER_MODEL_PATH: &str = "CENSGATE_NER_MODEL_PATH";
 /// When true, a missing or unloadable NER model fails gateway startup.
 pub const NER_REQUIRED: &str = "CENSGATE_NER_REQUIRED";
+/// Bounded ONNX session pool size (default 2, cap 4). Read by redact-ner.
+pub const NER_SESSION_POOL: &str = "CENSGATE_NER_SESSION_POOL";
 /// Token map backend.
 pub const VAULT_BACKEND: &str = "CENSGATE_VAULT_BACKEND";
 /// Token map server address.
@@ -288,6 +290,8 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     if let Some(value) = first(&[NER_REQUIRED]) {
         config.ner.required = parse_bool(NER_REQUIRED, &value)?;
     }
+    // Pool size is consumed by redact-ner at ONNX load (not a gateway schema field).
+    let _ = first(&[NER_SESSION_POOL]);
 
     if let Some(value) = first(&[VAULT_BACKEND]) {
         config.vault.backend = VaultBackend::from_str(&value)?;
