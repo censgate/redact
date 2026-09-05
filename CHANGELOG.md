@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-05
+
+Crate/image release of the NER serving-path and `vault_kv2` Kubernetes-auth
+work merged in #168. Notes also appear under 0.11.2 (changelog merge during
+that patch). This heading unblocks `scripts/ci/changelog-notes.sh`.
+
 ## [0.11.2] - 2026-09-04
 
 ### Added
