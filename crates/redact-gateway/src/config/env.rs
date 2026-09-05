@@ -25,7 +25,7 @@ use std::str::FromStr;
 use super::schema::GatewayDocument;
 use super::{
     AuditExport, AuthMode, ConfigError, ConfigSourceKind, ResolvedConfig, StreamMode, TraceLevel,
-    VaultBackend,
+    VaultAuthMethod, VaultBackend,
 };
 use crate::policy::PolicySet;
 
@@ -85,6 +85,16 @@ pub const VAULT_BACKEND: &str = "CENSGATE_VAULT_BACKEND";
 pub const VAULT_ADDR: &str = "CENSGATE_VAULT_ADDR";
 /// Token map authentication token.
 pub const VAULT_TOKEN: &str = "CENSGATE_VAULT_TOKEN";
+/// KV v2 auth method: `token` (local-dev) or `kubernetes` (HPA).
+pub const VAULT_AUTH: &str = "CENSGATE_VAULT_AUTH";
+/// Kubernetes auth role on openbao-tokens (never `external-secrets`).
+pub const VAULT_K8S_ROLE: &str = "CENSGATE_VAULT_K8S_ROLE";
+/// Kubernetes auth mount (default `kubernetes`).
+pub const VAULT_K8S_MOUNT: &str = "CENSGATE_VAULT_K8S_MOUNT";
+/// Path to the projected ServiceAccount JWT.
+pub const VAULT_JWT_PATH: &str = "CENSGATE_VAULT_JWT_PATH";
+/// Bounded ONNX intra-op threads per session (read by redact-ner).
+pub const NER_INTRA_THREADS: &str = "CENSGATE_NER_INTRA_THREADS";
 /// KV v2 mount point.
 pub const VAULT_MOUNT: &str = "CENSGATE_VAULT_MOUNT";
 /// Path prefix under the mount.
@@ -290,8 +300,9 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     if let Some(value) = first(&[NER_REQUIRED]) {
         config.ner.required = parse_bool(NER_REQUIRED, &value)?;
     }
-    // Pool size is consumed by redact-ner at ONNX load (not a gateway schema field).
+    // Pool size and intra threads are consumed by redact-ner at ONNX load.
     let _ = first(&[NER_SESSION_POOL]);
+    let _ = first(&[NER_INTRA_THREADS]);
 
     if let Some(value) = first(&[VAULT_BACKEND]) {
         config.vault.backend = VaultBackend::from_str(&value)?;
@@ -301,6 +312,18 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     }
     if let Some(value) = first(&[VAULT_TOKEN, "VAULT_TOKEN", "BAO_TOKEN"]) {
         config.vault.token = Some(value);
+    }
+    if let Some(value) = first(&[VAULT_AUTH]) {
+        config.vault.auth = VaultAuthMethod::from_str(&value)?;
+    }
+    if let Some(value) = first(&[VAULT_K8S_ROLE]) {
+        config.vault.kubernetes_role = Some(value);
+    }
+    if let Some(value) = first(&[VAULT_K8S_MOUNT]) {
+        config.vault.kubernetes_mount = value;
+    }
+    if let Some(value) = first(&[VAULT_JWT_PATH]) {
+        config.vault.jwt_path = PathBuf::from(value);
     }
     if let Some(value) = first(&[VAULT_MOUNT]) {
         config.vault.mount = value;

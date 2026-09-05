@@ -78,9 +78,31 @@ def export_model(model_name: str, output_dir: str, quantize: bool = False):
         print(f"  - Tokenizer: {output_path / 'tokenizer.json'}")
         print(f"  - Config: {config_path}")
 
+        if quantize:
+            print("\n🔢 Dynamic INT8 quantization (onnxruntime.quantization)")
+            print("   Can move logits across the 0.7 confidence floor.")
+            print("   Do not ship without a CoNLL PER/ORG/LOC F1 floor vs FP32.")
+            try:
+                from onnxruntime.quantization import QuantType, quantize_dynamic
+            except ImportError as qe:
+                print(f"❌ onnxruntime is required for --quantize: {qe}")
+                print("Install with: pip install onnxruntime")
+                return False
+            quantized_path = output_path / "model.int8.onnx"
+            quantize_dynamic(
+                model_input=str(onnx_path),
+                model_output=str(quantized_path),
+                weight_type=QuantType.QInt8,
+            )
+            onnx_path.unlink()
+            quantized_path.rename(onnx_path)
+            print(f"  - Wrote quantized {onnx_path}")
+
         # Display size
         model_size = onnx_path.stat().st_size / (1024 * 1024)
         print(f"  - Model size: {model_size:.1f} MB")
+        if quantize:
+            print("  - Quantization: dynamic INT8 (ungated — validate F1 before shipping)")
 
         print(f"\n🧪 Test with:")
         print(f"  cargo test --package redact-ner --test ner_e2e -- --ignored")
@@ -137,7 +159,7 @@ def main():
     parser.add_argument(
         "--quantize",
         action="store_true",
-        help="Quantize model for smaller size (experimental)",
+        help="Dynamic INT8 quantization (experimental; requires a CoNLL F1 floor before shipping)",
     )
 
     args = parser.parse_args()

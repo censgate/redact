@@ -70,6 +70,35 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
+/// Run CPU/ONNX work off the multi-thread tokio worker.
+///
+/// `block_in_place` parks the current worker in blocking mode; Tokio may
+/// spawn a replacement worker. It is not the `spawn_blocking` thread pool.
+/// Current-thread tests stay in-place (block_in_place panics there).
+fn run_off_async_worker<T>(run: impl FnOnce() -> Result<T, ApiError>) -> Result<T, ApiError> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(run)
+        }
+        _ => run(),
+    }
+}
+
+fn analyze_off_async_worker(
+    engine: &AnalyzerEngine,
+    request: &AnalyzeRequest,
+    entity_types: Option<&Vec<EntityType>>,
+) -> Result<redact_core::AnalysisResult, ApiError> {
+    run_off_async_worker(|| {
+        if let Some(entities) = entity_types {
+            engine.analyze_with_entities(&request.text, entities, Some(&request.language))
+        } else {
+            engine.analyze(&request.text, Some(&request.language))
+        }
+        .map_err(ApiError::from)
+    })
+}
+
 /// Analyze endpoint - detect PII entities
 pub async fn analyze(
     State(state): State<AppState>,
@@ -103,18 +132,8 @@ async fn analyze_request(
             .collect()
     });
 
-    // Analyze text
-    let result = if let Some(entities) = entity_types.as_ref() {
-        state
-            .engine
-            .analyze_with_entities(&request.text, entities, Some(&request.language))
-            .map_err(ApiError::from)?
-    } else {
-        state
-            .engine
-            .analyze(&request.text, Some(&request.language))
-            .map_err(ApiError::from)?
-    };
+    // Analyze text off the multi-thread tokio worker.
+    let result = analyze_off_async_worker(&state.engine, &request, entity_types.as_ref())?;
 
     // Filter by min_score if provided
     let mut results: Vec<EntityResult> = result
@@ -195,38 +214,34 @@ async fn anonymize_request(
             .collect()
     });
 
-    // Analyze and anonymize
-    let result = if let Some(entities) = entity_types.as_ref() {
-        // First analyze with specific entities
-        let analysis = state
-            .engine
-            .analyze_with_entities(&request.text, entities, Some(&request.language))
-            .map_err(ApiError::from)?;
-
-        // Then anonymize
-        let anonymized = state
-            .engine
-            .anonymizer_registry()
-            .anonymize(
-                &request.text,
-                analysis.detected_entities.clone(),
-                &core_config,
-            )
-            .map_err(ApiError::from)?;
-
-        (analysis.detected_entities, anonymized, analysis.metadata)
-    } else {
-        let analysis = state
-            .engine
-            .analyze_and_anonymize(&request.text, Some(&request.language), &core_config)
-            .map_err(ApiError::from)?;
-
-        let anonymized = analysis
-            .anonymized
-            .ok_or_else(|| ApiError::internal_error("Anonymization failed"))?;
-
-        (analysis.detected_entities, anonymized, analysis.metadata)
-    };
+    // Analyze and anonymize off the tokio worker (NER is synchronous).
+    let result = run_off_async_worker(|| {
+        if let Some(entities) = entity_types.as_ref() {
+            let analysis = state
+                .engine
+                .analyze_with_entities(&request.text, entities, Some(&request.language))
+                .map_err(ApiError::from)?;
+            let anonymized = state
+                .engine
+                .anonymizer_registry()
+                .anonymize(
+                    &request.text,
+                    analysis.detected_entities.clone(),
+                    &core_config,
+                )
+                .map_err(ApiError::from)?;
+            Ok((analysis.detected_entities, anonymized, analysis.metadata))
+        } else {
+            let analysis = state
+                .engine
+                .analyze_and_anonymize(&request.text, Some(&request.language), &core_config)
+                .map_err(ApiError::from)?;
+            let anonymized = analysis
+                .anonymized
+                .ok_or_else(|| ApiError::internal_error("Anonymization failed"))?;
+            Ok((analysis.detected_entities, anonymized, analysis.metadata))
+        }
+    })?;
 
     let (detected_entities, anonymized, metadata) = result;
 

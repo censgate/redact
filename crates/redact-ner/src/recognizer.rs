@@ -44,6 +44,24 @@ impl SessionPool {
     }
 }
 
+/// Parse `CENSGATE_NER_INTRA_THREADS` (default 1, cap 8).
+///
+/// Default is 1 so `pool × intra` stays near pod CPUs. The old hardcoded 4
+/// oversubscribed a 2-CPU sample and a 4-CPU Guaranteed pod with pool=2.
+pub(crate) fn clamp_intra_threads(raw: Option<&str>) -> usize {
+    match raw {
+        None => 1,
+        Some(s) => match s.trim().parse::<usize>() {
+            Ok(n) if n >= 1 => n.min(8),
+            _ => 1,
+        },
+    }
+}
+
+fn intra_threads() -> usize {
+    clamp_intra_threads(std::env::var("CENSGATE_NER_INTRA_THREADS").ok().as_deref())
+}
+
 /// Parse `CENSGATE_NER_SESSION_POOL` (default 2, cap 4).
 pub(crate) fn clamp_session_pool_size(raw: Option<&str>) -> usize {
     match raw {
@@ -464,7 +482,7 @@ impl NerRecognizer {
         Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| anyhow::anyhow!("{e}"))?
-            .with_intra_threads(4)
+            .with_intra_threads(intra_threads())
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .commit_from_file(model_path)
             .map_err(|e| anyhow::anyhow!("{e}"))
@@ -885,6 +903,18 @@ mod tests {
         assert_eq!(clamp_session_pool_size(Some("4")), 4);
         assert_eq!(clamp_session_pool_size(Some("8")), 4);
         assert_eq!(clamp_session_pool_size(Some("nope")), 2);
+    }
+
+    #[test]
+    fn test_intra_threads_default_and_cap() {
+        assert_eq!(clamp_intra_threads(None), 1);
+        assert_eq!(clamp_intra_threads(Some("")), 1);
+        assert_eq!(clamp_intra_threads(Some("0")), 1);
+        assert_eq!(clamp_intra_threads(Some("1")), 1);
+        assert_eq!(clamp_intra_threads(Some("4")), 4);
+        assert_eq!(clamp_intra_threads(Some("8")), 8);
+        assert_eq!(clamp_intra_threads(Some("16")), 8);
+        assert_eq!(clamp_intra_threads(Some("nope")), 1);
     }
 
     // ---- load_config_from_file tests ----
