@@ -50,7 +50,8 @@ When the ONNX `input_ids` sequence dim is dynamic, pad to buckets
 (`CENSGATE_NER_SESSION_POOL`, default 2, cap 4) plus
 `CENSGATE_NER_INTRA_THREADS` (default 1) should satisfy
 `pool × intra ≈` Guaranteed pod CPUs. Gateway analyze runs on the tokio
-blocking pool (`block_in_place` / `spawn_blocking`).
+multi-thread worker via `block_in_place` (parks that worker; Tokio may
+spawn a replacement). Current-thread tests stay in-place.
 
 ## Recommended models
 

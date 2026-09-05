@@ -29,8 +29,8 @@ if [[ ! -f "${CENSGATE_NER_MODEL_PATH}" ]]; then
 fi
 
 echo "==> e2e fixtures against the supplied model (fails if the model does not load)"
-cargo test --package redact-ner --test ner_e2e --test-threads=1 \
-  test_ner_honors_censgate_ner_model_path -- --nocapture
+cargo test --package redact-ner --test ner_e2e \
+  test_ner_honors_censgate_ner_model_path -- --test-threads=1 --nocapture
 
 echo
 echo "==> identity golden (ONNX cases skip only when the path is unset — path is set)"

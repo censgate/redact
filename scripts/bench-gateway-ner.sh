@@ -67,7 +67,7 @@ curl_json() {
 redact_body() {
   local text="$1"
   local session="$2"
-  python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1], "session_id": sys.argv[2]}))' \
+  python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1], "session_id": sys.argv[2], "profile": "reversible"}))' \
     "${text}" "${session}"
 }
 
@@ -110,6 +110,7 @@ run_slice() {
   local start end
   start="$(date +%s%N)"
   for ((r = 0; r < rounds; r++)); do
+    pids=()
     for ((i = 0; i < conc; i++)); do
       (
         local session="${session_fixed}"
@@ -118,7 +119,7 @@ run_slice() {
         fi
         local payload="${text}"
         if [[ "${distinct_pii}" == "1" ]]; then
-          payload="$(python3 -c 'import sys; i=int(sys.argv[1]); print(f"Agent {i} emailed agent{i}@example{i}.com from Site{i}.")' "$((r * conc + i))")"
+          payload="$(python3 -c 'import sys; i=int(sys.argv[1]); base=sys.argv[2]; print(f"{base} Agent {i} emailed agent{i}@example{i}.com from Site{i}.")' "$((r * conc + i))" "${text}")"
         fi
         local body
         body="$(redact_body "${payload}" "${session}")"
@@ -127,7 +128,12 @@ run_slice() {
         read -r code out <<< "$(curl_json "${url}/v1/redact" "${body}")"
         t1="$(date +%s%N)"
         if [[ "${code}" == "200" ]]; then
-          python3 -c "print((${t1}-${t0})/1e6)" >> "${ms_file}"
+          if ! python3 -c 'import json,sys; t=json.load(open(sys.argv[1])).get("text",""); sys.exit(0 if "[" in t else 1)' "${out}"; then
+            echo "1" >> "${err_file}"
+            echo "  fail ${name} conc=${conc} no token placeholders in response" >&2
+          else
+            python3 -c "print((${t1}-${t0})/1e6)" >> "${ms_file}"
+          fi
         else
           echo "1" >> "${err_file}"
           echo "  fail ${name} conc=${conc} http=${code} body=$(head -c 160 "${out}")" >&2
@@ -136,10 +142,10 @@ run_slice() {
       ) &
       pids+=("$!")
     done
-  done
-  local pid
-  for pid in "${pids[@]}"; do
-    wait "${pid}" || true
+    local pid
+    for pid in "${pids[@]}"; do
+      wait "${pid}" || true
+    done
   done
   end="$(date +%s%N)"
   local wall errors ok
@@ -171,8 +177,10 @@ for conc in ${CONCS}; do
   fi
   if [[ "${SESSION_MODE}" == "same" || "${SESSION_MODE}" == "both" ]]; then
     # Distinct PII per writer so skip-empty-put does not hide CAS contention.
-    run_slice "short same-session" "${BASE}" "${short_text}" "${conc}" "bench-shared-${conc}" 1 "${ITERS}" || failed=1
-    run_slice "long same-session" "${BASE}" "${long_text}" "${conc}" "bench-shared-long-${conc}" 1 1 || failed=1
+    shared="bench-shared-$(python3 -c 'import uuid; print(uuid.uuid4())')-${conc}"
+    run_slice "short same-session" "${BASE}" "${short_text}" "${conc}" "${shared}" 1 "${ITERS}" || failed=1
+    shared_long="bench-shared-long-$(python3 -c 'import uuid; print(uuid.uuid4())')-${conc}"
+    run_slice "long same-session" "${BASE}" "${long_text}" "${conc}" "${shared_long}" 1 1 || failed=1
   fi
 done
 if [[ "${failed}" != "0" ]]; then
