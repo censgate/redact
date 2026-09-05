@@ -7,7 +7,9 @@ gateway p99, and **must not** be retuned to try.
 
 Run this SPIKE only against **`openbao-tokens`**.
 
-Related: [`censgate/cloud-infrastructure` `infrastructure/openbao-tokens`](https://github.com/censgate/cloud-infrastructure/tree/main/infrastructure/openbao-tokens),
+Related: cloud-infrastructure PR
+[#111](https://github.com/censgate/cloud-infrastructure/pull/111)
+(`infrastructure/openbao-tokens`),
 [`scripts/bench-gateway-ner.sh`](../../scripts/bench-gateway-ner.sh).
 
 ## Two deployments

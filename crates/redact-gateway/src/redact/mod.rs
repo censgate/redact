@@ -24,9 +24,11 @@ use crate::policy::{EntityAction, MaskOptions, Profile};
 use crate::telemetry::spans;
 use token::{TokenError, TokenSession};
 
-/// Run engine analyze off the tokio worker when we are on a multi-thread
-/// runtime (same blocking pool as `spawn_blocking`). Current-thread tests
-/// and non-tokio callers stay in-place.
+/// Run engine analyze off the multi-thread tokio worker.
+///
+/// `block_in_place` parks the current worker in blocking mode; Tokio may
+/// spawn a replacement worker. It is not the `spawn_blocking` thread pool.
+/// Current-thread tests and non-tokio callers stay in-place.
 fn analyze_off_async_worker(
     engine: &AnalyzerEngine,
     text: &str,

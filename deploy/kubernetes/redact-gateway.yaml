@@ -13,7 +13,8 @@
 #      censgate-openbao). Token **blobs** never land on the secrets cluster.
 #   4. Kubernetes auth role is `redact-gateway`. Never `external-secrets`.
 #
-# Apply (after creating secrets / ESO):
+# Apply (after creating operator secrets / ESO). This file does **not**
+# contain a Secret — `kubectl apply` must not overwrite live API keys.
 #   kubectl apply -f deploy/kubernetes/redact-gateway.yaml
 #
 # Image naming matches release.yml: ghcr.io/<org>/redact-gateway:<tag>
@@ -71,31 +72,14 @@ data:
       genai_attributes: false
 
 ---
-# Secret TEMPLATE — placeholders will NOT start the gateway. Prefer ESO for
-# CENSGATE_TOKEN_DEK (see ExternalSecret below). Create the provider key
-# out of band:
+# DEK from the **secrets** OpenBao via ESO. Token blobs stay on openbao-tokens.
+# Own target Secret — never merge into the operator-owned API-key Secret.
+# Requires ClusterSecretStore/censgate-openbao. Path must exist before apply.
 #
+# Create provider + inbound keys out of band (this manifest never owns them):
 #   kubectl create secret generic redact-gateway-secrets \
 #     --from-literal=CENSGATE_PROVIDER_API_KEY='sk-...' \
 #     --from-literal=CENSGATE_API_KEYS='gw-...'
-#
-# A sealing key of all zero bytes is rejected at startup.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: redact-gateway-secrets
-  labels:
-    app.kubernetes.io/name: redact-gateway
-type: Opaque
-stringData:
-  CENSGATE_PROVIDER_API_KEY: "REPLACE_ME"
-  CENSGATE_API_KEYS: "REPLACE_ME"
-  # Prefer ExternalSecret from secrets OpenBao. Leave unset rather than zeros.
-  CENSGATE_TOKEN_DEK: "REPLACE_ME_openssl_rand_base64_32"
-
----
-# DEK from the **secrets** OpenBao via ESO. Token blobs stay on openbao-tokens.
-# Requires ClusterSecretStore/censgate-openbao. Path must exist before apply.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -108,8 +92,8 @@ spec:
     name: censgate-openbao
     kind: ClusterSecretStore
   target:
-    name: redact-gateway-secrets
-    creationPolicy: Merge
+    name: redact-gateway-dek
+    creationPolicy: Owner
   data:
     - secretKey: CENSGATE_TOKEN_DEK
       remoteRef:
@@ -167,7 +151,7 @@ spec:
             - name: CENSGATE_NER_SESSION_POOL
               value: "2"
             - name: CENSGATE_NER_INTRA_THREADS
-              value: "2"
+              value: "1"
             - name: CENSGATE_VAULT_BACKEND
               value: vault_kv2
             - name: CENSGATE_VAULT_ADDR
@@ -197,14 +181,16 @@ spec:
             - name: CENSGATE_TOKEN_DEK
               valueFrom:
                 secretKeyRef:
-                  name: redact-gateway-secrets
+                  name: redact-gateway-dek
                   key: CENSGATE_TOKEN_DEK
           resources:
             requests:
-              cpu: "4"
+              # 2 CPU Guaranteed schedules on D4+ (D2 allocatable is <2).
+              # 4/4 needs a D8 pool. pool × intra_threads ≈ these cores.
+              cpu: "2"
               memory: 4Gi
             limits:
-              cpu: "4"
+              cpu: "2"
               memory: 4Gi
           startupProbe:
             httpGet:

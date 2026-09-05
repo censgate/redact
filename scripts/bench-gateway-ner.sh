@@ -39,6 +39,8 @@ if [[ -n "${KEY}" ]]; then
 fi
 CONCS="${BENCH_CONCURRENCY:-1 5 20}"
 SESSION_MODE="${BENCH_SESSION_MODE:-both}"
+ITERS="${BENCH_ITERS:-8}"
+ALLOW_ERRORS="${BENCH_ALLOW_ERRORS:-0}"
 
 short_text='Ada Lovelace emailed john.doe@example.com from London.'
 long_text="$(python3 - <<'PY'
@@ -99,59 +101,84 @@ run_slice() {
   local text="$3"
   local conc="$4"
   local session_fixed="$5"
-  local ms_file
+  local distinct_pii="${6:-0}"
+  local rounds="${7:-1}"
+  local ms_file err_file
   ms_file="$(mktemp)"
-  local i pids=()
+  err_file="$(mktemp)"
+  local i r pids=()
   local start end
   start="$(date +%s%N)"
-  for ((i = 0; i < conc; i++)); do
-    (
-      local session="${session_fixed}"
-      if [[ -z "${session}" ]]; then
-        session="bench-$(python3 -c 'import uuid; print(uuid.uuid4())')"
-      fi
-      local body
-      body="$(redact_body "${text}" "${session}")"
-      local t0 t1
-      t0="$(date +%s%N)"
-      read -r code out <<< "$(curl_json "${url}/v1/redact" "${body}")"
-      t1="$(date +%s%N)"
-      python3 -c "print((${t1}-${t0})/1e6)" >> "${ms_file}"
-      if [[ "${code}" != "200" ]]; then
-        echo "  warn ${name} conc=${conc} http=${code} body=$(head -c 160 "${out}")" >&2
-      fi
-      rm -f "${out}"
-    ) &
-    pids+=("$!")
+  for ((r = 0; r < rounds; r++)); do
+    for ((i = 0; i < conc; i++)); do
+      (
+        local session="${session_fixed}"
+        if [[ -z "${session}" ]]; then
+          session="bench-$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        fi
+        local payload="${text}"
+        if [[ "${distinct_pii}" == "1" ]]; then
+          payload="$(python3 -c 'import sys; i=int(sys.argv[1]); print(f"Agent {i} emailed agent{i}@example{i}.com from Site{i}.")' "$((r * conc + i))")"
+        fi
+        local body
+        body="$(redact_body "${payload}" "${session}")"
+        local t0 t1
+        t0="$(date +%s%N)"
+        read -r code out <<< "$(curl_json "${url}/v1/redact" "${body}")"
+        t1="$(date +%s%N)"
+        if [[ "${code}" == "200" ]]; then
+          python3 -c "print((${t1}-${t0})/1e6)" >> "${ms_file}"
+        else
+          echo "1" >> "${err_file}"
+          echo "  fail ${name} conc=${conc} http=${code} body=$(head -c 160 "${out}")" >&2
+        fi
+        rm -f "${out}"
+      ) &
+      pids+=("$!")
+    done
   done
   local pid
   for pid in "${pids[@]}"; do
     wait "${pid}" || true
   done
   end="$(date +%s%N)"
-  local wall
+  local wall errors ok
   wall="$(python3 -c "print((${end}-${start})/1e6)")"
+  errors="$(wc -l < "${err_file}" | tr -d ' ')"
+  ok="$(wc -l < "${ms_file}" | tr -d ' ')"
   local stats
   stats="$(percentile < "${ms_file}")"
-  echo "${name} conc=${conc} wall_ms=${wall} ${stats}"
-  rm -f "${ms_file}"
+  local rps
+  rps="$(python3 -c "print(round(${ok} / max(${wall}/1000.0, 0.001), 2))")"
+  echo "${name} conc=${conc} rounds=${rounds} ok=${ok} errors=${errors} rps=${rps} wall_ms=${wall} ${stats}"
+  rm -f "${ms_file}" "${err_file}"
+  if [[ "${errors}" != "0" && "${ALLOW_ERRORS}" != "1" ]]; then
+    echo "FAIL ${name}: ${errors} unexpected HTTP responses" >&2
+    return 1
+  fi
 }
 
 echo "gateway ${BASE}"
 echo "NOTE: do not compare these numbers to the 32× Presidio redact-api result."
 echo "slice: pattern vs NER depends on whether the target loaded an ONNX model."
 
+failed=0
 for conc in ${CONCS}; do
   if [[ "${SESSION_MODE}" == "unique" || "${SESSION_MODE}" == "both" ]]; then
-    run_slice "pattern unique" "${BASE}" "${pattern_text}" "${conc}" ""
-    run_slice "short unique" "${BASE}" "${short_text}" "${conc}" ""
-    run_slice "long unique" "${BASE}" "${long_text}" "${conc}" ""
+    run_slice "pattern unique" "${BASE}" "${pattern_text}" "${conc}" "" 0 "${ITERS}" || failed=1
+    run_slice "short unique" "${BASE}" "${short_text}" "${conc}" "" 0 "${ITERS}" || failed=1
+    run_slice "long unique" "${BASE}" "${long_text}" "${conc}" "" 0 1 || failed=1
   fi
   if [[ "${SESSION_MODE}" == "same" || "${SESSION_MODE}" == "both" ]]; then
-    run_slice "short same-session" "${BASE}" "${short_text}" "${conc}" "bench-shared"
-    run_slice "long same-session" "${BASE}" "${long_text}" "${conc}" "bench-shared"
+    # Distinct PII per writer so skip-empty-put does not hide CAS contention.
+    run_slice "short same-session" "${BASE}" "${short_text}" "${conc}" "bench-shared-${conc}" 1 "${ITERS}" || failed=1
+    run_slice "long same-session" "${BASE}" "${long_text}" "${conc}" "bench-shared-long-${conc}" 1 1 || failed=1
   fi
 done
+if [[ "${failed}" != "0" ]]; then
+  echo "FAIL: one or more slices returned unexpected HTTP" >&2
+  exit 1
+fi
 
 if [[ -n "${BASE_B}" ]]; then
   echo "restore-after-scale: mint on ${BASE}, restore on ${BASE_B}"

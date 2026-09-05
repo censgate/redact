@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use vaultrs::api::kv2::requests::{ReadSecretRequest, SetSecretRequestOptions};
 use vaultrs::api::{self, kv2::responses::ReadSecretResponse};
 use vaultrs::client::{Client, VaultClient, VaultClientSettingsBuilder};
@@ -60,7 +60,7 @@ struct Inner {
 
 /// Token map backed by a Vault / OpenBao KV v2 mount.
 pub struct Kv2Store {
-    inner: Mutex<Inner>,
+    inner: RwLock<Inner>,
     auth: AuthMode,
     mount: String,
     path_prefix: String,
@@ -135,7 +135,7 @@ impl Kv2Store {
         })?;
 
         Ok(Self {
-            inner: Mutex::new(Inner {
+            inner: RwLock::new(Inner {
                 client,
                 token_expires_at: None,
             }),
@@ -151,10 +151,21 @@ impl Kv2Store {
         session_path(&self.path_prefix, tenant, session)
     }
 
-    async fn lock_ready(&self) -> Result<tokio::sync::MutexGuard<'_, Inner>, TokenMapError> {
-        let mut inner = self.inner.lock().await;
-        self.ensure_token(&mut inner).await?;
-        Ok(inner)
+    fn token_still_valid(inner: &Inner) -> bool {
+        inner
+            .token_expires_at
+            .is_some_and(|deadline| Instant::now() < deadline)
+    }
+
+    async fn ensure_fresh_token(&self) -> Result<(), TokenMapError> {
+        {
+            let inner = self.inner.read().await;
+            if matches!(self.auth, AuthMode::Static) || Self::token_still_valid(&inner) {
+                return Ok(());
+            }
+        }
+        let mut inner = self.inner.write().await;
+        self.ensure_token(&mut inner).await
     }
 
     async fn ensure_token(&self, inner: &mut Inner) -> Result<(), TokenMapError> {
@@ -168,10 +179,7 @@ impl Kv2Store {
         else {
             return Ok(());
         };
-        if inner
-            .token_expires_at
-            .is_some_and(|deadline| Instant::now() < deadline)
-        {
+        if Self::token_still_valid(inner) {
             return Ok(());
         }
         let jwt = std::fs::read_to_string(jwt_path).map_err(|e| {
@@ -183,14 +191,13 @@ impl Kv2Store {
         let (token, lease_secs) =
             kubernetes_login(address, namespace.as_deref(), mount, role, jwt.trim()).await?;
         inner.client.set_token(&token);
-        let usable =
-            Duration::from_secs(lease_secs.saturating_mul(80) / 100).max(Duration::from_secs(30));
-        inner.token_expires_at = Some(Instant::now() + usable);
+        inner.token_expires_at = Some(Instant::now() + kubernetes_token_cache_ttl(lease_secs));
         Ok(())
     }
 
     async fn read_entry(&self, path: &str) -> Result<Option<StoredSession>, TokenMapError> {
-        let inner = self.lock_ready().await?;
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
         match kv2::read::<StoredSession>(&inner.client, &self.mount, path).await {
             Ok(entry) => {
                 if entry.expires_at <= Utc::now() {
@@ -215,7 +222,8 @@ impl Kv2Store {
     /// yields `cas = 0` ("create only"). Expired entries contribute no mappings
     /// but retain their version so the subsequent write still CAS-protects.
     async fn read_for_cas(&self, path: &str) -> Result<(Vec<TokenMapping>, u32), TokenMapError> {
-        let inner = self.lock_ready().await?;
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
         let endpoint = ReadSecretRequest::builder()
             .mount(self.mount.as_str())
             .path(path)
@@ -271,7 +279,8 @@ impl TokenMapStore for Kv2Store {
             let options = SetSecretRequestOptions { cas };
 
             let result = {
-                let inner = self.lock_ready().await?;
+                self.ensure_fresh_token().await?;
+                let inner = self.inner.read().await;
                 kv2::set_with_options(&inner.client, &self.mount, &path, &payload, options).await
             };
 
@@ -305,7 +314,8 @@ impl TokenMapStore for Kv2Store {
 
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let path = self.path(tenant, session);
-        let inner = self.lock_ready().await?;
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
         match kv2::delete_latest(&inner.client, &self.mount, &path).await {
             Ok(()) => Ok(()),
             Err(ClientError::APIError { code: 404, .. }) => Ok(()),
@@ -324,7 +334,8 @@ impl TokenMapStore for Kv2Store {
         }
 
         let probed = {
-            let inner = self.lock_ready().await?;
+            self.ensure_fresh_token().await?;
+            let inner = self.inner.read().await;
             match inner.client.status().await {
                 Ok(_) => Ok(()),
                 Err(err) => Err(err.to_string()),
@@ -334,6 +345,20 @@ impl TokenMapStore for Kv2Store {
         *self.health.lock().await = Some((Instant::now(), probed.clone()));
         probed.map_err(TokenMapError::Unavailable)
     }
+}
+
+/// Cache a Kubernetes auth token strictly inside its lease.
+///
+/// `lease_duration == 0` means non-expiring; re-login hourly so a revoked
+/// token does not live forever in process. Never cache past a positive lease
+/// (the previous `max(80%, 30s)` floor reused expired sub-30s tokens).
+fn kubernetes_token_cache_ttl(lease_secs: u64) -> Duration {
+    if lease_secs == 0 {
+        return Duration::from_secs(3600);
+    }
+    let eighty_pct = lease_secs.saturating_mul(4) / 5;
+    let before_expiry = lease_secs.saturating_sub(1);
+    Duration::from_secs(eighty_pct.clamp(1, before_expiry.max(1)))
 }
 
 fn cas_backoff(attempt: u32) -> Duration {
@@ -431,6 +456,20 @@ mod tests {
             let d = cas_backoff(attempt);
             assert!(d >= Duration::from_millis(5));
             assert!(d < Duration::from_millis(200));
+        }
+    }
+
+    #[test]
+    fn kubernetes_token_cache_ttl_never_exceeds_a_positive_lease() {
+        assert_eq!(kubernetes_token_cache_ttl(3600), Duration::from_secs(2880));
+        assert_eq!(kubernetes_token_cache_ttl(20), Duration::from_secs(16));
+        assert_eq!(kubernetes_token_cache_ttl(1), Duration::from_secs(1));
+        assert_eq!(kubernetes_token_cache_ttl(0), Duration::from_secs(3600));
+        for lease in [1_u64, 5, 20, 30, 60, 3600] {
+            assert!(
+                kubernetes_token_cache_ttl(lease) <= Duration::from_secs(lease),
+                "cache ttl must be <= lease {lease}"
+            );
         }
     }
 

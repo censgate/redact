@@ -629,3 +629,60 @@ fn test_bucketed_pad_matches_fixed_512() -> Result<()> {
     }
     Ok(())
 }
+
+/// Fail-closed DistilBERT / alternate-model gate.
+///
+/// Ignored fixtures that hardcode `tests/fixtures/models/bert-base-ner` can
+/// pass without loading the model under `CENSGATE_NER_MODEL_PATH`. This test
+/// requires that path when set, loads it, and runs the prose fixtures.
+#[test]
+fn test_ner_honors_censgate_ner_model_path() -> Result<()> {
+    let Ok(model_path) = std::env::var("CENSGATE_NER_MODEL_PATH") else {
+        eprintln!("skip: CENSGATE_NER_MODEL_PATH unset");
+        return Ok(());
+    };
+    let model_path = model_path.trim();
+    anyhow::ensure!(
+        !model_path.is_empty() && Path::new(model_path).is_file(),
+        "CENSGATE_NER_MODEL_PATH={model_path} is missing or not a file"
+    );
+    let model_dir = Path::new(model_path)
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("CENSGATE_NER_MODEL_PATH has no parent directory"))?;
+    let tokenizer = model_dir.join("tokenizer.json");
+    anyhow::ensure!(
+        tokenizer.is_file(),
+        "tokenizer.json missing next to {}",
+        model_path
+    );
+
+    let recognizer = NerRecognizer::from_config(NerConfig {
+        model_path: model_path.to_string(),
+        tokenizer_path: Some(tokenizer.to_string_lossy().into_owned()),
+        min_confidence: 0.7,
+        ..Default::default()
+    })?;
+    anyhow::ensure!(
+        recognizer.is_available(),
+        "NER did not load from {model_path}"
+    );
+
+    for test_case in get_test_cases() {
+        let results = recognizer.analyze(test_case.text, "en")?;
+        for (expected_type, expected_text) in &test_case.expected_entities {
+            let found = results.iter().any(|r| {
+                r.entity_type == *expected_type && r.text.as_deref() == Some(*expected_text)
+            });
+            anyhow::ensure!(
+                found,
+                "expected {:?} '{}' in '{}' via {}; got {:?}",
+                expected_type,
+                expected_text,
+                test_case.text,
+                model_path,
+                results
+            );
+        }
+    }
+    Ok(())
+}
