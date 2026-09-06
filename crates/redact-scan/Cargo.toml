@@ -14,7 +14,7 @@ keywords = ["pii", "postgres", "privacy", "gdpr", "discovery"]
 categories = ["command-line-utilities", "database"]
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.12.2" }
+redact-core = { path = "../redact-core", version = "0.12.3" }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
