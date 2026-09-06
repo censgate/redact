@@ -155,7 +155,15 @@ impl TokenSession {
                 *counter = (*counter).max(index);
             }
             if let Ok(plaintext) = session.dek.open(&mapping.sealed_value) {
-                session.by_value.insert(plaintext, mapping.token.clone());
+                session
+                    .by_value
+                    .insert(plaintext.clone(), mapping.token.clone());
+                if mapping.entity_type == EntityType::Person.as_str() {
+                    let key = person_reuse_key(&plaintext);
+                    if key != plaintext {
+                        session.by_value.insert(key, mapping.token.clone());
+                    }
+                }
             }
             session.mappings.push(mapping);
         }
@@ -182,6 +190,12 @@ impl TokenSession {
         if let Some(existing) = self.by_value.get(plaintext) {
             return Ok(existing.clone());
         }
+        if *entity_type == EntityType::Person {
+            let key = person_reuse_key(plaintext);
+            if let Some(existing) = self.by_value.get(&key) {
+                return Ok(existing.clone());
+            }
+        }
 
         let label = entity_type.as_str().to_string();
         let counter = self.counters.entry(label.clone()).or_insert(0);
@@ -190,6 +204,12 @@ impl TokenSession {
 
         let sealed = self.dek.seal(plaintext)?;
         self.by_value.insert(plaintext.to_string(), token.clone());
+        if *entity_type == EntityType::Person {
+            let key = person_reuse_key(plaintext);
+            if key != plaintext {
+                self.by_value.insert(key, token.clone());
+            }
+        }
         self.mappings.push(TokenMapping {
             token: token.clone(),
             entity_type: label,
@@ -213,6 +233,18 @@ impl TokenSession {
     pub fn is_empty(&self) -> bool {
         self.mappings.is_empty()
     }
+}
+
+/// PERSON vault keys: trim, drop a trailing `'s`, ASCII-fold. `Nimbus` and
+/// `Nimbus's` therefore share one token without a platform-side cache.
+fn person_reuse_key(plaintext: &str) -> String {
+    let trimmed = plaintext.trim();
+    let bare = ["'s", "’s", "'S", "’S"]
+        .iter()
+        .find(|suffix| trimmed.len() > suffix.len() && trimmed.ends_with(*suffix))
+        .map(|suffix| &trimmed[..trimmed.len() - suffix.len()])
+        .unwrap_or(trimmed);
+    bare.to_ascii_lowercase()
 }
 
 fn token_index(token: &str) -> Option<usize> {
@@ -386,6 +418,34 @@ mod tests {
             .unwrap();
         assert_eq!(first, again);
         assert_eq!(session.new_mappings().len(), 1);
+    }
+
+    #[test]
+    fn person_possessive_and_case_reuse_one_token() {
+        let mut session = session();
+        let first = session.token_for(&EntityType::Person, "Nimbus").unwrap();
+        let poss = session.token_for(&EntityType::Person, "Nimbus's").unwrap();
+        let folded = session.token_for(&EntityType::Person, "nimbus").unwrap();
+        assert_eq!(first, "[PERSON_1]");
+        assert_eq!(poss, first);
+        assert_eq!(folded, first);
+        assert_eq!(session.new_mappings().len(), 1);
+
+        let other = session.token_for(&EntityType::Person, "Sorrel").unwrap();
+        assert_eq!(other, "[PERSON_2]");
+    }
+
+    #[test]
+    fn resume_reuses_normalized_person() {
+        let dek = Arc::new(Dek::generate().unwrap());
+        let mut original = TokenSession::new("s", "t", dek.clone());
+        original.token_for(&EntityType::Person, "Reed").unwrap();
+        let existing = original.take_new_mappings();
+
+        let mut resumed = TokenSession::resume("s", "t", dek, existing);
+        let reused = resumed.token_for(&EntityType::Person, "Reed's").unwrap();
+        assert_eq!(reused, "[PERSON_1]");
+        assert!(resumed.is_empty(), "normalized reuse should not mint");
     }
 
     #[test]

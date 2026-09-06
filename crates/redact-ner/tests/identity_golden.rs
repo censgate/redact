@@ -13,6 +13,9 @@ use redact_ner::IdentityRecognizer;
 
 const CATS_PARAGRAPH: &str = "I have two female cats: Nola ( black American short hair, 12 ) and Pip ( ginger tabby, 3 ). We live in Cedar Hollow, Caledonia ( Riverton metro area ). I have a wife and a daughter ( 11 ).";
 
+/// Synthetic lab roster — invented names and counts, not an operator household.
+const LAB_ROSTER: &str = "The lab mascot is Nimbus. Nimbus's badge is yellow. Desk neighbors are Reed, Sable, and Quill. Sorrel runs the front desk.";
+
 fn spans(rec: &IdentityRecognizer, text: &str) -> Vec<(EntityType, String)> {
     rec.analyze(text, "en")
         .unwrap()
@@ -171,5 +174,21 @@ fn onnx_org_and_bare_apple_when_model_present() {
         !ate.iter()
             .any(|(ty, s)| *ty == EntityType::Organization && s.eq_ignore_ascii_case("apple")),
         "food apple must not become ORGANIZATION: {ate:?}"
+    );
+
+    let people = types_of(&rec, LAB_ROSTER, EntityType::Person);
+    assert!(
+        people
+            .iter()
+            .all(|s| !s.contains('\'') && !s.contains('’') && s != "s"),
+        "lab-roster PERSON spans must be bare names, got {people:?}"
+    );
+    let sorrel: Vec<_> = people
+        .iter()
+        .filter(|s| s.contains("Sor") || s.contains("rel"))
+        .collect();
+    assert!(
+        sorrel.iter().all(|s| s.eq_ignore_ascii_case("Sorrel")) || sorrel.is_empty(),
+        "Sorrel must be one PERSON span if detected: {people:?}"
     );
 }
