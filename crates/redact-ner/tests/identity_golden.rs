@@ -121,7 +121,11 @@ fn common_words_after_identity_cues_are_not_names() {
     assert!(spans(&rec, "we live in peace now").is_empty());
     assert!(spans(&rec, "my cat eats tuna").is_empty());
     assert_eq!(
-        types_of(&rec, "my pets: Kestrel and Bram are loud", EntityType::Person),
+        types_of(
+            &rec,
+            "my pets: Kestrel and Bram are loud",
+            EntityType::Person
+        ),
         vec!["Kestrel".to_string(), "Bram".to_string()]
     );
 }
