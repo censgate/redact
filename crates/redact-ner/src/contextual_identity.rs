@@ -38,6 +38,9 @@ pub fn detect_contextual_identities(text: &str) -> Vec<RecognizerResult> {
     collect_relationships(text, &tokens, &mut hits);
     collect_named_called(text, &tokens, &mut hits);
     collect_pets(text, &tokens, &mut hits);
+    collect_role_is_are(text, &tokens, &mut hits);
+    collect_name_runs_the(text, &tokens, &mut hits);
+    collect_repeated_person_surfaces(text, &tokens, &mut hits);
     collect_locations(text, &tokens, &mut hits);
     collect_metro_areas(text, &tokens, &mut hits);
 
@@ -171,6 +174,109 @@ fn collect_named_called(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) {
             }
         }
     }
+}
+
+fn collect_role_is_are(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) {
+    for (i, tok) in tokens.iter().enumerate() {
+        if !is_relationship(tok.text) && !is_role(tok.text) {
+            continue;
+        }
+        let Some(verb) = tokens.get(i + 1) else {
+            continue;
+        };
+        if !verb.text.eq_ignore_ascii_case("is") && !verb.text.eq_ignore_ascii_case("are") {
+            continue;
+        }
+        for name in names_after_verb(text, tokens, i + 2) {
+            push_hit(hits, Kind::Person, name.0, name.1, 0.94);
+        }
+    }
+}
+
+fn collect_name_runs_the(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) {
+    for (i, tok) in tokens.iter().enumerate() {
+        if !tok.text.eq_ignore_ascii_case("runs") || i == 0 {
+            continue;
+        }
+        let Some(the) = tokens.get(i + 1) else {
+            continue;
+        };
+        if !the.text.eq_ignore_ascii_case("the") {
+            continue;
+        }
+        let prev = tokens[i - 1];
+        if accept_name(prev.text, NameRule::strong_no_calendar())
+            && !is_inside_skip_parens(text, prev.start)
+        {
+            push_hit(hits, Kind::Person, prev.start, prev.end, 0.93);
+        }
+    }
+}
+
+fn collect_repeated_person_surfaces(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) {
+    let cores: Vec<String> = hits
+        .iter()
+        .filter(|h| h.kind == Kind::Person)
+        .map(|h| person_core(&text[h.start..h.end]))
+        .filter(|c| c.chars().count() >= 2)
+        .collect();
+    if cores.is_empty() {
+        return;
+    }
+    for tok in tokens {
+        if is_inside_skip_parens(text, tok.start) {
+            continue;
+        }
+        let core = person_core(tok.text);
+        if cores.iter().any(|c| c.eq_ignore_ascii_case(&core))
+            && accept_name(tok.text, NameRule::strong_with_calendar())
+        {
+            push_hit(hits, Kind::Person, tok.start, tok.end, 0.93);
+        }
+    }
+}
+
+fn person_core(word: &str) -> String {
+    let mut s = word.to_string();
+    for suffix in ["'s", "’s", "'S", "’S"] {
+        if s.len() > suffix.len() && s.ends_with(suffix) {
+            s.truncate(s.len() - suffix.len());
+            break;
+        }
+    }
+    s
+}
+
+fn names_after_verb(text: &str, tokens: &[Token<'_>], start: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = start;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        if i > start {
+            let gap = &text[tokens[i - 1].end..tok.start];
+            if gap.contains('.') || gap.contains(';') {
+                break;
+            }
+        }
+        if tok.text.eq_ignore_ascii_case("and") || tok.text.eq_ignore_ascii_case("or") {
+            i += 1;
+            continue;
+        }
+        if !accept_name(tok.text, NameRule::strong_with_calendar()) {
+            break;
+        }
+        if is_inside_skip_parens(text, tok.start) {
+            i += 1;
+            continue;
+        }
+        out.push((tok.start, tok.end));
+        i += 1;
+    }
+    out
+}
+
+fn is_role(word: &str) -> bool {
+    matches!(word.to_ascii_lowercase().as_str(), "mascot" | "mascots")
 }
 
 fn collect_pets(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) {
@@ -528,7 +634,9 @@ fn is_relationship(word: &str) -> bool {
             | "boyfriend"
             | "roommate"
             | "neighbor"
+            | "neighbors"
             | "neighbour"
+            | "neighbours"
             | "boss"
             | "teacher"
             | "student"
