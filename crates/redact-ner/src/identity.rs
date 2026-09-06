@@ -190,8 +190,66 @@ fn merge_identity(
         }
         out.push(candidate);
     }
-    out.sort_by_key(|r| (r.start, r.end));
-    out
+    stabilize_identity_spans(text, out)
+}
+
+/// Merge split same-type PERSON spans and drop possessive `'s` from the
+/// entity so `Nimbus` / `Nimbus's` share one surface for tokenization.
+fn stabilize_identity_spans(text: &str, mut spans: Vec<RecognizerResult>) -> Vec<RecognizerResult> {
+    spans.sort_by_key(|r| (r.start, r.end));
+    let mut merged: Vec<RecognizerResult> = Vec::new();
+    for span in spans {
+        if let Some(prev) = merged.last_mut() {
+            if prev.entity_type == span.entity_type
+                && same_word_adjacent(text, prev.end, span.start)
+            {
+                prev.end = prev.end.max(span.end);
+                prev.score = prev.score.max(span.score);
+                continue;
+            }
+        }
+        merged.push(span);
+    }
+    for span in &mut merged {
+        span.end = span.end.min(text.len());
+        span.start = span.start.min(span.end);
+        if span.entity_type != EntityType::Person || span.start >= span.end {
+            continue;
+        }
+        if let Some(end) = person_span_end_without_possessive(text, span.start, span.end) {
+            span.end = end;
+        }
+    }
+    merged.retain(|span| span.start < span.end && !is_possessive_only(&text[span.start..span.end]));
+    merged
+}
+
+fn same_word_adjacent(text: &str, prev_end: usize, next_start: usize) -> bool {
+    if next_start < prev_end {
+        return true;
+    }
+    if next_start == prev_end {
+        return true;
+    }
+    if next_start > text.len() || prev_end > text.len() {
+        return false;
+    }
+    let gap = &text[prev_end..next_start];
+    !gap.is_empty() && gap.chars().all(|c| c == '\'' || c == '’' || c == '-')
+}
+
+fn person_span_end_without_possessive(text: &str, start: usize, end: usize) -> Option<usize> {
+    let surface = &text[start..end];
+    for suffix in ["'s", "’s", "'S", "’S"] {
+        if surface.len() > suffix.len() && surface.ends_with(suffix) {
+            return Some(end - suffix.len());
+        }
+    }
+    None
+}
+
+fn is_possessive_only(surface: &str) -> bool {
+    matches!(surface, "'s" | "’s" | "'S" | "’S" | "'" | "’" | "s" | "S")
 }
 
 #[cfg(test)]
@@ -244,5 +302,74 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].entity_type, EntityType::Location);
         assert_eq!(merged[0].recognizer_name, "ctx");
+    }
+
+    const LAB_ROSTER: &str = "The lab mascot is Nimbus. Nimbus's badge is yellow. Desk neighbors are Reed, Sable, and Quill. Sorrel runs the front desk. Reed files the badges.";
+
+    fn person(start: usize, end: usize, source: &str) -> RecognizerResult {
+        RecognizerResult::new(EntityType::Person, start, end, 0.9, source)
+    }
+
+    fn find_span(text: &str, needle: &str) -> (usize, usize) {
+        let start = text.find(needle).expect(needle);
+        (start, start + needle.len())
+    }
+
+    fn surfaces(text: &str, spans: &[RecognizerResult]) -> Vec<String> {
+        spans
+            .iter()
+            .map(|s| text[s.start..s.end].to_string())
+            .collect()
+    }
+
+    #[test]
+    fn lab_roster_possessive_and_split_stabilize_to_one_token_surface() {
+        let (nimbus, nimbus_end) = find_span(LAB_ROSTER, "Nimbus.");
+        let nimbus_first = (nimbus, nimbus_end - 1);
+        let nimbus_poss = find_span(LAB_ROSTER, "Nimbus's");
+        let reed = find_span(LAB_ROSTER, "Reed,");
+        let reed = (reed.0, reed.1 - 1);
+        let sable = find_span(LAB_ROSTER, "Sable");
+        let quill = find_span(LAB_ROSTER, "Quill");
+        let sorrel = find_span(LAB_ROSTER, "Sorrel");
+        let reed_again = LAB_ROSTER.rfind("Reed").expect("second Reed");
+        let reed_again = (reed_again, reed_again + 4);
+
+        let ner = vec![
+            person(nimbus_first.0, nimbus_first.1, "ner"),
+            person(nimbus_poss.0, nimbus_poss.0 + 6, "ner"),
+            person(nimbus_poss.0 + 6, nimbus_poss.1, "ner"),
+            person(reed.0, reed.1, "ner"),
+            person(sable.0, sable.1, "ner"),
+            person(quill.0, quill.1, "ner"),
+            person(sorrel.0, sorrel.0 + 3, "ner"),
+            person(sorrel.0 + 3, sorrel.1, "ner"),
+            person(reed_again.0, reed_again.1, "ner"),
+        ];
+        let merged = merge_identity(LAB_ROSTER, Vec::new(), ner);
+        let got = surfaces(LAB_ROSTER, &merged);
+        assert_eq!(
+            got,
+            vec![
+                "Nimbus".to_string(),
+                "Nimbus".to_string(),
+                "Reed".to_string(),
+                "Sable".to_string(),
+                "Quill".to_string(),
+                "Sorrel".to_string(),
+                "Reed".to_string(),
+            ]
+        );
+        assert!(got
+            .iter()
+            .all(|s| s != "Nimbus's" && s != "'s" && s != "Sor"));
+    }
+
+    #[test]
+    fn possessive_only_ner_span_is_dropped() {
+        let text = "Nimbus's badge";
+        let ner = vec![person(0, 6, "ner"), person(6, 8, "ner")];
+        let merged = merge_identity(text, Vec::new(), ner);
+        assert_eq!(surfaces(text, &merged), vec!["Nimbus".to_string()]);
     }
 }

@@ -4,14 +4,18 @@
 
 //! Golden cases for hybrid identity detection (contextual + optional ONNX NER).
 //!
-//! Contextual-only covers the household-identity paragraph and the
+//! Contextual-only covers a synthetic kennel/lab roster and the
 //! adversarial table. ONNX cases run only when `CENSGATE_NER_MODEL_PATH`
 //! points at a loadable model so CI without the artifact still stays green.
 
 use redact_core::{EntityType, Recognizer};
 use redact_ner::IdentityRecognizer;
 
-const CATS_PARAGRAPH: &str = "I have two female cats: Nola ( black American short hair, 12 ) and Pip ( ginger tabby, 3 ). We live in Cedar Hollow, Caledonia ( Riverton metro area ). I have a wife and a daughter ( 11 ).";
+/// One kennel dog + one place list. Not a household roster.
+const KENNEL_PARAGRAPH: &str = "The kennel lists one dog: Kestrel ( black terrier, 8 ). We live in Harbor Mill, Westfield ( Elmsford metro area ). A colleague named Bram dropped by.";
+
+/// Synthetic lab roster — invented names and counts, not an operator household.
+const LAB_ROSTER: &str = "The lab mascot is Nimbus. Nimbus's badge is yellow. Desk neighbors are Reed, Sable, and Quill. Sorrel runs the front desk.";
 
 fn spans(rec: &IdentityRecognizer, text: &str) -> Vec<(EntityType, String)> {
     rec.analyze(text, "en")
@@ -30,23 +34,23 @@ fn types_of(rec: &IdentityRecognizer, text: &str, ty: EntityType) -> Vec<String>
 }
 
 #[test]
-fn cats_paragraph_tokenizes_pets_and_places_not_american() {
+fn kennel_paragraph_tokenizes_pet_colleague_and_places() {
     let rec = IdentityRecognizer::contextual_only();
-    let people = types_of(&rec, CATS_PARAGRAPH, EntityType::Person);
-    let places = types_of(&rec, CATS_PARAGRAPH, EntityType::Location);
+    let people = types_of(&rec, KENNEL_PARAGRAPH, EntityType::Person);
+    let places = types_of(&rec, KENNEL_PARAGRAPH, EntityType::Location);
 
-    assert_eq!(people, vec!["Nola".to_string(), "Pip".to_string()]);
+    assert_eq!(people, vec!["Kestrel".to_string(), "Bram".to_string()]);
     assert_eq!(
         places,
         vec![
-            "Cedar Hollow".to_string(),
-            "Caledonia".to_string(),
-            "Riverton".to_string()
+            "Harbor Mill".to_string(),
+            "Westfield".to_string(),
+            "Elmsford".to_string()
         ]
     );
-    assert!(!spans(&rec, CATS_PARAGRAPH)
+    assert!(!spans(&rec, KENNEL_PARAGRAPH)
         .iter()
-        .any(|(_, t)| t == "American"));
+        .any(|(_, t)| t == "American" || t == "terrier"));
 }
 
 #[test]
@@ -117,15 +121,19 @@ fn common_words_after_identity_cues_are_not_names() {
     assert!(spans(&rec, "we live in peace now").is_empty());
     assert!(spans(&rec, "my cat eats tuna").is_empty());
     assert_eq!(
-        types_of(&rec, "my pets: Nola and Pip are loud", EntityType::Person),
-        vec!["Nola".to_string(), "Pip".to_string()]
+        types_of(
+            &rec,
+            "my pets: Kestrel and Bram are loud",
+            EntityType::Person
+        ),
+        vec!["Kestrel".to_string(), "Bram".to_string()]
     );
 }
 
 #[test]
 fn existing_vault_tokens_are_not_identity() {
     let rec = IdentityRecognizer::contextual_only();
-    let text = "I have two female cats: [PERSON_1] ( black American short hair, 12 ) and [PERSON_2] ( ginger tabby, 3 ). We live in [LOCATION_1], [LOCATION_2] ( [LOCATION_3] metro area ).";
+    let text = "The kennel lists one dog: [PERSON_1] ( black terrier, 8 ). The yard is in [LOCATION_1], [LOCATION_2] ( [LOCATION_3] metro area ). A colleague named [PERSON_2] dropped by.";
     assert!(
         spans(&rec, text).is_empty(),
         "sealed tokens must not be re-detected as PERSON/LOCATION: {:?}",
@@ -171,5 +179,21 @@ fn onnx_org_and_bare_apple_when_model_present() {
         !ate.iter()
             .any(|(ty, s)| *ty == EntityType::Organization && s.eq_ignore_ascii_case("apple")),
         "food apple must not become ORGANIZATION: {ate:?}"
+    );
+
+    let people = types_of(&rec, LAB_ROSTER, EntityType::Person);
+    assert!(
+        people
+            .iter()
+            .all(|s| !s.contains('\'') && !s.contains('’') && s != "s"),
+        "lab-roster PERSON spans must be bare names, got {people:?}"
+    );
+    let sorrel: Vec<_> = people
+        .iter()
+        .filter(|s| s.contains("Sor") || s.contains("rel"))
+        .collect();
+    assert!(
+        sorrel.iter().all(|s| s.eq_ignore_ascii_case("Sorrel")) || sorrel.is_empty(),
+        "Sorrel must be one PERSON span if detected: {people:?}"
     );
 }

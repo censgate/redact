@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-06
+
+### Fixed
+
+- PERSON spans from hybrid identity no longer keep a trailing `'s` / `’s`,
+  and adjacent same-type fragments of one word (ONNX split names) merge
+  before tokenize. The vault reuses one PERSON token for the same
+  normalized surface (`Nimbus` / `Nimbus's` / `nimbus`) in a session.
+
 ## [0.12.0] - 2026-09-05
 
 Crate/image release of the NER serving-path and `vault_kv2` Kubernetes-auth
