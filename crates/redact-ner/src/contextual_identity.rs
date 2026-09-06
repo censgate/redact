@@ -205,6 +205,9 @@ fn collect_name_runs_the(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) 
             continue;
         }
         let prev = tokens[i - 1];
+        if is_interrogative_pronoun(prev.text) {
+            continue;
+        }
         if accept_name(prev.text, NameRule::strong_no_calendar())
             && !is_inside_skip_parens(text, prev.start)
         {
@@ -787,14 +790,13 @@ fn is_function_word(word: &str) -> bool {
             | "today"
             | "tomorrow"
             | "yesterday"
-            | "who"
-            | "whom"
-            | "whose"
-            | "what"
-            | "when"
-            | "where"
-            | "why"
-            | "how"
+    )
+}
+
+fn is_interrogative_pronoun(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "who" | "whom" | "whose" | "what" | "when" | "where" | "why" | "how"
     )
 }
 
@@ -952,15 +954,31 @@ mod tests {
     }
 
     #[test]
-    fn who_runs_the_is_not_a_person() {
-        let text = "Who runs the front desk?";
-        let mut hits = Vec::new();
-        let tokens = tokenize(text);
-        collect_name_runs_the(text, &tokens, &mut hits);
-        assert!(
-            hits.is_empty(),
-            "interrogative Who must not become PERSON: {hits:?}"
-        );
+    fn interrogative_pronouns_are_not_persons_in_name_runs_the() {
+        for pronoun in [
+            "Who", "Whom", "Whose", "What", "When", "Where", "Why", "How",
+        ] {
+            let text = format!("{pronoun} runs the front desk?");
+            let mut hits = Vec::new();
+            let tokens = tokenize(&text);
+            collect_name_runs_the(&text, &tokens, &mut hits);
+            assert!(
+                hits.is_empty(),
+                "{pronoun} runs the must not become PERSON: {hits:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn interrogative_pronouns_are_not_global_function_words() {
+        for pronoun in [
+            "who", "whom", "whose", "what", "when", "where", "why", "how",
+        ] {
+            assert!(
+                !is_function_word(pronoun),
+                "{pronoun} must stay scoped to Name runs the"
+            );
+        }
     }
 
     #[test]
