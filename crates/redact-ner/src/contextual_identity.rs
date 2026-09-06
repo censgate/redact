@@ -205,6 +205,9 @@ fn collect_name_runs_the(text: &str, tokens: &[Token<'_>], hits: &mut Vec<Hit>) 
             continue;
         }
         let prev = tokens[i - 1];
+        if is_interrogative_pronoun(prev.text) {
+            continue;
+        }
         if accept_name(prev.text, NameRule::strong_no_calendar())
             && !is_inside_skip_parens(text, prev.start)
         {
@@ -790,6 +793,13 @@ fn is_function_word(word: &str) -> bool {
     )
 }
 
+fn is_interrogative_pronoun(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "who" | "whom" | "whose" | "what" | "when" | "where" | "why" | "how"
+    )
+}
+
 /// Ordinary English that identity cues must not treat as a name or place.
 fn is_common_non_name(word: &str) -> bool {
     matches!(
@@ -941,5 +951,43 @@ mod tests {
         assert_eq!(toks[0].text, "Hi");
         assert_eq!(toks[1].text, "Ada");
         assert_eq!(&text[toks[1].start..toks[1].end], "Ada");
+    }
+
+    #[test]
+    fn interrogative_pronouns_are_not_persons_in_name_runs_the() {
+        for pronoun in [
+            "Who", "Whom", "Whose", "What", "When", "Where", "Why", "How",
+        ] {
+            let text = format!("{pronoun} runs the front desk?");
+            let mut hits = Vec::new();
+            let tokens = tokenize(&text);
+            collect_name_runs_the(&text, &tokens, &mut hits);
+            assert!(
+                hits.is_empty(),
+                "{pronoun} runs the must not become PERSON: {hits:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn interrogative_pronouns_are_not_global_function_words() {
+        for pronoun in [
+            "who", "whom", "whose", "what", "when", "where", "why", "how",
+        ] {
+            assert!(
+                !is_function_word(pronoun),
+                "{pronoun} must stay scoped to Name runs the"
+            );
+        }
+    }
+
+    #[test]
+    fn sorrel_runs_the_is_a_person() {
+        let text = "Sorrel runs the front desk.";
+        let mut hits = Vec::new();
+        let tokens = tokenize(text);
+        collect_name_runs_the(text, &tokens, &mut hits);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&text[hits[0].start..hits[0].end], "Sorrel");
     }
 }

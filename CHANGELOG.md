@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Contextual identity no longer treats interrogative pronouns (`who`,
+  `what`, `when`, `where`, `why`, `how`, and `whom` / `whose`) as PERSON
+  in `Name runs the …` cues. `Who runs the front desk?` stays a question;
+  `Sorrel runs the front desk` still tokenizes Sorrel.
+
 ## [0.12.2] - 2026-09-06
 
 ### Fixed
