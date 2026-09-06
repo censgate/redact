@@ -132,8 +132,8 @@ Library (version pin is updated by Prepare Release):
 
 ```toml
 [dependencies]
-redact-core = "0.12.0"
-redact-ner = "0.12.0"  # optional ONNX NER
+redact-core = "0.12.1"
+redact-ner = "0.12.1"  # optional ONNX NER
 ```
 
 ```rust
