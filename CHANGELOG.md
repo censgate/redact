@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-09-06
+
+### Fixed
+
+- Contextual identity now treats `mascot is`, `neighbors are` lists, and
+  `Name runs the …` as identity context, and re-hits the same person
+  surface later in the document (including `'s`). The synthetic lab-roster
+  golden tokenizes Nimbus / Reed / Sable / Quill / Sorrel without
+  capitalization heuristics.
+
 ## [0.12.1] - 2026-09-06
 
 ### Fixed

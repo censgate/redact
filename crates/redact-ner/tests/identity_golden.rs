@@ -15,7 +15,7 @@ use redact_ner::IdentityRecognizer;
 const KENNEL_PARAGRAPH: &str = "The kennel lists one dog: Kestrel ( black terrier, 8 ). We live in Harbor Mill, Westfield ( Elmsford metro area ). A colleague named Bram dropped by.";
 
 /// Synthetic lab roster — invented names and counts, not an operator household.
-const LAB_ROSTER: &str = "The lab mascot is Nimbus. Nimbus's badge is yellow. Desk neighbors are Reed, Sable, and Quill. Sorrel runs the front desk.";
+const LAB_ROSTER: &str = "The lab mascot is Nimbus. Nimbus's badge is yellow. Desk neighbors are Reed, Sable, and Quill. Sorrel runs the front desk. Reed files the badges.";
 
 fn spans(rec: &IdentityRecognizer, text: &str) -> Vec<(EntityType, String)> {
     rec.analyze(text, "en")
@@ -153,6 +153,25 @@ fn named_and_called_are_strong_person_context() {
         types_of(&rec, "the stray is called pip", EntityType::Person),
         vec!["pip".to_string()]
     );
+}
+
+#[test]
+fn lab_roster_contextual_covers_mascot_neighbors_and_desk_lead() {
+    let rec = IdentityRecognizer::contextual_only();
+    let people = types_of(&rec, LAB_ROSTER, EntityType::Person);
+    assert_eq!(
+        people,
+        vec![
+            "Nimbus".to_string(),
+            "Nimbus".to_string(),
+            "Reed".to_string(),
+            "Sable".to_string(),
+            "Quill".to_string(),
+            "Sorrel".to_string(),
+            "Reed".to_string(),
+        ]
+    );
+    assert!(people.iter().all(|s| !s.contains('\'') && !s.contains('’')));
 }
 
 #[test]
