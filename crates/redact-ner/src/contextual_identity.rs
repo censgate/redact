@@ -787,6 +787,14 @@ fn is_function_word(word: &str) -> bool {
             | "today"
             | "tomorrow"
             | "yesterday"
+            | "who"
+            | "whom"
+            | "whose"
+            | "what"
+            | "when"
+            | "where"
+            | "why"
+            | "how"
     )
 }
 
@@ -941,5 +949,27 @@ mod tests {
         assert_eq!(toks[0].text, "Hi");
         assert_eq!(toks[1].text, "Ada");
         assert_eq!(&text[toks[1].start..toks[1].end], "Ada");
+    }
+
+    #[test]
+    fn who_runs_the_is_not_a_person() {
+        let text = "Who runs the front desk?";
+        let mut hits = Vec::new();
+        let tokens = tokenize(text);
+        collect_name_runs_the(text, &tokens, &mut hits);
+        assert!(
+            hits.is_empty(),
+            "interrogative Who must not become PERSON: {hits:?}"
+        );
+    }
+
+    #[test]
+    fn sorrel_runs_the_is_a_person() {
+        let text = "Sorrel runs the front desk.";
+        let mut hits = Vec::new();
+        let tokens = tokenize(text);
+        collect_name_runs_the(text, &tokens, &mut hits);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&text[hits[0].start..hits[0].end], "Sorrel");
     }
 }

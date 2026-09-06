@@ -175,6 +175,17 @@ fn lab_roster_contextual_covers_mascot_neighbors_and_desk_lead() {
 }
 
 #[test]
+fn who_runs_the_front_desk_is_not_a_person() {
+    let rec = IdentityRecognizer::contextual_only();
+    let people = types_of(&rec, "Who runs the front desk?", EntityType::Person);
+    assert!(
+        people.is_empty(),
+        "interrogative Who must not become PERSON: {people:?}"
+    );
+    assert!(spans(&rec, "Who runs the front desk?").is_empty());
+}
+
+#[test]
 fn onnx_org_and_bare_apple_when_model_present() {
     let Some(rec) = IdentityRecognizer::from_env_optional() else {
         return;
