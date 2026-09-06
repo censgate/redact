@@ -3312,7 +3312,7 @@ dependencies = [
 
 [[package]]
 name = "redact-api"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -3329,7 +3329,7 @@ dependencies = [
 
 [[package]]
 name = "redact-cli"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3345,7 +3345,7 @@ dependencies = [
 
 [[package]]
 name = "redact-core"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3367,7 +3367,7 @@ dependencies = [
 
 [[package]]
 name = "redact-examples"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "redact-api",
@@ -3379,7 +3379,7 @@ dependencies = [
 
 [[package]]
 name = "redact-gateway"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -3423,7 +3423,7 @@ dependencies = [
 
 [[package]]
 name = "redact-ner"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "ndarray",
@@ -3440,7 +3440,7 @@ dependencies = [
 
 [[package]]
 name = "redact-scan"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3464,7 +3464,7 @@ dependencies = [
 
 [[package]]
 name = "redact-verify"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3481,7 +3481,7 @@ dependencies = [
 
 [[package]]
 name = "redact-wasm"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",

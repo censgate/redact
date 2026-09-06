@@ -407,4 +407,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.12.1 or later.
+Those versions are no longer maintained. Please upgrade to v0.12.2 or later.
