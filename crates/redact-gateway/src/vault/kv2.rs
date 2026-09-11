@@ -26,7 +26,9 @@ use vaultrs::client::{Client, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::kv2;
 
-use super::{merge_mappings, session_path, TokenMapError, TokenMapStore};
+use super::{
+    lineage_path, merge_mappings, session_path, CredentialLineage, TokenMapError, TokenMapStore,
+};
 use crate::config::{VaultAuthMethod, VaultSettings};
 use crate::redact::token::TokenMapping;
 
@@ -149,6 +151,10 @@ impl Kv2Store {
 
     fn path(&self, tenant: &str, session: &str) -> String {
         session_path(&self.path_prefix, tenant, session)
+    }
+
+    fn lineage_storage_path(&self, tenant: &str, subject: &str) -> String {
+        lineage_path(&self.path_prefix, tenant, subject)
     }
 
     fn token_still_valid(inner: &Inner) -> bool {
@@ -321,6 +327,47 @@ impl TokenMapStore for Kv2Store {
             Err(ClientError::APIError { code: 404, .. }) => Ok(()),
             Err(err) => Err(map_client_error(err)),
         }
+    }
+
+    async fn purge(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let path = self.path(tenant, session);
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        match kv2::delete_metadata(&inner.client, &self.mount, &path).await {
+            Ok(()) => Ok(()),
+            Err(ClientError::APIError { code: 404, .. }) => Ok(()),
+            Err(err) => Err(map_client_error(err)),
+        }
+    }
+
+    async fn get_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+    ) -> Result<CredentialLineage, TokenMapError> {
+        let path = self.lineage_storage_path(tenant, subject);
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        match kv2::read::<CredentialLineage>(&inner.client, &self.mount, &path).await {
+            Ok(lineage) => Ok(lineage),
+            Err(ClientError::APIError { code: 404, .. }) => Ok(CredentialLineage::default()),
+            Err(err) => Err(map_client_error(err)),
+        }
+    }
+
+    async fn put_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+        lineage: &CredentialLineage,
+    ) -> Result<(), TokenMapError> {
+        let path = self.lineage_storage_path(tenant, subject);
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        kv2::set(&inner.client, &self.mount, &path, lineage)
+            .await
+            .map(|_| ())
+            .map_err(map_client_error)
     }
 
     async fn health(&self) -> Result<(), TokenMapError> {

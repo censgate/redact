@@ -14,10 +14,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::extract::{MatchedPath, Request, State};
+use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{from_fn_with_state, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use redact_core::AnalyzerEngine;
 use serde::{Deserialize, Serialize};
@@ -38,7 +39,10 @@ use crate::redact::token::{
 use crate::redact::{content_digest, RedactError, RedactionContext, RedactionOutcome};
 use crate::stream::transform_buffered_sse;
 use crate::telemetry::{semconv, spans, Telemetry};
-use crate::vault::TokenMapStore;
+use crate::vault::{
+    compose_predecessor_lineage, CredentialLineage, LineageRegisterError, TokenMapError,
+    TokenMapStore,
+};
 
 /// Shared handler state.
 #[derive(Clone)]
@@ -85,6 +89,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/v1/models", get(models))
         .route("/v1/redact", post(redact_endpoint))
         .route("/v1/restore", post(restore_endpoint))
+        .route("/v1/vault/context", delete(erase_vault_context))
+        .route("/v1/vault/context/verify", post(verify_vault_context))
+        .route("/v1/credentials/predecessors", post(register_predecessors))
         .route("/v1/compliance/status", get(compliance_status))
         .route("/v1/compliance/check", post(compliance_check))
         .layer(from_fn_with_state(state.clone(), authenticate))
@@ -1184,6 +1191,30 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
     }
 }
 
+/// Optional vault addressing on redact/restore bodies.
+///
+/// `context_id` is an alias of `session_id`. Callers must not send a subject;
+/// the authenticated credential is the subject.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct VaultContextRequest {
+    /// Caller-facing vault context identifier (alias of `session_id`).
+    #[serde(default)]
+    pub context_id: Option<String>,
+    /// Rejected when present. Subject comes from the authenticated credential.
+    #[serde(default)]
+    subject: Option<Value>,
+    /// Rejected when present. Subject comes from the authenticated credential.
+    #[serde(default)]
+    subjects: Option<Value>,
+}
+
+impl VaultContextRequest {
+    fn validated_context_id(&self) -> Result<Option<String>, GatewayError> {
+        reject_subject_fields(self.subject.as_ref(), self.subjects.as_ref())?;
+        Ok(self.context_id.clone())
+    }
+}
+
 /// Request body for `/v1/redact` and `/v1/compliance/check`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RedactRequest {
@@ -1195,6 +1226,9 @@ pub struct RedactRequest {
     /// Session used for token numbering and persistence.
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Optional vault addressing. `vault.context_id` aliases `session_id`.
+    #[serde(default)]
+    pub vault: Option<VaultContextRequest>,
 }
 
 /// Response body for `/v1/redact`.
@@ -1247,9 +1281,10 @@ async fn redact_endpoint(
         Err(err) => return err.into_response(),
     };
 
-    let session_id = request
-        .session_id
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let session_id = match caller_session_id(request.session_id, request.vault.as_ref(), true) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
     let token_map_session = match auth.subject.as_deref() {
         Some(subject) => subject_bound_session_key(&session_id, subject),
         None => session_id.clone(),
@@ -1367,7 +1402,11 @@ pub struct RestoreRequest {
     /// Text containing tokens to restore.
     pub text: String,
     /// Session that minted the tokens.
-    pub session_id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Optional vault addressing. `vault.context_id` aliases `session_id`.
+    #[serde(default)]
+    pub vault: Option<VaultContextRequest>,
 }
 
 async fn restore_endpoint(
@@ -1392,7 +1431,12 @@ async fn restore_endpoint(
         .into_response();
     }
 
-    let token_map_session = subject_bound_session_key(&request.session_id, subject);
+    let session_id = match caller_session_id(request.session_id, request.vault.as_ref(), false) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+
+    let token_map_session = subject_bound_session_key(&session_id, subject);
 
     // Missing and foreign-subject sessions both yield an empty mapping list so
     // callers cannot probe whether a session id exists for another subject.
@@ -1419,9 +1463,320 @@ async fn restore_endpoint(
     Json(json!({
         "text": text,
         // Echo the caller-facing id only — never the subject-bound storage key.
-        "session_id": request.session_id,
+        "session_id": session_id,
         "restored": outcome.restored,
         "missing": outcome.missing,
+    }))
+    .into_response()
+}
+
+/// Body for `DELETE /v1/vault/context` and `POST /v1/vault/context/verify`.
+#[derive(Debug, Clone, Deserialize, Default)]
+struct VaultContextBody {
+    #[serde(default)]
+    vault: Option<VaultContextRequest>,
+    #[serde(default)]
+    subject: Option<Value>,
+    #[serde(default)]
+    subjects: Option<Value>,
+}
+
+/// Body for `POST /v1/credentials/predecessors`. No subject fields are accepted.
+#[derive(Debug, Clone, Deserialize, Default)]
+struct PredecessorRegisterRequest {
+    #[serde(default)]
+    subject: Option<Value>,
+    #[serde(default)]
+    subjects: Option<Value>,
+}
+
+fn reject_subject_fields(
+    subject: Option<&Value>,
+    subjects: Option<&Value>,
+) -> Result<(), GatewayError> {
+    if subject.is_some() || subjects.is_some() {
+        return Err(GatewayError::InvalidRequest(
+            "request must not include a subject; the authenticated credential is the subject"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+fn caller_session_id(
+    session_id: Option<String>,
+    vault: Option<&VaultContextRequest>,
+    generate_if_missing: bool,
+) -> Result<String, GatewayError> {
+    let context_id = match vault {
+        Some(vault) => vault.validated_context_id()?,
+        None => None,
+    };
+    resolve_caller_context_id(session_id, context_id, generate_if_missing)
+}
+
+/// Resolve the caller-facing session / context id.
+///
+/// `vault.context_id` is an alias of `session_id`. When both are set they must
+/// match. Storage continues to use [`subject_bound_session_key`].
+fn resolve_caller_context_id(
+    session_id: Option<String>,
+    context_id: Option<String>,
+    generate_if_missing: bool,
+) -> Result<String, GatewayError> {
+    match (session_id, context_id) {
+        (Some(session), Some(context)) if session != context => Err(GatewayError::InvalidRequest(
+            "session_id and vault.context_id differ".into(),
+        )),
+        (Some(session), _) => Ok(session),
+        (None, Some(context)) => Ok(context),
+        (None, None) if generate_if_missing => Ok(Uuid::new_v4().to_string()),
+        (None, None) => Err(GatewayError::InvalidRequest(
+            "session_id or vault.context_id is required".into(),
+        )),
+    }
+}
+
+fn require_authenticated_subject(auth: &AuthContext) -> Result<&str, GatewayError> {
+    auth.subject
+        .as_deref()
+        .filter(|_| auth.mode != "none")
+        .ok_or_else(|| {
+            GatewayError::Forbidden(
+                "this endpoint requires authentication; set auth.mode to api_key or oidc".into(),
+            )
+        })
+}
+
+fn token_map_unavailable(err: TokenMapError) -> GatewayError {
+    GatewayError::DependencyUnavailable(format!("token map backend is unavailable: {err}"))
+}
+
+fn require_token_map(state: &AppState) -> Result<(), GatewayError> {
+    if state.tokens.backend_name() == "off" {
+        Err(GatewayError::DependencyUnavailable(
+            "this endpoint requires a token map backend; configure CENSGATE_VAULT_BACKEND".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+async fn context_subject_closure(
+    state: &AppState,
+    auth: &AuthContext,
+) -> Result<(Vec<String>, CredentialLineage), GatewayError> {
+    let subject = require_authenticated_subject(auth)?;
+    let lineage = state
+        .tokens
+        .get_lineage(&auth.tenant, subject)
+        .await
+        .map_err(token_map_unavailable)?;
+    let mut subjects = Vec::with_capacity(1 + lineage.predecessors.len());
+    subjects.push(subject.to_string());
+    subjects.extend(lineage.predecessors.iter().cloned());
+    Ok((subjects, lineage))
+}
+
+fn vault_context_response(state: &str, verified: bool, lineage: &CredentialLineage) -> Value {
+    json!({
+        "state": state,
+        "verified": verified,
+        "lineage_revision": lineage.revision,
+        "predecessor_count": lineage.predecessors.len(),
+    })
+}
+
+fn required_context_id(body: &VaultContextBody) -> Result<String, GatewayError> {
+    reject_subject_fields(body.subject.as_ref(), body.subjects.as_ref())?;
+    let context_id = body
+        .vault
+        .as_ref()
+        .map(VaultContextRequest::validated_context_id)
+        .transpose()?
+        .flatten()
+        .filter(|id| !id.is_empty());
+    context_id.ok_or_else(|| GatewayError::InvalidRequest("vault.context_id is required".into()))
+}
+
+async fn maps_present(
+    state: &AppState,
+    tenant: &str,
+    context_id: &str,
+    subjects: &[String],
+) -> Result<bool, GatewayError> {
+    for subject in subjects {
+        let key = subject_bound_session_key(context_id, subject);
+        let mappings = state
+            .tokens
+            .get(tenant, &key)
+            .await
+            .map_err(token_map_unavailable)?;
+        if !mappings.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+async fn erase_vault_context(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
+    Json(body): Json<VaultContextBody>,
+) -> Response {
+    if let Err(err) = require_authenticated_subject(&auth) {
+        return err.into_response();
+    }
+    if let Err(err) = require_token_map(&state) {
+        return err.into_response();
+    }
+    let context_id = match required_context_id(&body) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let (subjects, lineage) = match context_subject_closure(&state, &auth).await {
+        Ok(value) => value,
+        Err(err) => return err.into_response(),
+    };
+    for subject in &subjects {
+        let key = subject_bound_session_key(&context_id, subject);
+        if let Err(err) = state.tokens.purge(&auth.tenant, &key).await {
+            return token_map_unavailable(err).into_response();
+        }
+    }
+    match maps_present(&state, &auth.tenant, &context_id, &subjects).await {
+        Ok(present) => {
+            let state_name = if present { "present" } else { "absent" };
+            Json(vault_context_response(state_name, !present, &lineage)).into_response()
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn verify_vault_context(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
+    Json(body): Json<VaultContextBody>,
+) -> Response {
+    if let Err(err) = require_authenticated_subject(&auth) {
+        return err.into_response();
+    }
+    if let Err(err) = require_token_map(&state) {
+        return err.into_response();
+    }
+    let context_id = match required_context_id(&body) {
+        Ok(id) => id,
+        Err(err) => return err.into_response(),
+    };
+    let (subjects, lineage) = match context_subject_closure(&state, &auth).await {
+        Ok(value) => value,
+        Err(err) => return err.into_response(),
+    };
+    match maps_present(&state, &auth.tenant, &context_id, &subjects).await {
+        Ok(present) => {
+            let state_name = if present { "present" } else { "absent" };
+            Json(vault_context_response(state_name, !present, &lineage)).into_response()
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+fn predecessor_proof_headers(headers: &HeaderMap) -> Result<HeaderMap, GatewayError> {
+    let value = headers
+        .get(HeaderName::from_static("x-predecessor-authorization"))
+        .ok_or_else(|| GatewayError::Unauthorized("missing predecessor proof".into()))?;
+    // Copy into Authorization so authenticators can validate the previous
+    // credential. The proof header itself is never logged.
+    let mut proof = HeaderMap::new();
+    proof.insert(AUTHORIZATION, value.clone());
+    Ok(proof)
+}
+
+async fn register_predecessors(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
+    Json(body): Json<PredecessorRegisterRequest>,
+) -> Response {
+    if let Err(err) = reject_subject_fields(body.subject.as_ref(), body.subjects.as_ref()) {
+        return err.into_response();
+    }
+    let current_subject = match require_authenticated_subject(&auth) {
+        Ok(subject) => subject.to_string(),
+        Err(err) => return err.into_response(),
+    };
+    if let Err(err) = require_token_map(&state) {
+        return err.into_response();
+    }
+    let proof_headers = match predecessor_proof_headers(&headers) {
+        Ok(headers) => headers,
+        Err(err) => return err.into_response(),
+    };
+    let previous = match state.auth.authenticate(&proof_headers).await {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            return GatewayError::Unauthorized("invalid predecessor proof".into()).into_response();
+        }
+    };
+    let previous_subject = match require_authenticated_subject(&previous) {
+        Ok(subject) => subject.to_string(),
+        Err(err) => return err.into_response(),
+    };
+    if auth.tenant != previous.tenant {
+        return GatewayError::InvalidRequest("predecessor is not in the same tenant".into())
+            .into_response();
+    }
+
+    let current_lineage = match state
+        .tokens
+        .get_lineage(&auth.tenant, &current_subject)
+        .await
+    {
+        Ok(lineage) => lineage,
+        Err(err) => return token_map_unavailable(err).into_response(),
+    };
+    let previous_lineage = match state
+        .tokens
+        .get_lineage(&auth.tenant, &previous_subject)
+        .await
+    {
+        Ok(lineage) => lineage,
+        Err(err) => return token_map_unavailable(err).into_response(),
+    };
+    let composed = match compose_predecessor_lineage(
+        &current_subject,
+        &current_lineage,
+        &previous_subject,
+        &previous_lineage,
+    ) {
+        Ok(lineage) => lineage,
+        Err(LineageRegisterError::SelfLink) => {
+            return GatewayError::InvalidRequest(
+                "a credential cannot be its own predecessor".into(),
+            )
+            .into_response();
+        }
+        Err(LineageRegisterError::Cycle) => {
+            return GatewayError::InvalidRequest("predecessor chain would create a cycle".into())
+                .into_response();
+        }
+        Err(LineageRegisterError::BoundExceeded) => {
+            return GatewayError::InvalidRequest(
+                "predecessor chain exceeds the stored bound".into(),
+            )
+            .into_response();
+        }
+    };
+    if let Err(err) = state
+        .tokens
+        .put_lineage(&auth.tenant, &current_subject, &composed)
+        .await
+    {
+        return token_map_unavailable(err).into_response();
+    }
+    Json(json!({
+        "lineage_revision": composed.revision,
+        "predecessor_count": composed.predecessors.len(),
     }))
     .into_response()
 }
@@ -1565,5 +1920,30 @@ mod tests {
         let auth = AuthContext::anonymous();
         let profile = resolve_profile(&config, &auth, Some("secrets_only")).unwrap();
         assert_eq!(profile.name, "secrets_only");
+    }
+
+    #[test]
+    fn context_id_aliases_session_id_and_rejects_conflicts() {
+        assert_eq!(
+            resolve_caller_context_id(Some("context-1".into()), None, false).unwrap(),
+            "context-1"
+        );
+        assert_eq!(
+            resolve_caller_context_id(None, Some("context-1".into()), false).unwrap(),
+            "context-1"
+        );
+        assert_eq!(
+            resolve_caller_context_id(Some("context-1".into()), Some("context-1".into()), false)
+                .unwrap(),
+            "context-1"
+        );
+        let err =
+            resolve_caller_context_id(Some("context-1".into()), Some("context-2".into()), false)
+                .unwrap_err();
+        assert!(matches!(err, GatewayError::InvalidRequest(_)));
+        assert!(resolve_caller_context_id(None, None, false).is_err());
+        assert!(!resolve_caller_context_id(None, None, true)
+            .unwrap()
+            .is_empty());
     }
 }

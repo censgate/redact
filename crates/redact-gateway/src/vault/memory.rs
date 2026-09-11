@@ -18,7 +18,9 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 
-use super::{merge_mappings, session_path, TokenMapError, TokenMapStore};
+use super::{
+    lineage_path, merge_mappings, session_path, CredentialLineage, TokenMapError, TokenMapStore,
+};
 use crate::redact::token::TokenMapping;
 
 /// One session's sealed mappings and when they should disappear.
@@ -35,6 +37,7 @@ struct SessionEntry {
 pub struct MemoryStore {
     ttl: Duration,
     entries: RwLock<HashMap<String, SessionEntry>>,
+    lineage: RwLock<HashMap<String, CredentialLineage>>,
     /// Optional clock override so expiry can be tested without sleeping.
     now: RwLock<Option<DateTime<Utc>>>,
 }
@@ -60,6 +63,7 @@ impl MemoryStore {
         Self {
             ttl,
             entries: RwLock::new(HashMap::new()),
+            lineage: RwLock::new(HashMap::new()),
             now: RwLock::new(None),
         }
     }
@@ -83,6 +87,10 @@ impl MemoryStore {
     fn key(tenant: &str, session: &str) -> String {
         // Fixed synthetic prefix keeps keys aligned with session_path sanitization.
         session_path("_", tenant, session)
+    }
+
+    fn lineage_key(tenant: &str, subject: &str) -> String {
+        lineage_path("_", tenant, subject)
     }
 }
 
@@ -144,6 +152,32 @@ impl TokenMapStore for MemoryStore {
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let key = Self::key(tenant, session);
         self.entries.write().await.remove(&key);
+        Ok(())
+    }
+
+    async fn get_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+    ) -> Result<CredentialLineage, TokenMapError> {
+        let key = Self::lineage_key(tenant, subject);
+        Ok(self
+            .lineage
+            .read()
+            .await
+            .get(&key)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn put_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+        lineage: &CredentialLineage,
+    ) -> Result<(), TokenMapError> {
+        let key = Self::lineage_key(tenant, subject);
+        self.lineage.write().await.insert(key, lineage.clone());
         Ok(())
     }
 

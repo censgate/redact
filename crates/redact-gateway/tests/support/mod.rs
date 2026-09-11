@@ -314,6 +314,16 @@ pub async fn post_json_with_headers(
     request(router, "POST", uri, Some(body), headers).await
 }
 
+/// DELETE a JSON body with extra request headers.
+pub async fn delete_json_with_headers(
+    router: Router,
+    uri: &str,
+    body: Value,
+    headers: &[(&str, &str)],
+) -> TestResponse {
+    request(router, "DELETE", uri, Some(body), headers).await
+}
+
 /// GET a path from the router.
 pub async fn get_path(router: Router, uri: &str) -> TestResponse {
     request(router, "GET", uri, None, &[]).await

@@ -166,6 +166,9 @@ The provider sees `[EMAIL_ADDRESS_1]`. When the model echoes that placeholder, t
 | `GET` | `/v1/models` | Yes | Proxied model list |
 | `POST` | `/v1/redact` | Yes | Redact text without calling a provider |
 | `POST` | `/v1/restore` | Yes | Restore tokens for a session (requires `api_key` or `oidc`; **403** when `auth.mode` is `none`) |
+| `DELETE` | `/v1/vault/context` | Yes | Permanently purge sealed maps for a vault context (current subject plus registered predecessors) |
+| `POST` | `/v1/vault/context/verify` | Yes | Report whether those maps are still present |
+| `POST` | `/v1/credentials/predecessors` | Yes | Register a previous credential so later context erase covers its maps |
 | `GET` | `/v1/compliance/status` | Yes | Effective profiles and runtime summary |
 | `POST` | `/v1/compliance/check` | Yes | Dry-run policy decision (tokens not persisted) |
 

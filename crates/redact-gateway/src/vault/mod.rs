@@ -14,6 +14,8 @@ pub mod kv2;
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::config::{VaultBackend, VaultSettings};
 use crate::redact::token::TokenMapping;
 
@@ -42,6 +44,75 @@ pub enum TokenMapError {
     Disabled,
 }
 
+/// Maximum number of predecessor subjects stored for one credential.
+pub const MAX_PREDECESSOR_SUBJECTS: usize = 32;
+
+/// Durable predecessor subjects for one authenticated credential.
+///
+/// Persistence follows the token-map backend: process-local for `memory`
+/// (lost on restart; suitable for tests), KV v2 for `vault_kv2` (survives
+/// restart), and unavailable when the backend is `off`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CredentialLineage {
+    /// Predecessor subject identifiers, oldest-link first, already transitive.
+    #[serde(default)]
+    pub predecessors: Vec<String>,
+    /// Monotonic revision incremented on each successful register.
+    #[serde(default)]
+    pub revision: u64,
+}
+
+/// Why a predecessor register was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineageRegisterError {
+    /// Current and previous subjects are the same credential.
+    SelfLink,
+    /// The previous chain already includes the current subject.
+    Cycle,
+    /// Deduped transitive list would exceed [`MAX_PREDECESSOR_SUBJECTS`].
+    BoundExceeded,
+}
+
+/// Build the lineage stored for `current_subject` after proving `previous_subject`.
+///
+/// The stored list is `[previous] + predecessors(previous) + existing`,
+/// deduped with order preserved. `current_subject` is never stored in its
+/// own predecessor list.
+pub fn compose_predecessor_lineage(
+    current_subject: &str,
+    current: &CredentialLineage,
+    previous_subject: &str,
+    previous: &CredentialLineage,
+) -> Result<CredentialLineage, LineageRegisterError> {
+    if current_subject == previous_subject {
+        return Err(LineageRegisterError::SelfLink);
+    }
+
+    let mut predecessors =
+        Vec::with_capacity(1 + previous.predecessors.len() + current.predecessors.len());
+    predecessors.push(previous_subject.to_string());
+    predecessors.extend(previous.predecessors.iter().cloned());
+    predecessors.extend(current.predecessors.iter().cloned());
+
+    let mut seen = std::collections::HashSet::new();
+    predecessors.retain(|subject| seen.insert(subject.clone()));
+
+    if predecessors
+        .iter()
+        .any(|subject| subject == current_subject)
+    {
+        return Err(LineageRegisterError::Cycle);
+    }
+    if predecessors.len() > MAX_PREDECESSOR_SUBJECTS {
+        return Err(LineageRegisterError::BoundExceeded);
+    }
+
+    Ok(CredentialLineage {
+        predecessors,
+        revision: current.revision.saturating_add(1),
+    })
+}
+
 /// Persistence for sealed token mappings, keyed by tenant and session.
 #[async_trait::async_trait]
 pub trait TokenMapStore: Send + Sync + std::fmt::Debug {
@@ -61,6 +132,34 @@ pub trait TokenMapStore: Send + Sync + std::fmt::Debug {
 
     /// Forget a session.
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError>;
+
+    /// Permanently forget a session, including every stored version.
+    ///
+    /// Memory backends hard-delete the map. KV v2 backends delete metadata and
+    /// all versions (not `delete_latest`). The off backend returns
+    /// [`TokenMapError::Disabled`]. The default implementation delegates to
+    /// [`Self::delete`].
+    async fn purge(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        self.delete(tenant, session).await
+    }
+
+    /// Load the predecessor lineage for an authenticated subject.
+    ///
+    /// Missing entries are an empty lineage (revision 0). The off backend
+    /// returns [`TokenMapError::Disabled`].
+    async fn get_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+    ) -> Result<CredentialLineage, TokenMapError>;
+
+    /// Persist the predecessor lineage for an authenticated subject.
+    async fn put_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+        lineage: &CredentialLineage,
+    ) -> Result<(), TokenMapError>;
 
     /// Cheap reachability probe used by the readiness endpoint.
     async fn health(&self) -> Result<(), TokenMapError>;
@@ -90,6 +189,23 @@ impl TokenMapStore for DisabledStore {
     }
 
     async fn delete(&self, _tenant: &str, _session: &str) -> Result<(), TokenMapError> {
+        Err(TokenMapError::Disabled)
+    }
+
+    async fn get_lineage(
+        &self,
+        _tenant: &str,
+        _subject: &str,
+    ) -> Result<CredentialLineage, TokenMapError> {
+        Err(TokenMapError::Disabled)
+    }
+
+    async fn put_lineage(
+        &self,
+        _tenant: &str,
+        _subject: &str,
+        _lineage: &CredentialLineage,
+    ) -> Result<(), TokenMapError> {
         Err(TokenMapError::Disabled)
     }
 
@@ -131,6 +247,20 @@ pub fn session_path(prefix: &str, tenant: &str, session: &str) -> String {
         prefix,
         sanitize_path_segment(tenant),
         sanitize_path_segment(session)
+    )
+}
+
+/// Build the storage path for a credential lineage record.
+///
+/// Uses a `_lineage` segment under `prefix` so lineage keys cannot collide
+/// with session maps at `{prefix}/{tenant}/{session}`.
+pub fn lineage_path(prefix: &str, tenant: &str, subject: &str) -> String {
+    let prefix = prefix.trim_matches('/');
+    format!(
+        "{}/_lineage/{}/{}",
+        prefix,
+        sanitize_path_segment(tenant),
+        sanitize_path_segment(subject)
     )
 }
 
@@ -196,6 +326,10 @@ mod tests {
         assert_eq!(
             session_path("/redact-gateway/", "acme", "chat-1"),
             "redact-gateway/acme/chat-1"
+        );
+        assert_eq!(
+            lineage_path("redact-gateway", "acme", "key:abc"),
+            "redact-gateway/_lineage/acme/key%3Aabc"
         );
     }
 
@@ -283,6 +417,20 @@ mod tests {
             store.delete("t", "s").await,
             Err(TokenMapError::Disabled)
         ));
+        assert!(matches!(
+            store.purge("t", "s").await,
+            Err(TokenMapError::Disabled)
+        ));
+        assert!(matches!(
+            store.get_lineage("t", "sub").await,
+            Err(TokenMapError::Disabled)
+        ));
+        assert!(matches!(
+            store
+                .put_lineage("t", "sub", &CredentialLineage::default())
+                .await,
+            Err(TokenMapError::Disabled)
+        ));
         store.health().await.unwrap();
     }
 
@@ -301,6 +449,47 @@ mod tests {
         assert_eq!(
             build_store(&settings).await.unwrap().backend_name(),
             "memory"
+        );
+    }
+
+    #[test]
+    fn compose_lineage_is_transitive_and_rejects_cycles() {
+        let previous = CredentialLineage {
+            predecessors: vec!["caller-c".into()],
+            revision: 1,
+        };
+        let composed = compose_predecessor_lineage(
+            "caller-a",
+            &CredentialLineage::default(),
+            "caller-b",
+            &previous,
+        )
+        .unwrap();
+        assert_eq!(composed.predecessors, vec!["caller-b", "caller-c"]);
+        assert_eq!(composed.revision, 1);
+
+        assert_eq!(
+            compose_predecessor_lineage(
+                "caller-a",
+                &CredentialLineage::default(),
+                "caller-a",
+                &CredentialLineage::default(),
+            ),
+            Err(LineageRegisterError::SelfLink)
+        );
+
+        let looping = CredentialLineage {
+            predecessors: vec!["caller-a".into()],
+            revision: 1,
+        };
+        assert_eq!(
+            compose_predecessor_lineage(
+                "caller-a",
+                &CredentialLineage::default(),
+                "caller-b",
+                &looping,
+            ),
+            Err(LineageRegisterError::Cycle)
         );
     }
 }

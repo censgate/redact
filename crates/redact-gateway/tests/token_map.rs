@@ -8,7 +8,8 @@ use chrono::{Duration, Utc};
 use redact_gateway::config::{VaultAuthMethod, VaultBackend, VaultSettings};
 use redact_gateway::redact::token::{Dek, TokenMapping};
 use redact_gateway::vault::{
-    build_store, session_path, DisabledStore, MemoryStore, TokenMapError, TokenMapStore,
+    build_store, session_path, CredentialLineage, DisabledStore, MemoryStore, TokenMapError,
+    TokenMapStore,
 };
 
 fn mapping(token: &str, sealed: &str) -> TokenMapping {
@@ -87,6 +88,46 @@ async fn memory_delete_forgets_a_session() {
 }
 
 #[tokio::test]
+async fn memory_purge_hard_deletes_the_map() {
+    let store = MemoryStore::new(3600);
+    let (_dek, sealed) = sealed_email("alice@example.com");
+    store
+        .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+        .await
+        .unwrap();
+    store.purge("t", "s").await.unwrap();
+    assert!(store.get("t", "s").await.unwrap().is_empty());
+    store.purge("t", "s").await.unwrap();
+    assert!(store.get("t", "s").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn memory_lineage_round_trip_is_tenant_scoped() {
+    let store = MemoryStore::new(3600);
+    let lineage = CredentialLineage {
+        predecessors: vec!["caller-b".into(), "caller-c".into()],
+        revision: 2,
+    };
+    store
+        .put_lineage("tenant-a", "caller-a", &lineage)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.get_lineage("tenant-a", "caller-a").await.unwrap(),
+        lineage
+    );
+    assert_eq!(
+        store.get_lineage("tenant-b", "caller-a").await.unwrap(),
+        CredentialLineage::default()
+    );
+    assert_eq!(
+        store.get_lineage("tenant-a", "caller-b").await.unwrap(),
+        CredentialLineage::default()
+    );
+}
+
+#[tokio::test]
 async fn memory_ttl_expiry_without_long_sleep() {
     let store = MemoryStore::with_ttl(std::time::Duration::from_secs(60));
     let start = Utc::now();
@@ -116,6 +157,10 @@ async fn disabled_backend_returns_disabled() {
     ));
     assert!(matches!(
         store.delete("t", "s").await,
+        Err(TokenMapError::Disabled)
+    ));
+    assert!(matches!(
+        store.purge("t", "s").await,
         Err(TokenMapError::Disabled)
     ));
     store.health().await.unwrap();
@@ -228,6 +273,10 @@ mod kv2_mock {
         write_attempts: Arc<Mutex<u32>>,
         /// Kubernetes auth logins recorded (role + jwt).
         logins: Arc<Mutex<Vec<(String, String)>>>,
+        /// Paths that received a KV v2 metadata delete (all versions).
+        metadata_deletes: Arc<Mutex<Vec<String>>>,
+        /// Paths that received a KV v2 data (latest-version) delete.
+        data_deletes: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockVaultState {
@@ -432,6 +481,17 @@ mod kv2_mock {
         Path((mount, path)): Path<(String, String)>,
     ) -> impl IntoResponse {
         let key = format!("{mount}/data/{path}");
+        state.data_deletes.lock().await.push(path);
+        state.secrets.lock().await.remove(&key);
+        StatusCode::NO_CONTENT
+    }
+
+    async fn mock_delete_metadata(
+        State(state): State<MockVaultState>,
+        Path((mount, path)): Path<(String, String)>,
+    ) -> impl IntoResponse {
+        let key = format!("{mount}/data/{path}");
+        state.metadata_deletes.lock().await.push(path);
         state.secrets.lock().await.remove(&key);
         StatusCode::NO_CONTENT
     }
@@ -446,6 +506,10 @@ mod kv2_mock {
                 get(mock_read_secret)
                     .post(mock_write_secret)
                     .delete(mock_delete_secret),
+            )
+            .route(
+                "/v1/{mount}/metadata/{*path}",
+                axum::routing::delete(mock_delete_metadata),
             )
             .with_state(state.clone());
 
@@ -718,5 +782,75 @@ mod kv2_mock {
         assert_eq!(logins[0].0, "redact-gateway");
         assert_eq!(logins[0].1, "projected-sa-jwt");
         assert_eq!(store.get("t", "s").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn kv2_purge_deletes_metadata_not_only_latest() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed) = sealed_email("alice@example.com");
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+
+        store.purge("t", "s").await.unwrap();
+        assert!(store.get("t", "s").await.unwrap().is_empty());
+
+        let metadata = state.metadata_deletes.lock().await.clone();
+        assert!(
+            metadata.iter().any(|p| p.contains("t") && p.contains("s")),
+            "purge must hit KV v2 metadata delete, got {metadata:?}"
+        );
+        assert!(
+            state.data_deletes.lock().await.is_empty(),
+            "purge must not use delete_latest"
+        );
+
+        store.purge("t", "s").await.unwrap();
+        assert!(store.get("t", "s").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn kv2_delete_latest_does_not_use_metadata_delete() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed) = sealed_email("alice@example.com");
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+        store.delete("t", "s").await.unwrap();
+        assert!(store.get("t", "s").await.unwrap().is_empty());
+        assert!(
+            !state.data_deletes.lock().await.is_empty(),
+            "delete should hit the data path"
+        );
+        assert!(
+            state.metadata_deletes.lock().await.is_empty(),
+            "delete_latest must not delete metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn kv2_lineage_round_trip_against_mock() {
+        let (addr, _) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let lineage = CredentialLineage {
+            predecessors: vec!["caller-b".into()],
+            revision: 1,
+        };
+        store
+            .put_lineage("default", "caller-a", &lineage)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get_lineage("default", "caller-a").await.unwrap(),
+            lineage
+        );
+        assert_eq!(
+            store.get_lineage("default", "caller-b").await.unwrap(),
+            CredentialLineage::default()
+        );
     }
 }
