@@ -433,6 +433,87 @@ async fn predecessor_register_then_transitive_forget_after_rotation() {
 }
 
 #[tokio::test]
+async fn later_child_rotation_is_visible_to_existing_parent() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let router = router_for(memory_tokenize_callers(
+        &upstream,
+        &["caller-a", "caller-b", "caller-c"],
+    ))
+    .await;
+
+    // Parent registers first, then the child rotates — erase as A must still
+    // cover C even though A's stored edge is only B.
+    let parent = post_json_with_headers(
+        router.clone(),
+        "/v1/credentials/predecessors",
+        json!({}),
+        &[
+            ("authorization", "Bearer caller-a"),
+            ("x-predecessor-authorization", "Bearer caller-b"),
+        ],
+    )
+    .await;
+    assert_eq!(parent.status, StatusCode::OK);
+    assert_eq!(parent.json()["predecessor_count"], 1);
+
+    let child = post_json_with_headers(
+        router.clone(),
+        "/v1/credentials/predecessors",
+        json!({}),
+        &[
+            ("authorization", "Bearer caller-b"),
+            ("x-predecessor-authorization", "Bearer caller-c"),
+        ],
+    )
+    .await;
+    assert_eq!(child.status, StatusCode::OK);
+    assert_eq!(child.json()["predecessor_count"], 1);
+
+    for key in ["caller-a", "caller-b", "caller-c"] {
+        let minted = post_auth(
+            router.clone(),
+            "/v1/redact",
+            json!({
+                "text": "mail alice@example.com",
+                "vault": {"context_id": "context-1"}
+            }),
+            key,
+        )
+        .await;
+        assert_eq!(minted.status, StatusCode::OK, "mint as {key}");
+    }
+
+    let erased = delete_auth(
+        router.clone(),
+        "/v1/vault/context",
+        context_body("context-1"),
+        "caller-a",
+    )
+    .await;
+    assert_eq!(erased.status, StatusCode::OK);
+    assert_eq!(erased.json()["verified"], true);
+    assert_eq!(erased.json()["predecessor_count"], 2);
+
+    for key in ["caller-a", "caller-b", "caller-c"] {
+        let restored = post_auth(
+            router.clone(),
+            "/v1/restore",
+            json!({
+                "text": "[EMAIL_ADDRESS_1]",
+                "vault": {"context_id": "context-1"}
+            }),
+            key,
+        )
+        .await;
+        assert_eq!(
+            restored.json()["restored"],
+            0,
+            "maps for {key} must be gone"
+        );
+    }
+}
+
+#[tokio::test]
 async fn lineage_mismatch_does_not_purge_unlinked_subject() {
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let router = router_for(memory_tokenize_callers(

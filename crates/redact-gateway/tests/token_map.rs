@@ -153,7 +153,8 @@ async fn memory_register_predecessor_is_serialized() {
 #[tokio::test]
 async fn lineage_storage_path_omits_raw_subject() {
     let path = lineage_tenant_path("redact-gateway", "acme");
-    assert_eq!(path, "redact-gateway/_lineage/acme");
+    assert_eq!(path, "redact-gateway/_lineage/acme/graph");
+    assert_ne!(path, session_path("redact-gateway", "_lineage", "acme"));
     assert!(!path.contains('@'));
     let digest = subject_path_digest("user@example.com");
     assert!(!path.contains(&digest));

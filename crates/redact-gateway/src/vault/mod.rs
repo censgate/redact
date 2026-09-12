@@ -101,6 +101,75 @@ pub struct TenantLineageGraph {
     pub subjects: BTreeMap<String, CredentialLineage>,
 }
 
+/// Walk the tenant graph from `subject` along stored **direct** edges.
+///
+/// The result is a bounded, cycle-checked transitive closure. `subject` is
+/// never included. A cycle back to `subject` is [`LineageRegisterError::Cycle`].
+pub fn subject_closure(
+    graph: &TenantLineageGraph,
+    subject: &str,
+) -> Result<Vec<String>, LineageRegisterError> {
+    let mut predecessors = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<String> = graph
+        .subjects
+        .get(subject)
+        .map(|row| row.predecessors.iter().cloned().collect())
+        .unwrap_or_default();
+
+    while let Some(next) = queue.pop_front() {
+        if next == subject {
+            return Err(LineageRegisterError::Cycle);
+        }
+        if !seen.insert(next.clone()) {
+            continue;
+        }
+        predecessors.push(next.clone());
+        if predecessors.len() > MAX_PREDECESSOR_SUBJECTS {
+            return Err(LineageRegisterError::BoundExceeded);
+        }
+        if let Some(row) = graph.subjects.get(&next) {
+            queue.extend(row.predecessors.iter().cloned());
+        }
+    }
+    Ok(predecessors)
+}
+
+/// Record a direct predecessor edge and return the current subject's closure.
+///
+/// Ancestors keep their own direct edges; erase/verify recompute the full
+/// closure so `A→B` then `B→C` still covers `C` when erasing as `A`.
+pub fn register_direct_predecessor(
+    graph: &mut TenantLineageGraph,
+    current_subject: &str,
+    previous_subject: &str,
+) -> Result<CredentialLineage, LineageRegisterError> {
+    if current_subject == previous_subject {
+        return Err(LineageRegisterError::SelfLink);
+    }
+    if subject_closure(graph, previous_subject)?
+        .iter()
+        .any(|subject| subject == current_subject)
+    {
+        return Err(LineageRegisterError::Cycle);
+    }
+
+    let current = graph
+        .subjects
+        .entry(current_subject.to_string())
+        .or_default();
+    if !current.predecessors.iter().any(|s| s == previous_subject) {
+        current.predecessors.push(previous_subject.to_string());
+    }
+    current.revision = current.revision.saturating_add(1);
+    let revision = current.revision;
+    let predecessors = subject_closure(graph, current_subject)?;
+    Ok(CredentialLineage {
+        predecessors,
+        revision,
+    })
+}
+
 /// Build the lineage stored for `current_subject` after proving `previous_subject`.
 ///
 /// The stored list is `[previous] + predecessors(previous) + existing`,
@@ -327,7 +396,11 @@ pub fn session_path(prefix: &str, tenant: &str, session: &str) -> String {
 /// subject is not placed in the path (OpenBao/Vault audit logs the URL).
 pub fn lineage_tenant_path(prefix: &str, tenant: &str) -> String {
     let prefix = prefix.trim_matches('/');
-    format!("{}/_lineage/{}", prefix, sanitize_path_segment(tenant))
+    format!(
+        "{}/_lineage/{}/graph",
+        prefix,
+        sanitize_path_segment(tenant)
+    )
 }
 
 /// Hex SHA-256 of a credential subject for logs or leftover path segments.
@@ -406,7 +479,11 @@ mod tests {
         );
         assert_eq!(
             lineage_tenant_path("redact-gateway", "acme"),
-            "redact-gateway/_lineage/acme"
+            "redact-gateway/_lineage/acme/graph"
+        );
+        assert_ne!(
+            lineage_tenant_path("p", "acme"),
+            session_path("p", "_lineage", "acme")
         );
         let digest = subject_path_digest("user@example.com");
         assert_eq!(digest.len(), 64);
@@ -552,6 +629,16 @@ mod tests {
         .unwrap();
         assert_eq!(composed.predecessors, vec!["caller-b", "caller-c"]);
         assert_eq!(composed.revision, 1);
+
+        let mut graph = TenantLineageGraph::default();
+        let first = register_direct_predecessor(&mut graph, "caller-a", "caller-b").unwrap();
+        assert_eq!(first.predecessors, vec!["caller-b"]);
+        let mid = register_direct_predecessor(&mut graph, "caller-b", "caller-c").unwrap();
+        assert_eq!(mid.predecessors, vec!["caller-c"]);
+        assert_eq!(
+            subject_closure(&graph, "caller-a").unwrap(),
+            vec!["caller-b", "caller-c"]
+        );
 
         assert_eq!(
             compose_predecessor_lineage(

@@ -27,8 +27,9 @@ use vaultrs::error::ClientError;
 use vaultrs::kv2;
 
 use super::{
-    compose_predecessor_lineage, lineage_tenant_path, merge_mappings, session_path,
-    CredentialLineage, LineagePersistError, TenantLineageGraph, TokenMapError, TokenMapStore,
+    lineage_tenant_path, merge_mappings, register_direct_predecessor, session_path,
+    subject_closure, CredentialLineage, LineagePersistError, TenantLineageGraph, TokenMapError,
+    TokenMapStore,
 };
 use crate::config::{VaultAuthMethod, VaultSettings};
 use crate::redact::token::TokenMapping;
@@ -424,7 +425,17 @@ impl TokenMapStore for Kv2Store {
     ) -> Result<CredentialLineage, TokenMapError> {
         let path = self.lineage_storage_path(tenant);
         let (graph, _) = self.read_graph_for_cas(&path).await?;
-        Ok(graph.subjects.get(subject).cloned().unwrap_or_default())
+        let revision = graph
+            .subjects
+            .get(subject)
+            .map(|row| row.revision)
+            .unwrap_or(0);
+        let predecessors = subject_closure(&graph, subject)
+            .map_err(|err| TokenMapError::Backend(err.to_string()))?;
+        Ok(CredentialLineage {
+            predecessors,
+            revision,
+        })
     }
 
     async fn put_lineage(
@@ -458,26 +469,11 @@ impl TokenMapStore for Kv2Store {
         let current_subject = current_subject.to_string();
         let previous_subject = previous_subject.to_string();
         self.put_graph_cas(tenant, move |graph| {
-            let current = graph
-                .subjects
-                .get(&current_subject)
-                .cloned()
-                .unwrap_or_default();
-            let previous = graph
-                .subjects
-                .get(&previous_subject)
-                .cloned()
-                .unwrap_or_default();
-            let composed = compose_predecessor_lineage(
+            Ok(register_direct_predecessor(
+                graph,
                 &current_subject,
-                &current,
                 &previous_subject,
-                &previous,
-            )?;
-            graph
-                .subjects
-                .insert(current_subject.clone(), composed.clone());
-            Ok(composed)
+            )?)
         })
         .await
     }

@@ -20,8 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `memory` and durable on `vault_kv2`; `off` returns **503**.
   Verify uses backend metadata presence (not an empty live mapping list).
   Predecessor register CAS-updates a tenant-scoped graph so concurrent
-  rotations cannot drop a subject. New erase/verify/predecessor bodies reject
-  unknown fields.
+  rotations cannot drop a subject. Stored edges are direct; erase/verify walk
+  the live closure so a later child rotation is visible to existing parents.
+  Lineage lives at `{prefix}/_lineage/{tenant}/graph`. New erase/verify/
+  predecessor bodies reject unknown fields.
 
 ## [0.12.3] - 2026-09-06
 

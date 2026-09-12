@@ -201,7 +201,7 @@ Lineage persistence follows the token-map backend:
 | Backend | Lineage durability |
 |---------|--------------------|
 | `memory` | Process-local. Lost on restart. Suitable for tests. |
-| `vault_kv2` | One tenant graph at `{prefix}/_lineage/{tenant}` (CAS). Subjects are not placed in the path. Survives restart. |
+| `vault_kv2` | One tenant graph at `{prefix}/_lineage/{tenant}/graph` (CAS). Subjects are not placed in the path. Survives restart. |
 | `off` | Register, erase, and verify return **503**. |
 
 ```bash
