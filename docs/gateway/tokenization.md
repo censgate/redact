@@ -190,7 +190,7 @@ curl -s -X DELETE http://127.0.0.1:8080/v1/vault/context \
 }
 ```
 
-`state` is `present` or `absent`. `verified` is true when every map in the closure is gone. Both calls are idempotent.
+`state` is `present` or `absent`. `verified` is true when every map in the closure is gone. Presence is metadata (KV v2) or an unexpired entry (memory), not an empty live mapping list, so expired or soft-deleted historical versions stay `present` until `purge`. Both calls are idempotent.
 
 ## Credential predecessors
 
@@ -201,7 +201,7 @@ Lineage persistence follows the token-map backend:
 | Backend | Lineage durability |
 |---------|--------------------|
 | `memory` | Process-local. Lost on restart. Suitable for tests. |
-| `vault_kv2` | Written next to session maps under `{prefix}/_lineage/{tenant}/{subject}`. Survives restart. |
+| `vault_kv2` | One tenant graph at `{prefix}/_lineage/{tenant}` (CAS). Subjects are not placed in the path. Survives restart. |
 | `off` | Register, erase, and verify return **503**. |
 
 ```bash

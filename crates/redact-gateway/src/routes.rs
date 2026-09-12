@@ -40,8 +40,7 @@ use crate::redact::{content_digest, RedactError, RedactionContext, RedactionOutc
 use crate::stream::transform_buffered_sse;
 use crate::telemetry::{semconv, spans, Telemetry};
 use crate::vault::{
-    compose_predecessor_lineage, CredentialLineage, LineageRegisterError, TokenMapError,
-    TokenMapStore,
+    CredentialLineage, LineagePersistError, LineageRegisterError, TokenMapError, TokenMapStore,
 };
 
 /// Shared handler state.
@@ -1196,6 +1195,7 @@ async fn models(State(state): State<AppState>, headers: HeaderMap) -> Response {
 /// `context_id` is an alias of `session_id`. Callers must not send a subject;
 /// the authenticated credential is the subject.
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct VaultContextRequest {
     /// Caller-facing vault context identifier (alias of `session_id`).
     #[serde(default)]
@@ -1472,6 +1472,7 @@ async fn restore_endpoint(
 
 /// Body for `DELETE /v1/vault/context` and `POST /v1/vault/context/verify`.
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct VaultContextBody {
     #[serde(default)]
     vault: Option<VaultContextRequest>,
@@ -1483,11 +1484,16 @@ struct VaultContextBody {
 
 /// Body for `POST /v1/credentials/predecessors`. No subject fields are accepted.
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct PredecessorRegisterRequest {
     #[serde(default)]
     subject: Option<Value>,
     #[serde(default)]
     subjects: Option<Value>,
+}
+
+fn parse_json_body<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, GatewayError> {
+    serde_json::from_value(value).map_err(|err| GatewayError::InvalidRequest(err.to_string()))
 }
 
 fn reject_subject_fields(
@@ -1607,12 +1613,12 @@ async fn maps_present(
 ) -> Result<bool, GatewayError> {
     for subject in subjects {
         let key = subject_bound_session_key(context_id, subject);
-        let mappings = state
+        let present = state
             .tokens
-            .get(tenant, &key)
+            .exists(tenant, &key)
             .await
             .map_err(token_map_unavailable)?;
-        if !mappings.is_empty() {
+        if present {
             return Ok(true);
         }
     }
@@ -1622,8 +1628,12 @@ async fn maps_present(
 async fn erase_vault_context(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
-    Json(body): Json<VaultContextBody>,
+    Json(raw): Json<Value>,
 ) -> Response {
+    let body = match parse_json_body::<VaultContextBody>(raw) {
+        Ok(body) => body,
+        Err(err) => return err.into_response(),
+    };
     if let Err(err) = require_authenticated_subject(&auth) {
         return err.into_response();
     }
@@ -1656,8 +1666,12 @@ async fn erase_vault_context(
 async fn verify_vault_context(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
-    Json(body): Json<VaultContextBody>,
+    Json(raw): Json<Value>,
 ) -> Response {
+    let body = match parse_json_body::<VaultContextBody>(raw) {
+        Ok(body) => body,
+        Err(err) => return err.into_response(),
+    };
     if let Err(err) = require_authenticated_subject(&auth) {
         return err.into_response();
     }
@@ -1696,8 +1710,12 @@ async fn register_predecessors(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
-    Json(body): Json<PredecessorRegisterRequest>,
+    Json(raw): Json<Value>,
 ) -> Response {
+    let body = match parse_json_body::<PredecessorRegisterRequest>(raw) {
+        Ok(body) => body,
+        Err(err) => return err.into_response(),
+    };
     if let Err(err) = reject_subject_fields(body.subject.as_ref(), body.subjects.as_ref()) {
         return err.into_response();
     }
@@ -1727,53 +1745,30 @@ async fn register_predecessors(
             .into_response();
     }
 
-    let current_lineage = match state
+    let composed = match state
         .tokens
-        .get_lineage(&auth.tenant, &current_subject)
+        .register_predecessor(&auth.tenant, &current_subject, &previous_subject)
         .await
     {
         Ok(lineage) => lineage,
-        Err(err) => return token_map_unavailable(err).into_response(),
-    };
-    let previous_lineage = match state
-        .tokens
-        .get_lineage(&auth.tenant, &previous_subject)
-        .await
-    {
-        Ok(lineage) => lineage,
-        Err(err) => return token_map_unavailable(err).into_response(),
-    };
-    let composed = match compose_predecessor_lineage(
-        &current_subject,
-        &current_lineage,
-        &previous_subject,
-        &previous_lineage,
-    ) {
-        Ok(lineage) => lineage,
-        Err(LineageRegisterError::SelfLink) => {
+        Err(LineagePersistError::Register(LineageRegisterError::SelfLink)) => {
             return GatewayError::InvalidRequest(
                 "a credential cannot be its own predecessor".into(),
             )
             .into_response();
         }
-        Err(LineageRegisterError::Cycle) => {
+        Err(LineagePersistError::Register(LineageRegisterError::Cycle)) => {
             return GatewayError::InvalidRequest("predecessor chain would create a cycle".into())
                 .into_response();
         }
-        Err(LineageRegisterError::BoundExceeded) => {
+        Err(LineagePersistError::Register(LineageRegisterError::BoundExceeded)) => {
             return GatewayError::InvalidRequest(
                 "predecessor chain exceeds the stored bound".into(),
             )
             .into_response();
         }
+        Err(LineagePersistError::Store(err)) => return token_map_unavailable(err).into_response(),
     };
-    if let Err(err) = state
-        .tokens
-        .put_lineage(&auth.tenant, &current_subject, &composed)
-        .await
-    {
-        return token_map_unavailable(err).into_response();
-    }
     Json(json!({
         "lineage_revision": composed.revision,
         "predecessor_count": composed.predecessors.len(),

@@ -12,14 +12,15 @@
 //! testing only; production multi-replica deployments should use the KV v2
 //! backend.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 
 use super::{
-    lineage_path, merge_mappings, session_path, CredentialLineage, TokenMapError, TokenMapStore,
+    compose_predecessor_lineage, merge_mappings, session_path, CredentialLineage,
+    LineagePersistError, TokenMapError, TokenMapStore,
 };
 use crate::redact::token::TokenMapping;
 
@@ -37,7 +38,8 @@ struct SessionEntry {
 pub struct MemoryStore {
     ttl: Duration,
     entries: RwLock<HashMap<String, SessionEntry>>,
-    lineage: RwLock<HashMap<String, CredentialLineage>>,
+    /// Tenant → subject → lineage. One lock serializes predecessor register.
+    lineage: RwLock<HashMap<String, BTreeMap<String, CredentialLineage>>>,
     /// Optional clock override so expiry can be tested without sleeping.
     now: RwLock<Option<DateTime<Utc>>>,
 }
@@ -89,8 +91,8 @@ impl MemoryStore {
         session_path("_", tenant, session)
     }
 
-    fn lineage_key(tenant: &str, subject: &str) -> String {
-        lineage_path("_", tenant, subject)
+    fn lineage_tenant_key(tenant: &str) -> String {
+        tenant.to_string()
     }
 }
 
@@ -149,6 +151,10 @@ impl TokenMapStore for MemoryStore {
         }
     }
 
+    async fn exists(&self, tenant: &str, session: &str) -> Result<bool, TokenMapError> {
+        Ok(!self.get(tenant, session).await?.is_empty())
+    }
+
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let key = Self::key(tenant, session);
         self.entries.write().await.remove(&key);
@@ -160,13 +166,13 @@ impl TokenMapStore for MemoryStore {
         tenant: &str,
         subject: &str,
     ) -> Result<CredentialLineage, TokenMapError> {
-        let key = Self::lineage_key(tenant, subject);
+        let tenant_key = Self::lineage_tenant_key(tenant);
         Ok(self
             .lineage
             .read()
             .await
-            .get(&key)
-            .cloned()
+            .get(&tenant_key)
+            .and_then(|graph| graph.get(subject).cloned())
             .unwrap_or_default())
     }
 
@@ -176,9 +182,30 @@ impl TokenMapStore for MemoryStore {
         subject: &str,
         lineage: &CredentialLineage,
     ) -> Result<(), TokenMapError> {
-        let key = Self::lineage_key(tenant, subject);
-        self.lineage.write().await.insert(key, lineage.clone());
+        let tenant_key = Self::lineage_tenant_key(tenant);
+        let mut guard = self.lineage.write().await;
+        guard
+            .entry(tenant_key)
+            .or_default()
+            .insert(subject.to_string(), lineage.clone());
         Ok(())
+    }
+
+    async fn register_predecessor(
+        &self,
+        tenant: &str,
+        current_subject: &str,
+        previous_subject: &str,
+    ) -> Result<CredentialLineage, LineagePersistError> {
+        let tenant_key = Self::lineage_tenant_key(tenant);
+        let mut guard = self.lineage.write().await;
+        let graph = guard.entry(tenant_key).or_default();
+        let current = graph.get(current_subject).cloned().unwrap_or_default();
+        let previous = graph.get(previous_subject).cloned().unwrap_or_default();
+        let composed =
+            compose_predecessor_lineage(current_subject, &current, previous_subject, &previous)?;
+        graph.insert(current_subject.to_string(), composed.clone());
+        Ok(composed)
     }
 
     async fn health(&self) -> Result<(), TokenMapError> {

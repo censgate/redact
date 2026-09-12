@@ -503,3 +503,43 @@ async fn proof_header_is_not_echoed_on_failure() {
         response.body
     );
 }
+
+#[tokio::test]
+async fn erase_verify_and_predecessor_reject_unknown_fields() {
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let router = router_for(memory_tokenize_callers(
+        &upstream,
+        &["caller-a", "caller-b"],
+    ))
+    .await;
+
+    let erase = delete_auth(
+        router.clone(),
+        "/v1/vault/context",
+        json!({"vault":{"context_id":"context-1"},"subject_id":"foreign"}),
+        "caller-a",
+    )
+    .await;
+    assert_eq!(erase.status, StatusCode::BAD_REQUEST);
+
+    let verify = post_auth(
+        router.clone(),
+        "/v1/vault/context/verify",
+        json!({"vault":{"context_id":"context-1","tenant":"other"}}),
+        "caller-a",
+    )
+    .await;
+    assert_eq!(verify.status, StatusCode::BAD_REQUEST);
+
+    let register = post_json_with_headers(
+        router,
+        "/v1/credentials/predecessors",
+        json!({"subject_id":"foreign"}),
+        &[
+            ("authorization", "Bearer caller-a"),
+            ("x-predecessor-authorization", "Bearer caller-b"),
+        ],
+    )
+    .await;
+    assert_eq!(register.status, StatusCode::BAD_REQUEST);
+}
