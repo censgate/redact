@@ -147,14 +147,9 @@ pub fn register_direct_predecessor(
     if current_subject == previous_subject {
         return Err(LineageRegisterError::SelfLink);
     }
-    if subject_closure(graph, previous_subject)?
-        .iter()
-        .any(|subject| subject == current_subject)
-    {
-        return Err(LineageRegisterError::Cycle);
-    }
 
-    let current = graph
+    let mut candidate = graph.clone();
+    let current = candidate
         .subjects
         .entry(current_subject.to_string())
         .or_default();
@@ -162,8 +157,18 @@ pub fn register_direct_predecessor(
         current.predecessors.push(previous_subject.to_string());
     }
     current.revision = current.revision.saturating_add(1);
-    let revision = current.revision;
-    let predecessors = subject_closure(graph, current_subject)?;
+
+    for subject in candidate.subjects.keys() {
+        subject_closure(&candidate, subject)?;
+    }
+
+    let revision = candidate
+        .subjects
+        .get(current_subject)
+        .map(|row| row.revision)
+        .unwrap_or(0);
+    let predecessors = subject_closure(&candidate, current_subject)?;
+    *graph = candidate;
     Ok(CredentialLineage {
         predecessors,
         revision,
@@ -639,6 +644,25 @@ mod tests {
             subject_closure(&graph, "caller-a").unwrap(),
             vec!["caller-b", "caller-c"]
         );
+
+        let mut saturated = TenantLineageGraph::default();
+        for i in 0..MAX_PREDECESSOR_SUBJECTS {
+            register_direct_predecessor(&mut saturated, "caller-a", &format!("caller-{i}"))
+                .unwrap();
+        }
+        assert_eq!(
+            subject_closure(&saturated, "caller-a").unwrap().len(),
+            MAX_PREDECESSOR_SUBJECTS
+        );
+        assert_eq!(
+            register_direct_predecessor(&mut saturated, "caller-0", "caller-extra"),
+            Err(LineageRegisterError::BoundExceeded)
+        );
+        assert_eq!(
+            subject_closure(&saturated, "caller-a").unwrap().len(),
+            MAX_PREDECESSOR_SUBJECTS
+        );
+        assert!(saturated.subjects.get("caller-0").is_none());
 
         assert_eq!(
             compose_predecessor_lineage(
