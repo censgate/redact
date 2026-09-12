@@ -154,6 +154,73 @@ curl -s http://127.0.0.1:8080/v1/restore \
 
 Requires a non-`off` token map backend. The caller's tenant and subject-bound session key scope the lookup.
 
+`session_id` and `vault.context_id` are aliases. If both are set they must be equal; otherwise the request is rejected with **400**. The response always echoes `session_id` (the caller-facing id). Storage is unchanged: `SHA-256(subject ‖ 0x00 ‖ session_id or context_id)`.
+
+```bash
+curl -s http://127.0.0.1:8080/v1/restore \
+  -H 'authorization: Bearer dev-key' \
+  -H 'content-type: application/json' \
+  -d '{
+    "vault": {"context_id": "conversation-42"},
+    "text": "We emailed [EMAIL_ADDRESS_1] already."
+  }'
+```
+
+## Vault context erase
+
+`DELETE /v1/vault/context` permanently removes sealed maps for one caller-facing context id. It iterates the current authenticated subject and that subject's durable predecessor list, then `purge`s each subject-bound map (KV v2 deletes metadata and all versions; memory hard-deletes; `off` returns **503**).
+
+`POST /v1/vault/context/verify` uses the same body and subject closure and reports whether any of those maps remain.
+
+Neither endpoint accepts a subject in the body. The authenticated credential is the subject.
+
+```bash
+curl -s -X DELETE http://127.0.0.1:8080/v1/vault/context \
+  -H 'authorization: Bearer current-key' \
+  -H 'content-type: application/json' \
+  -d '{"vault":{"context_id":"conversation-42"}}'
+```
+
+```json
+{
+  "state": "absent",
+  "verified": true,
+  "lineage_revision": 1,
+  "predecessor_count": 1
+}
+```
+
+`state` is `present` or `absent`. `verified` is true when every map in the closure is gone. Presence is metadata (KV v2) or an unexpired entry (memory), not an empty live mapping list, so expired or soft-deleted historical versions stay `present` until `purge`. Both calls are idempotent.
+
+## Credential predecessors
+
+`POST /v1/credentials/predecessors` records that the `Authorization` credential succeeds a previous one, proven by `X-Predecessor-Authorization: Bearer <previous>`. Subjects are never taken from the body. Both credentials must authenticate and share a tenant. Self-links and cycles are rejected. The stored list is `[previous] + predecessors(previous)` unioned with any list already stored for the current credential, deduped, and capped.
+
+Lineage persistence follows the token-map backend:
+
+| Backend | Lineage durability |
+|---------|--------------------|
+| `memory` | Process-local. Lost on restart. Suitable for tests. |
+| `vault_kv2` | One tenant graph at `{prefix}/_lineage/{tenant}/graph` (CAS). Subjects are not placed in the path. Survives restart. |
+| `off` | Register, erase, and verify return **503**. |
+
+```bash
+curl -s http://127.0.0.1:8080/v1/credentials/predecessors \
+  -H 'authorization: Bearer current-key' \
+  -H 'x-predecessor-authorization: Bearer previous-key' \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+```json
+{
+  "lineage_revision": 1,
+  "predecessor_count": 1
+}
+```
+
+The proof header is not logged.
+
 ## Fail-closed behavior
 
 When a profile has `fail_closed: true` (the bundled default for traffic-handling profiles):

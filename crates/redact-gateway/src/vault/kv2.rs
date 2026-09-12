@@ -26,7 +26,11 @@ use vaultrs::client::{Client, VaultClient, VaultClientSettingsBuilder};
 use vaultrs::error::ClientError;
 use vaultrs::kv2;
 
-use super::{merge_mappings, session_path, TokenMapError, TokenMapStore};
+use super::{
+    lineage_tenant_path, merge_mappings, register_direct_predecessor, session_path,
+    subject_closure, CredentialLineage, LineagePersistError, TenantLineageGraph, TokenMapError,
+    TokenMapStore,
+};
 use crate::config::{VaultAuthMethod, VaultSettings};
 use crate::redact::token::TokenMapping;
 
@@ -149,6 +153,82 @@ impl Kv2Store {
 
     fn path(&self, tenant: &str, session: &str) -> String {
         session_path(&self.path_prefix, tenant, session)
+    }
+
+    fn lineage_storage_path(&self, tenant: &str) -> String {
+        lineage_tenant_path(&self.path_prefix, tenant)
+    }
+
+    async fn metadata_exists(&self, path: &str) -> Result<bool, TokenMapError> {
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        match kv2::read_metadata(&inner.client, &self.mount, path).await {
+            Ok(_) => Ok(true),
+            Err(ClientError::APIError { code: 404, .. }) => Ok(false),
+            Err(err) => Err(map_client_error(err)),
+        }
+    }
+
+    async fn read_graph_for_cas(
+        &self,
+        path: &str,
+    ) -> Result<(TenantLineageGraph, u32), TokenMapError> {
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        let endpoint = ReadSecretRequest::builder()
+            .mount(self.mount.as_str())
+            .path(path)
+            .build()
+            .map_err(|e| TokenMapError::Backend(format!("invalid vault read request: {e}")))?;
+
+        let response: ReadSecretResponse =
+            match api::exec_with_result(&inner.client, endpoint).await {
+                Ok(res) => res,
+                Err(ClientError::APIError { code: 404, .. }) => {
+                    return Ok((TenantLineageGraph::default(), 0))
+                }
+                Err(err) => return Err(map_client_error(err)),
+            };
+
+        let cas = version_to_cas(response.metadata.version)?;
+        let graph: TenantLineageGraph = serde_json::value::from_value(response.data)
+            .map_err(|e| TokenMapError::Backend(format!("invalid vault lineage payload: {e}")))?;
+        Ok((graph, cas))
+    }
+
+    async fn put_graph_cas(
+        &self,
+        tenant: &str,
+        mutate: impl Fn(&mut TenantLineageGraph) -> Result<CredentialLineage, LineagePersistError>,
+    ) -> Result<CredentialLineage, LineagePersistError> {
+        let path = self.lineage_storage_path(tenant);
+        let mut last_cas_error = None;
+        for attempt in 1..=PUT_CAS_ATTEMPTS {
+            let (mut graph, cas) = self.read_graph_for_cas(&path).await?;
+            let result = mutate(&mut graph)?;
+            let options = SetSecretRequestOptions { cas };
+            let write = {
+                self.ensure_fresh_token().await?;
+                let inner = self.inner.read().await;
+                kv2::set_with_options(&inner.client, &self.mount, &path, &graph, options).await
+            };
+            match write {
+                Ok(_) => return Ok(result),
+                Err(err) if is_cas_conflict(&err) => {
+                    last_cas_error = Some(err.to_string());
+                    if attempt == PUT_CAS_ATTEMPTS {
+                        break;
+                    }
+                    tokio::time::sleep(cas_backoff(attempt)).await;
+                }
+                Err(err) => return Err(map_client_error(err).into()),
+            }
+        }
+        Err(TokenMapError::Backend(format!(
+            "vault KV v2 lineage compare-and-set conflict after {PUT_CAS_ATTEMPTS} attempts: {}",
+            last_cas_error.unwrap_or_else(|| "unknown check-and-set failure".to_string())
+        ))
+        .into())
     }
 
     fn token_still_valid(inner: &Inner) -> bool {
@@ -312,6 +392,10 @@ impl TokenMapStore for Kv2Store {
             .unwrap_or_default())
     }
 
+    async fn exists(&self, tenant: &str, session: &str) -> Result<bool, TokenMapError> {
+        self.metadata_exists(&self.path(tenant, session)).await
+    }
+
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let path = self.path(tenant, session);
         self.ensure_fresh_token().await?;
@@ -321,6 +405,77 @@ impl TokenMapStore for Kv2Store {
             Err(ClientError::APIError { code: 404, .. }) => Ok(()),
             Err(err) => Err(map_client_error(err)),
         }
+    }
+
+    async fn purge(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let path = self.path(tenant, session);
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        match kv2::delete_metadata(&inner.client, &self.mount, &path).await {
+            Ok(()) => Ok(()),
+            Err(ClientError::APIError { code: 404, .. }) => Ok(()),
+            Err(err) => Err(map_client_error(err)),
+        }
+    }
+
+    async fn get_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+    ) -> Result<CredentialLineage, TokenMapError> {
+        let path = self.lineage_storage_path(tenant);
+        let (graph, _) = self.read_graph_for_cas(&path).await?;
+        let revision = graph
+            .subjects
+            .get(subject)
+            .map(|row| row.revision)
+            .unwrap_or(0);
+        let predecessors = subject_closure(&graph, subject)
+            .map_err(|err| TokenMapError::Backend(err.to_string()))?;
+        Ok(CredentialLineage {
+            predecessors,
+            revision,
+        })
+    }
+
+    async fn put_lineage(
+        &self,
+        tenant: &str,
+        subject: &str,
+        lineage: &CredentialLineage,
+    ) -> Result<(), TokenMapError> {
+        let subject = subject.to_string();
+        let lineage = lineage.clone();
+        self.put_graph_cas(tenant, move |graph| {
+            graph.subjects.insert(subject.clone(), lineage.clone());
+            Ok(lineage.clone())
+        })
+        .await
+        .map(|_| ())
+        .map_err(|err| match err {
+            LineagePersistError::Store(store) => store,
+            LineagePersistError::Register(_) => {
+                TokenMapError::Backend("lineage compose failed during put_lineage".to_string())
+            }
+        })
+    }
+
+    async fn register_predecessor(
+        &self,
+        tenant: &str,
+        current_subject: &str,
+        previous_subject: &str,
+    ) -> Result<CredentialLineage, LineagePersistError> {
+        let current_subject = current_subject.to_string();
+        let previous_subject = previous_subject.to_string();
+        self.put_graph_cas(tenant, move |graph| {
+            Ok(register_direct_predecessor(
+                graph,
+                &current_subject,
+                &previous_subject,
+            )?)
+        })
+        .await
     }
 
     async fn health(&self) -> Result<(), TokenMapError> {

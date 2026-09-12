@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `vault.context_id` on `POST /v1/redact` and `POST /v1/restore` as an
+  alias of `session_id`. If both are set and differ the request is **400**.
+  Responses still echo `session_id`. Storage keying is unchanged.
+- `TokenMapStore::purge` permanently deletes a session (KV v2 metadata + all
+  versions; memory hard-delete). `DELETE /v1/vault/context` and
+  `POST /v1/vault/context/verify` iterate the current subject plus durable
+  predecessor closure. `POST /v1/credentials/predecessors` records a previous
+  credential via `X-Predecessor-Authorization`. Lineage is process-local for
+  `memory` and durable on `vault_kv2`; `off` returns **503**.
+  Verify uses backend metadata presence (not an empty live mapping list).
+  Predecessor register CAS-updates a tenant-scoped graph so concurrent
+  rotations cannot drop a subject. Stored edges are direct; erase/verify walk
+  the live closure so a later child rotation is visible to existing parents.
+  Lineage lives at `{prefix}/_lineage/{tenant}/graph`. New erase/verify/
+  predecessor bodies reject unknown fields.
+
 ## [0.12.3] - 2026-09-06
 
 ### Fixed

@@ -8,7 +8,8 @@ use chrono::{Duration, Utc};
 use redact_gateway::config::{VaultAuthMethod, VaultBackend, VaultSettings};
 use redact_gateway::redact::token::{Dek, TokenMapping};
 use redact_gateway::vault::{
-    build_store, session_path, DisabledStore, MemoryStore, TokenMapError, TokenMapStore,
+    build_store, lineage_tenant_path, session_path, subject_path_digest, CredentialLineage,
+    DisabledStore, MemoryStore, TokenMapError, TokenMapStore,
 };
 
 fn mapping(token: &str, sealed: &str) -> TokenMapping {
@@ -87,6 +88,80 @@ async fn memory_delete_forgets_a_session() {
 }
 
 #[tokio::test]
+async fn memory_purge_hard_deletes_the_map() {
+    let store = MemoryStore::new(3600);
+    let (_dek, sealed) = sealed_email("alice@example.com");
+    store
+        .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+        .await
+        .unwrap();
+    store.purge("t", "s").await.unwrap();
+    assert!(store.get("t", "s").await.unwrap().is_empty());
+    store.purge("t", "s").await.unwrap();
+    assert!(store.get("t", "s").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn memory_lineage_round_trip_is_tenant_scoped() {
+    let store = MemoryStore::new(3600);
+    let lineage = CredentialLineage {
+        predecessors: vec!["caller-b".into(), "caller-c".into()],
+        revision: 2,
+    };
+    store
+        .put_lineage("tenant-a", "caller-a", &lineage)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.get_lineage("tenant-a", "caller-a").await.unwrap(),
+        lineage
+    );
+    assert_eq!(
+        store.get_lineage("tenant-b", "caller-a").await.unwrap(),
+        CredentialLineage::default()
+    );
+    assert_eq!(
+        store.get_lineage("tenant-a", "caller-b").await.unwrap(),
+        CredentialLineage::default()
+    );
+}
+
+#[tokio::test]
+async fn memory_register_predecessor_is_serialized() {
+    let store = std::sync::Arc::new(MemoryStore::new(3600));
+    let a = store.clone();
+    let b = store.clone();
+    let (left, right) = tokio::join!(
+        async move {
+            a.register_predecessor("tenant", "caller-a", "caller-b")
+                .await
+        },
+        async move {
+            b.register_predecessor("tenant", "caller-a", "caller-c")
+                .await
+        },
+    );
+    left.expect("register caller-b");
+    right.expect("register caller-c");
+    let lineage = store.get_lineage("tenant", "caller-a").await.unwrap();
+    assert_eq!(lineage.predecessors.len(), 2);
+    assert!(lineage.predecessors.contains(&"caller-b".to_string()));
+    assert!(lineage.predecessors.contains(&"caller-c".to_string()));
+}
+
+#[tokio::test]
+async fn lineage_storage_path_omits_raw_subject() {
+    let path = lineage_tenant_path("redact-gateway", "acme");
+    assert_eq!(path, "redact-gateway/_lineage/acme/graph");
+    assert_ne!(path, session_path("redact-gateway", "_lineage", "acme"));
+    assert!(!path.contains('@'));
+    let digest = subject_path_digest("user@example.com");
+    assert!(!path.contains(&digest));
+    assert!(!digest.contains("user@example.com"));
+}
+
+#[tokio::test]
 async fn memory_ttl_expiry_without_long_sleep() {
     let store = MemoryStore::with_ttl(std::time::Duration::from_secs(60));
     let start = Utc::now();
@@ -116,6 +191,14 @@ async fn disabled_backend_returns_disabled() {
     ));
     assert!(matches!(
         store.delete("t", "s").await,
+        Err(TokenMapError::Disabled)
+    ));
+    assert!(matches!(
+        store.purge("t", "s").await,
+        Err(TokenMapError::Disabled)
+    ));
+    assert!(matches!(
+        store.exists("t", "s").await,
         Err(TokenMapError::Disabled)
     ));
     store.health().await.unwrap();
@@ -211,6 +294,7 @@ mod kv2_mock {
     struct SecretEntry {
         data: Value,
         version: u64,
+        soft_deleted: bool,
     }
 
     #[derive(Clone, Default)]
@@ -228,6 +312,10 @@ mod kv2_mock {
         write_attempts: Arc<Mutex<u32>>,
         /// Kubernetes auth logins recorded (role + jwt).
         logins: Arc<Mutex<Vec<(String, String)>>>,
+        /// Paths that received a KV v2 metadata delete (all versions).
+        metadata_deletes: Arc<Mutex<Vec<String>>>,
+        /// Paths that received a KV v2 data (latest-version) delete.
+        data_deletes: Arc<Mutex<Vec<String>>>,
     }
 
     impl MockVaultState {
@@ -306,7 +394,7 @@ mod kv2_mock {
         let key = format!("{mount}/data/{path}");
         let secrets = state.secrets.lock().await;
         match secrets.get(&key) {
-            Some(entry) => (
+            Some(entry) if !entry.soft_deleted => (
                 StatusCode::OK,
                 Json(json!({
                     "request_id": "mock",
@@ -326,7 +414,7 @@ mod kv2_mock {
                 })),
             )
                 .into_response(),
-            None => (StatusCode::NOT_FOUND, Json(json!({ "errors": [] }))).into_response(),
+            _ => (StatusCode::NOT_FOUND, Json(json!({ "errors": [] }))).into_response(),
         }
     }
 
@@ -379,6 +467,7 @@ mod kv2_mock {
                     SecretEntry {
                         data: concurrent_data,
                         version: new_version,
+                        soft_deleted: false,
                     },
                 );
             } else if let Some(entry) = secrets.get_mut(&key) {
@@ -393,6 +482,7 @@ mod kv2_mock {
                             "expires_at": "2099-01-01T00:00:00Z",
                         }),
                         version: new_version,
+                        soft_deleted: false,
                     },
                 );
             }
@@ -406,6 +496,7 @@ mod kv2_mock {
             SecretEntry {
                 data,
                 version: new_version,
+                soft_deleted: false,
             },
         );
         (
@@ -432,6 +523,60 @@ mod kv2_mock {
         Path((mount, path)): Path<(String, String)>,
     ) -> impl IntoResponse {
         let key = format!("{mount}/data/{path}");
+        state.data_deletes.lock().await.push(path);
+        if let Some(entry) = state.secrets.lock().await.get_mut(&key) {
+            entry.soft_deleted = true;
+        }
+        StatusCode::NO_CONTENT
+    }
+
+    async fn mock_read_metadata(
+        State(state): State<MockVaultState>,
+        Path((mount, path)): Path<(String, String)>,
+    ) -> impl IntoResponse {
+        let key = format!("{mount}/data/{path}");
+        match state.secrets.lock().await.get(&key) {
+            Some(entry) => (
+                StatusCode::OK,
+                Json(json!({
+                    "request_id": "mock",
+                    "lease_id": "",
+                    "renewable": false,
+                    "lease_duration": 0,
+                    "data": {
+                        "cas_required": false,
+                        "created_time": "2024-01-01T00:00:00Z",
+                        "current_version": entry.version,
+                        "delete_version_after": "0s",
+                        "max_versions": 0,
+                        "oldest_version": 1,
+                        "updated_time": "2024-01-01T00:00:00Z",
+                        "custom_metadata": null,
+                        "versions": {
+                            "1": {
+                                "created_time": "2024-01-01T00:00:00Z",
+                                "deletion_time": if entry.soft_deleted {
+                                    "2024-01-02T00:00:00Z"
+                                } else {
+                                    ""
+                                },
+                                "destroyed": false
+                            }
+                        }
+                    }
+                })),
+            )
+                .into_response(),
+            None => (StatusCode::NOT_FOUND, Json(json!({ "errors": [] }))).into_response(),
+        }
+    }
+
+    async fn mock_delete_metadata(
+        State(state): State<MockVaultState>,
+        Path((mount, path)): Path<(String, String)>,
+    ) -> impl IntoResponse {
+        let key = format!("{mount}/data/{path}");
+        state.metadata_deletes.lock().await.push(path);
         state.secrets.lock().await.remove(&key);
         StatusCode::NO_CONTENT
     }
@@ -446,6 +591,10 @@ mod kv2_mock {
                 get(mock_read_secret)
                     .post(mock_write_secret)
                     .delete(mock_delete_secret),
+            )
+            .route(
+                "/v1/{mount}/metadata/{*path}",
+                get(mock_read_metadata).delete(mock_delete_metadata),
             )
             .with_state(state.clone());
 
@@ -718,5 +867,144 @@ mod kv2_mock {
         assert_eq!(logins[0].0, "redact-gateway");
         assert_eq!(logins[0].1, "projected-sa-jwt");
         assert_eq!(store.get("t", "s").await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn kv2_purge_deletes_metadata_not_only_latest() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed) = sealed_email("alice@example.com");
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+
+        store.purge("t", "s").await.unwrap();
+        assert!(store.get("t", "s").await.unwrap().is_empty());
+
+        let metadata = state.metadata_deletes.lock().await.clone();
+        assert!(
+            metadata.iter().any(|p| p.contains("t") && p.contains("s")),
+            "purge must hit KV v2 metadata delete, got {metadata:?}"
+        );
+        assert!(
+            state.data_deletes.lock().await.is_empty(),
+            "purge must not use delete_latest"
+        );
+
+        store.purge("t", "s").await.unwrap();
+        assert!(store.get("t", "s").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn kv2_delete_latest_does_not_use_metadata_delete() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed) = sealed_email("alice@example.com");
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+        store.delete("t", "s").await.unwrap();
+        assert!(store.get("t", "s").await.unwrap().is_empty());
+        assert!(
+            !state.data_deletes.lock().await.is_empty(),
+            "delete should hit the data path"
+        );
+        assert!(
+            state.metadata_deletes.lock().await.is_empty(),
+            "delete_latest must not delete metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn kv2_lineage_round_trip_against_mock() {
+        let (addr, _) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let lineage = CredentialLineage {
+            predecessors: vec!["caller-b".into()],
+            revision: 1,
+        };
+        store
+            .put_lineage("default", "caller-a", &lineage)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get_lineage("default", "caller-a").await.unwrap(),
+            lineage
+        );
+        assert_eq!(
+            store.get_lineage("default", "caller-b").await.unwrap(),
+            CredentialLineage::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn kv2_exists_uses_metadata_not_live_mappings() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        let (_dek, sealed) = sealed_email("alice@example.com");
+        store
+            .put("t", "s", &[mapping("[EMAIL_ADDRESS_1]", &sealed)])
+            .await
+            .unwrap();
+        assert!(store.exists("t", "s").await.unwrap());
+
+        store.delete("t", "s").await.unwrap();
+        assert!(
+            store.get("t", "s").await.unwrap().is_empty(),
+            "soft-delete hides the live mapping"
+        );
+        assert!(
+            store.exists("t", "s").await.unwrap(),
+            "metadata must remain after delete_latest"
+        );
+
+        let key = format!(
+            "secret/data/{}",
+            session_path("redact-gateway", "t", "expired")
+        );
+        state.secrets.lock().await.insert(
+            key,
+            SecretEntry {
+                data: stored_session_json(&[mapping("[EMAIL_ADDRESS_1]", &sealed)]),
+                version: 1,
+                soft_deleted: false,
+            },
+        );
+        // Force expiry in the stored payload.
+        if let Some(entry) = state.secrets.lock().await.get_mut(&format!(
+            "secret/data/{}",
+            session_path("redact-gateway", "t", "expired")
+        )) {
+            entry.data["expires_at"] = json!("2000-01-01T00:00:00Z");
+        }
+        assert!(store.get("t", "expired").await.unwrap().is_empty());
+        assert!(store.exists("t", "expired").await.unwrap());
+
+        store.purge("t", "s").await.unwrap();
+        assert!(!store.exists("t", "s").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn kv2_register_predecessor_retries_cas() {
+        let (addr, state) = start_mock_vault().await;
+        let store = Kv2Store::from_settings(&kv2_settings(addr)).unwrap();
+        state
+            .arm_cas_fail(
+                1,
+                Some(json!({
+                    "subjects": {
+                        "caller-a": { "predecessors": ["caller-b"], "revision": 1 }
+                    }
+                })),
+            )
+            .await;
+        let lineage = store
+            .register_predecessor("default", "caller-a", "caller-c")
+            .await
+            .unwrap();
+        assert!(lineage.predecessors.contains(&"caller-b".to_string()));
+        assert!(lineage.predecessors.contains(&"caller-c".to_string()));
     }
 }
