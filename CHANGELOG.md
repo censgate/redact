@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-09-26
+
 ### Security
 
 - `rustls` 0.23.43 → 0.23.45 (RUSTSEC-2026-0285). TLS 1.3 handshake
