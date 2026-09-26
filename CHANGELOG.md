@@ -7,12 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.5] - 2026-09-26
-
 ### Security
 
-- `rustls` 0.23.43 → 0.23.45 (RUSTSEC-2026-0285). TLS 1.3 handshake
-  messages were accepted across encryption-level boundaries.
 - Pattern, secret, and pack recognizers no longer skip non-`en` language
   codes. Callers that passed `vi`, `es`, or any other code previously got
   no detections at all. English callers, the gateway, and WASM are
@@ -24,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Simplified Chinese. A translation does not dilute an English hit. Age,
   PO Box, medical-record, and bank-account phrases in those languages are
   detected. See [docs/languages.md](docs/languages.md) to add another locale.
+
+## [0.12.5] - 2026-09-26
+
+### Security
+
+- `rustls` 0.23.43 → 0.23.45 (RUSTSEC-2026-0285). TLS 1.3 handshake
+  messages were accepted across encryption-level boundaries.
 
 ### Fixed
 
