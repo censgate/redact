@@ -13,6 +13,7 @@ use regex::Regex;
 use super::entropy::score_entropy;
 use super::Recognizer;
 use crate::types::{EntityType, RecognizerResult};
+use crate::utf8::{ceil_char_boundary, floor_char_boundary};
 use anyhow::Result;
 
 const MIN_SCORE: f32 = 0.5;
@@ -258,20 +259,6 @@ pub fn evaluate_generic_candidate(value: &str, lhs: &str, surrounding: &str) -> 
             score_entropy(value)
         }
     }
-}
-
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
 }
 
 /// Context-gated generic secret recognizer.

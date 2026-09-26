@@ -482,6 +482,24 @@ fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Record a detection or redaction failure. The payload is never included.
+fn emit_redaction_failure(
+    state: &AppState,
+    scope: &RequestScope,
+    error: &GatewayError,
+    event_name: &'static str,
+    action: &str,
+) {
+    state.audit.emit(AuditEvent::from_outcome(
+        &RedactionOutcome::default(),
+        AuditContext {
+            outcome: Some(AuditOutcome::Error),
+            error_type: Some(error.telemetry_error_type().to_string()),
+            ..scope.audit_context(event_name, action)
+        },
+    ));
+}
+
 fn redaction_error(err: RedactError) -> GatewayError {
     match err {
         RedactError::TokenizationUnavailable => GatewayError::DependencyUnavailable(
@@ -600,7 +618,19 @@ async fn chat_completions_inner(
     let mut scope = RequestScope::build(&state, &headers, &auth).await?;
     let streaming = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
 
-    let request_outcome = redact_request_payload(&state, &mut scope, body, false)?;
+    let request_outcome = match redact_request_payload(&state, &mut scope, body, false) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            emit_redaction_failure(
+                &state,
+                &scope,
+                &error,
+                semconv::event::REQUEST,
+                "chat.completions",
+            );
+            return Err(error);
+        }
+    };
     if request_outcome.is_blocked() {
         let error = blocked_error(&request_outcome);
         state.audit.emit(AuditEvent::from_outcome(
@@ -631,7 +661,19 @@ async fn chat_completions_inner(
     }
 
     let mut response = call_provider(&state, &scope, "/v1/chat/completions", body).await?;
-    let response_outcome = redact_response_payload(&state, &scope, &mut response.body)?;
+    let response_outcome = match redact_response_payload(&state, &scope, &mut response.body) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            emit_redaction_failure(
+                &state,
+                &scope,
+                &error,
+                semconv::event::RESPONSE,
+                "chat.completions",
+            );
+            return Err(error);
+        }
+    };
     if response_outcome.is_blocked() {
         let error = blocked_error(&response_outcome);
         state.audit.emit(AuditEvent::from_outcome(
@@ -879,7 +921,19 @@ async fn stream_chat(
         let mut error_body = serde_json::from_str::<Value>(&response.body).unwrap_or_else(
             |_| json!({"error": {"message": response.body, "type": "provider_error"}}),
         );
-        let response_outcome = redact_response_payload(state, scope, &mut error_body)?;
+        let response_outcome = match redact_response_payload(state, scope, &mut error_body) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                emit_redaction_failure(
+                    state,
+                    scope,
+                    &error,
+                    semconv::event::RESPONSE,
+                    "chat.completions.stream",
+                );
+                return Err(error);
+            }
+        };
         if response_outcome.is_blocked() {
             let error = blocked_error(&response_outcome);
             state.audit.emit(AuditEvent::from_outcome(
@@ -909,7 +963,20 @@ async fn stream_chat(
         restore.missing += outcome.missing;
         Ok(restored)
     })
-    .map_err(redaction_error)?;
+    .map_err(redaction_error);
+    let transformed = match transformed {
+        Ok(transformed) => transformed,
+        Err(error) => {
+            emit_redaction_failure(
+                state,
+                scope,
+                &error,
+                semconv::event::RESPONSE,
+                "chat.completions.stream",
+            );
+            return Err(error);
+        }
+    };
     let response_outcome = ctx.finish();
     state
         .telemetry
@@ -1105,7 +1172,13 @@ async fn proxy_json_surface(
     };
 
     let mut scope = RequestScope::build(&state, &headers, &auth).await?;
-    let request_outcome = redact_request_payload(&state, &mut scope, body, is_embeddings)?;
+    let request_outcome = match redact_request_payload(&state, &mut scope, body, is_embeddings) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            emit_redaction_failure(&state, &scope, &error, semconv::event::REQUEST, action);
+            return Err(error);
+        }
+    };
     if request_outcome.is_blocked() {
         let error = blocked_error(&request_outcome);
         state.audit.emit(AuditEvent::from_outcome(
@@ -1125,7 +1198,13 @@ async fn proxy_json_surface(
     // Always scan the response: successful embedding vectors have no text
     // fields of interest, but provider error JSON (`error.message`) can carry
     // blocked secrets on any surface — including embeddings.
-    let response_outcome = redact_response_payload(&state, &scope, &mut response.body)?;
+    let response_outcome = match redact_response_payload(&state, &scope, &mut response.body) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            emit_redaction_failure(&state, &scope, &error, semconv::event::RESPONSE, action);
+            return Err(error);
+        }
+    };
 
     if response_outcome.is_blocked() {
         let error = blocked_error(&response_outcome);

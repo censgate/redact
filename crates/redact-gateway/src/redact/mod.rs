@@ -34,9 +34,12 @@ fn analyze_off_async_worker(
     text: &str,
 ) -> Result<redact_core::AnalysisResult, RedactError> {
     let run = || {
-        engine
-            .analyze(text, None)
-            .map_err(|e| RedactError::Detection(e.to_string()))
+        // The panic payload can quote request text, so it is never propagated.
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| engine.analyze(text, None)))
+        {
+            Ok(result) => result.map_err(|e| RedactError::Detection(e.to_string())),
+            Err(_) => Err(RedactError::Detection("recognizer panicked".to_string())),
+        }
     };
     match tokio::runtime::Handle::try_current() {
         Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {

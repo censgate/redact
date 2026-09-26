@@ -20,7 +20,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use redact_core::types::{EntityType, RecognizerResult};
-use redact_core::Recognizer;
+use redact_core::{ceil_char_boundary, floor_char_boundary, Recognizer};
 
 fn default_true() -> bool {
     true
@@ -699,20 +699,6 @@ impl Recognizer for PackRecognizer {
     fn min_score(&self) -> f32 {
         self.min_score
     }
-}
-
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
 }
 
 /// Last identifier-like token in the text immediately before a captured value.
