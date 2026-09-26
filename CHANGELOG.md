@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `rustls` 0.23.43 → 0.23.45 (RUSTSEC-2026-0285). TLS 1.3 handshake
+  messages were accepted across encryption-level boundaries.
+
 ### Fixed
 
 - Context boosting no longer panics when a multi-byte character (Vietnamese
