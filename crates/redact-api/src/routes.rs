@@ -99,6 +99,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_analyze_vietnamese_language_keeps_pattern_hits() {
+        let state = AppState {
+            engine: Arc::new(AnalyzerEngine::new()),
+        };
+        let app = create_router(state);
+        let body =
+            r#"{"text":"Email nguyen.anh@example.com, card 4532015112830366","language":"vi"}"#;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/analyze")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        let types: Vec<_> = json["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|result| result["entity_type"].as_str().unwrap())
+            .collect();
+        assert!(types.contains(&"EMAIL_ADDRESS"), "{types:?}");
+        assert!(types.contains(&"CREDIT_CARD"), "{types:?}");
+    }
+
+    #[tokio::test]
+    async fn test_anonymize_vietnamese_language_redacts_patterns() {
+        let state = AppState {
+            engine: Arc::new(AnalyzerEngine::new()),
+        };
+        let app = create_router(state);
+        let body = r#"{"text":"Email nguyen.anh@example.com","language":"vi"}"#;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/anonymize")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        let text = json["text"].as_str().unwrap();
+        assert!(text.contains("[EMAIL_ADDRESS]"), "{text}");
+        assert!(!text.contains("nguyen.anh@example.com"), "{text}");
+    }
+
+    #[tokio::test]
     async fn test_analyze_route_omits_entity_text_when_include_text_false() {
         let state = AppState {
             engine: Arc::new(AnalyzerEngine::new()),

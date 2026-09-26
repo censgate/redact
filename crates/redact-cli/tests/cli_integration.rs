@@ -247,7 +247,21 @@ fn test_language_flag() {
         .arg("analyze")
         .arg("Email: john@example.com")
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("EmailAddress"));
+}
+
+#[test]
+fn test_vietnamese_language_fail_on_detect() {
+    cli()
+        .arg("--language")
+        .arg("vi")
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("Email nguyen.anh@example.com")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("EmailAddress"));
 }
 
 #[test]

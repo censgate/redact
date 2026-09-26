@@ -219,10 +219,18 @@ pub struct PatternRecognizer {
 }
 
 #[derive(Debug, Clone)]
+enum ContextKey {
+    /// Built-in concept. Every shipped locale contributes terms.
+    Concept(super::context::Concept),
+    /// Caller-supplied word from [`PatternRecognizer::add_pattern_with_context`].
+    AdHoc(String),
+}
+
+#[derive(Debug, Clone)]
 struct CompiledPattern {
     regex: Regex,
     score: f32,
-    context_words: Vec<String>,
+    concepts: Vec<ContextKey>,
 }
 
 impl PatternRecognizer {
@@ -261,7 +269,7 @@ impl PatternRecognizer {
         let compiled = CompiledPattern {
             regex,
             score,
-            context_words: vec![],
+            concepts: vec![],
         };
         self.patterns.entry(entity_type).or_default().push(compiled);
         Ok(())
@@ -279,10 +287,31 @@ impl PatternRecognizer {
         let compiled = CompiledPattern {
             regex,
             score,
-            context_words,
+            concepts: context_words.into_iter().map(ContextKey::AdHoc).collect(),
         };
         self.patterns.entry(entity_type).or_default().push(compiled);
         Ok(())
+    }
+
+    /// Built-in pattern whose keywords are concepts, not a flat word list.
+    fn add_builtin(
+        &mut self,
+        entity_type: EntityType,
+        pattern: &str,
+        score: f32,
+        concepts: &[super::context::Concept],
+    ) {
+        let regex = Regex::new(pattern).unwrap_or_else(|err| {
+            panic!("builtin pattern failed to compile for {entity_type:?}: {err}")
+        });
+        self.patterns
+            .entry(entity_type)
+            .or_default()
+            .push(CompiledPattern {
+                regex,
+                score,
+                concepts: concepts.iter().copied().map(ContextKey::Concept).collect(),
+            });
     }
 
     /// Load default patterns for common PII types
@@ -352,15 +381,11 @@ impl PatternRecognizer {
         );
 
         // UK NHS Number
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::UkNhs,
             r"\b(?:\d{3}\s?\d{3}\s?\d{4}|\d{10})\b",
             0.6,
-            vec![
-                "NHS".to_string(),
-                "patient".to_string(),
-                "health".to_string(),
-            ],
+            super::context::UK_NHS_CONCEPTS,
         );
 
         // UK National Insurance Number
@@ -414,15 +439,11 @@ impl PatternRecognizer {
         );
 
         // PO Box
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::PoBox,
             r"\b(?:P\.?\s?O\.?|POST\s+OFFICE)\s*BOX\s+\d+\b",
             0.85,
-            vec![
-                "address".to_string(),
-                "mail".to_string(),
-                "ship".to_string(),
-            ],
+            super::context::PO_BOX_CONCEPTS,
         );
 
         // ISBN (10 or 13 digit formats)
@@ -433,31 +454,27 @@ impl PatternRecognizer {
         );
 
         // Generic Passport Number (alphanumeric, 6-9 characters)
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::PassportNumber,
             r"\b[A-Z]{1,2}\d{6,9}\b",
             0.7,
-            vec!["passport".to_string(), "travel".to_string()],
+            super::context::PASSPORT_CONCEPTS,
         );
 
         // Medical Record Number (various formats with MRN context)
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::MedicalRecordNumber,
             r"\b(?:MRN|Medical\s*Record|Patient\s*ID):?\s*[A-Z0-9]{6,12}\b",
             0.85,
-            vec![
-                "patient".to_string(),
-                "medical".to_string(),
-                "hospital".to_string(),
-            ],
+            super::context::MRN_CONCEPTS,
         );
 
         // Age (with context)
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::Age,
             r"\b(?:age|aged|years old):?\s*(\d{1,3})\b",
             0.8,
-            vec!["years".to_string(), "old".to_string(), "age".to_string()],
+            super::context::AGE_CONCEPTS,
         );
 
         // Date/Time (ISO format and common variants)
@@ -472,44 +489,29 @@ impl PatternRecognizer {
         // - Letter prefix followed by 6-8 digits (most states)
         // - State-specific format with dashes
         // Base score is low (0.4) - requires context to reach min_score
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::UsDriverLicense,
             r"\b[A-Z]\d{6,8}\b|\b[A-Z]\d{3}-\d{4}-\d{4}\b",
             0.4,
-            vec![
-                "driver".to_string(),
-                "license".to_string(),
-                "DL".to_string(),
-                "DMV".to_string(),
-            ],
+            super::context::US_DRIVER_CONCEPTS,
         );
 
         // US Passport Number (9 digits, sometimes with letter prefix)
         // Base score is low - requires context
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::UsPassport,
             r"\b[A-Z]?\d{9}\b",
             0.4,
-            vec![
-                "passport".to_string(),
-                "travel".to_string(),
-                "state department".to_string(),
-            ],
+            super::context::US_PASSPORT_CONCEPTS,
         );
 
         // US Bank Account Number (typically 8-17 digits)
         // Very low base score - highly dependent on context
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::UsBankNumber,
             r"\b\d{8,17}\b",
             0.3,
-            vec![
-                "account".to_string(),
-                "bank".to_string(),
-                "routing".to_string(),
-                "checking".to_string(),
-                "savings".to_string(),
-            ],
+            super::context::US_BANK_CONCEPTS,
         );
 
         // UK Driver's License (DVLA format: 5 letters + 6 digits + 2 letters + 3 digits + 2 letters)
@@ -522,15 +524,11 @@ impl PatternRecognizer {
 
         // UK Passport Number (9 digits)
         // Low base score - requires context to avoid matching random 9-digit numbers
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::UkPassportNumber,
             r"\b\d{9}\b",
             0.3,
-            vec![
-                "passport".to_string(),
-                "travel".to_string(),
-                "HMPO".to_string(),
-            ],
+            super::context::UK_PASSPORT_CONCEPTS,
         );
 
         // UK Phone Number (landline: 01/02/03 prefix)
@@ -549,45 +547,33 @@ impl PatternRecognizer {
 
         // UK Company Number (Companies House: 8 digits or 2 letters + 6 digits)
         // Low base score - requires context to avoid matching random 8-digit numbers
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::UkCompanyNumber,
             r"\b(?:\d{8}|[A-Z]{2}\d{6})\b",
             0.3,
-            vec![
-                "company".to_string(),
-                "companies house".to_string(),
-                "registration".to_string(),
-                "CRN".to_string(),
-            ],
+            super::context::UK_COMPANY_CONCEPTS,
         );
 
         // Medical License Number (various formats with context)
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::MedicalLicense,
             r"\b(?:MD|DO|NP|PA|RN|LPN)[-\s]?\d{5,10}\b",
             0.8,
-            vec![
-                "license".to_string(),
-                "medical".to_string(),
-                "physician".to_string(),
-                "doctor".to_string(),
-                "nurse".to_string(),
-            ],
+            super::context::MEDICAL_LICENSE_CONCEPTS,
         );
 
         // Generic Crypto Wallet (covers various formats beyond BTC/ETH)
         // Matches Litecoin (L/M/3), Ripple (r), etc.
-        let _ = self.add_pattern_with_context(
+        self.add_builtin(
             EntityType::CryptoWallet,
             r"\b[LMr3][a-km-zA-HJ-NP-Z1-9]{25,34}\b",
             0.75,
-            vec![
-                "wallet".to_string(),
-                "crypto".to_string(),
-                "address".to_string(),
-                "coin".to_string(),
-            ],
+            super::context::CRYPTO_CONCEPTS,
         );
+
+        for extra in super::context::extra_patterns() {
+            self.add_builtin(extra.entity, extra.regex, extra.score, extra.concepts);
+        }
 
         // Secrets and credentials - loaded from the flat data table above.
         // Panic on compile failure: `let _ = add_pattern` previously swallowed
@@ -603,26 +589,34 @@ impl PatternRecognizer {
         }
     }
 
-    /// Check context words around a match to boost confidence
-    fn check_context(&self, text: &str, start: usize, end: usize, context_words: &[String]) -> f32 {
-        if context_words.is_empty() {
+    /// Boost confidence from concept hits around a match.
+    ///
+    /// One hit per concept, however many translations matched, so an English
+    /// word still contributes `1 / concept_count`.
+    fn check_context(&self, text: &str, start: usize, end: usize, concepts: &[ContextKey]) -> f32 {
+        if concepts.is_empty() {
             return 0.0;
         }
 
         let (context_start, context_end) = context_window(text, start, end, CONTEXT_CHARS);
-        let context = text
-            .get(context_start..context_end)
-            .unwrap_or("")
-            .to_lowercase();
+        let raw = text.get(context_start..context_end).unwrap_or("");
+        let context = super::context::normalize(raw);
 
-        // Count matching context words
-        let matches = context_words
+        let matches = concepts
             .iter()
-            .filter(|word| context.contains(&word.to_lowercase()))
+            .filter(|key| concept_hit(&context, key))
             .count();
 
-        // Boost score based on context matches (up to +0.3)
-        (matches as f32 / context_words.len() as f32) * 0.3
+        (matches as f32 / concepts.len() as f32) * 0.3
+    }
+}
+
+fn concept_hit(context: &str, key: &ContextKey) -> bool {
+    match key {
+        ContextKey::AdHoc(word) => context.contains(&super::context::normalize(word)),
+        ContextKey::Concept(concept) => super::context::terms_for(*concept)
+            .iter()
+            .any(|term| context.contains(term)),
     }
 }
 
@@ -737,14 +731,39 @@ impl Recognizer for PatternRecognizer {
         &SUPPORTED
     }
 
+    fn supports_language(&self, _language: &str) -> bool {
+        // Patterns, checksums, and context terms do not depend on the request language.
+        true
+    }
+
     fn analyze(&self, text: &str, _language: &str) -> Result<Vec<RecognizerResult>> {
         let _span = crate::operations_enabled()
             .then(|| tracing::info_span!("redact.gateway.detect.patterns").entered());
+        if text.is_ascii() {
+            self.scan(text, text, None)
+        } else {
+            let (nfc, map) = super::context::nfc_with_map(text);
+            self.scan(text, &nfc, Some(&map))
+        }
+    }
+
+    fn min_score(&self) -> f32 {
+        self.min_score
+    }
+}
+
+impl PatternRecognizer {
+    fn scan(
+        &self,
+        original: &str,
+        haystack: &str,
+        map: Option<&[usize]>,
+    ) -> Result<Vec<RecognizerResult>> {
         let mut results = Vec::new();
 
         for (entity_type, patterns) in &self.patterns {
             for pattern in patterns {
-                for capture in pattern.regex.captures_iter(text) {
+                for capture in pattern.regex.captures_iter(haystack) {
                     // Prefer group 1 only for patterns that capture a value-only
                     // span (HTTP Basic credentials; padded AWS Bedrock keys).
                     // PII patterns such as AGE also have a group 1 — using it
@@ -755,21 +774,28 @@ impl Recognizer for PatternRecognizer {
                         }
                         _ => capture.get(0),
                     } {
-                        let start = matched.start();
-                        let end = matched.end();
-                        let matched_text = matched.as_str();
+                        let (start, end) = match map {
+                            Some(map) => super::context::map_span(
+                                map,
+                                original.len(),
+                                matched.start(),
+                                matched.end(),
+                            ),
+                            None => (matched.start(), matched.end()),
+                        };
+                        let start = crate::floor_char_boundary(original, start);
+                        let end = crate::ceil_char_boundary(original, end.max(start));
+                        if start >= end {
+                            continue;
+                        }
+                        let matched_text = &original[start..end];
 
-                        // Base score from pattern
                         let mut score = pattern.score;
-
-                        // Boost score based on context if context words are provided
-                        if !pattern.context_words.is_empty() {
-                            score += self.check_context(text, start, end, &pattern.context_words);
-                            score = score.min(1.0); // Cap at 1.0
+                        if !pattern.concepts.is_empty() {
+                            score += self.check_context(original, start, end, &pattern.concepts);
+                            score = score.min(1.0);
                         }
 
-                        // Apply validation (checksum, format validation)
-                        // This can reduce or zero out the score for invalid matches
                         let validation_factor = validate_entity(entity_type, matched_text);
                         score *= validation_factor;
 
@@ -782,7 +808,7 @@ impl Recognizer for PatternRecognizer {
                                     score,
                                     self.name(),
                                 )
-                                .with_text(text),
+                                .with_text(original),
                             );
                         }
                     }
@@ -791,10 +817,6 @@ impl Recognizer for PatternRecognizer {
         }
 
         Ok(results)
-    }
-
-    fn min_score(&self) -> f32 {
-        self.min_score
     }
 }
 
@@ -1035,6 +1057,73 @@ mod tests {
             .iter()
             .find(|r| r.entity_type == EntityType::MedicalLicense);
         assert!(license_result.is_some(), "Should detect medical license");
+    }
+
+    #[test]
+    fn english_bank_boost_matches_the_historical_word_ratio() {
+        let recognizer = PatternRecognizer::new();
+        let patterns = recognizer
+            .patterns
+            .get(&EntityType::UsBankNumber)
+            .expect("bank patterns");
+        let generic = patterns
+            .iter()
+            .find(|pattern| {
+                pattern.concepts.len() == crate::recognizers::context::US_BANK_CONCEPTS.len()
+            })
+            .expect("generic bank pattern");
+
+        let full = "account bank routing checking savings 841234567890";
+        let start = full.find("841234567890").unwrap();
+        let boost = recognizer.check_context(full, start, start + 12, &generic.concepts);
+        assert!((boost - 0.3).abs() < 1e-6, "{boost}");
+
+        let one = "bank 841234567890";
+        let start = one.find("841234567890").unwrap();
+        let boost = recognizer.check_context(one, start, start + 12, &generic.concepts);
+        assert!((boost - 0.06).abs() < 1e-6, "{boost}");
+
+        // A translation of an already-matched concept must not raise the English score.
+        let mixed = "bank ngân hàng 841234567890";
+        let start = mixed.find("841234567890").unwrap();
+        let boost = recognizer.check_context(mixed, start, start + 12, &generic.concepts);
+        assert!((boost - 0.06).abs() < 1e-6, "{boost}");
+    }
+
+    #[test]
+    fn english_bank_sentence_keeps_a_single_span_at_the_historical_score() {
+        let recognizer = PatternRecognizer::new();
+        let text = "account bank routing checking savings 841234567890";
+        let hits: Vec<_> = recognizer
+            .analyze(text, "en")
+            .unwrap()
+            .into_iter()
+            .filter(|hit| hit.entity_type == EntityType::UsBankNumber)
+            .collect();
+        assert_eq!(hits.len(), 1);
+        assert!((hits[0].score - 0.6).abs() < 1e-5, "{}", hits[0].score);
+    }
+
+    #[test]
+    fn locale_fixtures_match_their_expectations() {
+        let recognizer = PatternRecognizer::new();
+        for (locale, fixture) in crate::recognizers::context::locale_fixtures() {
+            let hits = recognizer.analyze(fixture.text, locale).unwrap();
+            let found = hits.iter().any(|hit| hit.entity_type == fixture.entity);
+            assert_eq!(found, fixture.expect, "{locale}: {:?}", fixture.text);
+        }
+    }
+
+    #[test]
+    fn decomposed_vietnamese_bank_sentence_is_detected() {
+        use unicode_normalization::UnicodeNormalization;
+        let text: String = "Số tài khoản ngân hàng: 841234567890".nfd().collect();
+        let hits = PatternRecognizer::new().analyze(&text, "vi").unwrap();
+        assert!(
+            hits.iter()
+                .any(|hit| hit.entity_type == EntityType::UsBankNumber),
+            "{text:?}"
+        );
     }
 
     #[test]

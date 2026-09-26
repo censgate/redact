@@ -811,18 +811,34 @@ impl Recognizer for NerRecognizer {
     }
 
     fn supports_language(&self, language: &str) -> bool {
-        // Most multilingual NER models support these languages
-        matches!(
-            language,
-            "en" | "es" | "fr" | "de" | "it" | "pt" | "nl" | "pl" | "ru" | "zh" | "ja" | "ko"
-        )
+        ner_model_supports_language(language)
     }
+}
+
+/// Languages the bundled NER models advertise.
+///
+/// Vietnamese is intentionally absent: the documented multilingual model does
+/// not cover it. Pattern detection still runs for that code.
+pub(crate) fn ner_model_supports_language(language: &str) -> bool {
+    matches!(
+        language,
+        "en" | "es" | "fr" | "de" | "it" | "pt" | "nl" | "pl" | "ru" | "zh" | "ja" | "ko"
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn vietnamese_is_outside_the_ner_language_list() {
+        assert!(super::ner_model_supports_language("en"));
+        assert!(super::ner_model_supports_language("es"));
+        assert!(super::ner_model_supports_language("zh"));
+        assert!(!super::ner_model_supports_language("vi"));
+        assert!(!super::ner_model_supports_language("xx"));
+    }
 
     #[test]
     fn test_default_config() {
