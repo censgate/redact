@@ -815,10 +815,13 @@ impl Recognizer for NerRecognizer {
     }
 }
 
-/// Languages the bundled NER models advertise.
+/// Request languages for which the analyzer will invoke NER.
 ///
-/// Vietnamese is intentionally absent: the documented multilingual model does
-/// not cover it. Pattern detection still runs for that code.
+/// This list is not read from the loaded ONNX file. `es` and `zh` are on it
+/// because the verification model was trained on them. `vi` is absent: that
+/// model was not trained on Vietnamese, and a few transferred smoke spans
+/// are not a support claim. See `docs/ner-languages-spike.md`.
+/// Pattern detection still runs for every code.
 pub(crate) fn ner_model_supports_language(language: &str) -> bool {
     matches!(
         language,

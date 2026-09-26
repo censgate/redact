@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Simplified Chinese. A translation does not dilute an English hit. Age,
   PO Box, medical-record, and bank-account phrases in those languages are
   detected. See [docs/languages.md](docs/languages.md) to add another locale.
+- NER verification for Spanish, simplified Chinese, and a Vietnamese smoke
+  check uses `Davlan/bert-base-multilingual-cased-ner-hrl` (local ONNX,
+  not the default image). See [docs/ner-languages-spike.md](docs/ner-languages-spike.md).
 
 ## [0.12.5] - 2026-09-26
 

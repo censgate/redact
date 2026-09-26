@@ -13,6 +13,10 @@ cargo bench --package redact-core
 # Run NER E2E tests (requires ONNX model)
 cargo test --package redact-ner --test ner_e2e -- --ignored
 
+# Reference-language smoke (Davlan ONNX directory; see docs/ner.md)
+REDACT_NER_SMOKE_DIR=models/multilingual-ner \
+  cargo test -p redact-ner --test ner_e2e -- --ignored test_reference_language_ner_smoke
+
 # Run specific test suites
 cargo test --package redact-core --test pattern_coverage
 cargo test --package redact-core --test error_scenarios
