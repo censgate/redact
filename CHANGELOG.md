@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-09-26
+
 ### Security
 
 - `rustls` 0.23.43 → 0.23.45 (RUSTSEC-2026-0285). TLS 1.3 handshake
@@ -461,4 +463,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.12.4 or later.
+Those versions are no longer maintained. Please upgrade to v0.12.5 or later.
