@@ -609,10 +609,11 @@ impl PatternRecognizer {
             return 0.0;
         }
 
-        // Get 50 characters before and after the match
-        let context_start = start.saturating_sub(50);
-        let context_end = (end + 50).min(text.len());
-        let context = &text[context_start..context_end].to_lowercase();
+        let (context_start, context_end) = context_window(text, start, end, CONTEXT_CHARS);
+        let context = text
+            .get(context_start..context_end)
+            .unwrap_or("")
+            .to_lowercase();
 
         // Count matching context words
         let matches = context_words
@@ -623,6 +624,29 @@ impl PatternRecognizer {
         // Boost score based on context matches (up to +0.3)
         (matches as f32 / context_words.len() as f32) * 0.3
     }
+}
+
+/// Context radius in Unicode scalar values, so non-ASCII text gets the same reach as ASCII.
+const CONTEXT_CHARS: usize = 50;
+
+/// Byte range covering `radius` chars before `start` and after `end`.
+///
+/// Both ends are char boundaries. On ASCII text this is identical to
+/// `start.saturating_sub(radius)..(end + radius).min(text.len())`.
+fn context_window(text: &str, start: usize, end: usize, radius: usize) -> (usize, usize) {
+    let start = crate::floor_char_boundary(text, start);
+    let end = crate::ceil_char_boundary(text, end.max(start));
+    let window_start = text[..start]
+        .char_indices()
+        .rev()
+        .take(radius)
+        .last()
+        .map_or(start, |(index, _)| index);
+    let window_end = text[end..]
+        .char_indices()
+        .nth(radius)
+        .map_or(text.len(), |(index, _)| end + index);
+    (window_start, window_end)
 }
 
 impl Default for PatternRecognizer {
@@ -777,6 +801,43 @@ impl Recognizer for PatternRecognizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_window_matches_legacy_byte_window_on_ascii() {
+        let text: String = (0..300).map(|i| (b'a' + (i % 26) as u8) as char).collect();
+        for start in 0..text.len() {
+            for end in start..(start + 20).min(text.len()) {
+                assert_eq!(
+                    context_window(&text, start, end, 50),
+                    (start.saturating_sub(50), (end + 50).min(text.len())),
+                    "{start}..{end}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn context_window_counts_vietnamese_chars_not_bytes() {
+        let text = format!("bank {}841234567890", "ạ ".repeat(20));
+        let start = text.find('8').unwrap();
+        let (window_start, window_end) = context_window(&text, start, start + 12, 50);
+        assert_eq!(text[window_start..start].chars().count(), 45);
+        assert_eq!(window_end, text.len());
+        assert!(text[window_start..window_end].contains("bank"));
+    }
+
+    #[test]
+    fn check_context_does_not_panic_on_multibyte_boundaries() {
+        let recognizer = PatternRecognizer::new();
+        for text in [
+            format!("841234567890{}ó", " ".repeat(49)),
+            format!("ử{}841234567890", " ".repeat(49)),
+            format!("841234567890{}📄", " ".repeat(48)),
+            "Mã đơn hàng 20260916 đã được xử lý thành công. Tổng cộng: 1.250.000 đồng.".to_string(),
+        ] {
+            recognizer.analyze(&text, "en").expect("analyze");
+        }
+    }
 
     #[test]
     fn test_age_span_includes_label() {

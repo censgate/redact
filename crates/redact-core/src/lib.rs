@@ -49,6 +49,7 @@ pub mod policy;
 pub mod recognizers;
 pub mod trace;
 pub mod types;
+pub mod utf8;
 
 // Re-export commonly used types
 pub use anonymizers::{AnonymizationStrategy, AnonymizerConfig, AnonymizerRegistry};
@@ -58,6 +59,7 @@ pub use trace::{operations_enabled, with_operation_spans};
 pub use types::{
     AnalysisMetadata, AnalysisResult, AnonymizedResult, EntityType, RecognizerResult, Token,
 };
+pub use utf8::{ceil_char_boundary, floor_char_boundary};
 
 /// Version of the redact-core library
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

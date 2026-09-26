@@ -260,19 +260,7 @@ pub fn evaluate_generic_candidate(value: &str, lhs: &str, surrounding: &str) -> 
     }
 }
 
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
-}
+use crate::utf8::{ceil_char_boundary, floor_char_boundary};
 
 /// Context-gated generic secret recognizer.
 #[derive(Debug)]
