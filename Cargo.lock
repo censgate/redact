@@ -3390,6 +3390,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "criterion",
  "futures-util",
  "http-body-util",
  "jsonwebtoken",
