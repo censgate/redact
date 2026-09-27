@@ -53,14 +53,24 @@ For Redact-internal performance (no HTTP overhead):
 
 ```bash
 cargo bench --package redact-core
+cargo bench -p redact-gateway --bench hot_path
 ```
 
-Benchmarks include:
-- Single entity detection (email, SSN, phone, etc.)
-- Multiple entity detection
-- Text length scaling (100-5000 chars)
-- Anonymization strategies (replace, mask, hash)
-- Cold vs warm start performance
+`redact-core` benchmarks include single-entity detection, text length, and
+anonymization strategy. `redact-gateway` benchmarks the in-process hot path
+an agent platform pays on every call: a clean prompt, an email rewrite, a
+multi-byte sentence, and a chat-completion JSON body. HTTP and the provider
+are not included.
+
+CI enforces a release-mode ceiling on that same path:
+
+```bash
+cargo test -p redact-gateway --release --test hot_path_budget -- --nocapture
+```
+
+The ceilings live in `crates/redact-gateway/tests/hot_path_budget.rs`. They
+are a tripwire, not a latency SLO. The printed p50 is the number to compare
+across changes.
 
 ## Latest Results (2026-04-18)
 

@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - NER verification for Spanish, simplified Chinese, and a Vietnamese smoke
   check uses `Davlan/bert-base-multilingual-cased-ner-hrl` (local ONNX,
   not the default image). See [docs/ner-languages-spike.md](docs/ner-languages-spike.md).
+- Gateway hot-path microbenchmark (`cargo bench -p redact-gateway --bench hot_path`)
+  and a release-mode budget test so CI rejects a large latency regression on
+  text redaction and chat-request redaction.
 
 ## [0.12.5] - 2026-09-26
 

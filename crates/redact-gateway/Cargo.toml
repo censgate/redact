@@ -72,6 +72,11 @@ tower = { workspace = true, features = ["util"] }
 http-body-util = "0.1"
 axum = { workspace = true }
 tempfile = "3"
+criterion = { workspace = true }
+
+[[bench]]
+name = "hot_path"
+harness = false
 
 [[bin]]
 name = "redact-gateway"
