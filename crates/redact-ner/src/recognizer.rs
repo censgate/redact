@@ -618,7 +618,7 @@ impl NerRecognizer {
     /// Parse BIO tags and extract entity spans
     fn parse_bio_tags(
         &self,
-        _text: &str,
+        text: &str,
         predictions: &[usize],
         probabilities: &[f32],
         offsets: &[(usize, usize)],
@@ -715,8 +715,64 @@ impl NerRecognizer {
             }
         }
 
-        results
+        widen_to_words(text, results)
     }
+}
+
+/// WordPiece labels each subword piece on its own, so `Hoka` can come back as
+/// B-ORG `Ho` + O `##ka`. Tokenizing only `Ho` mints a vault value for a
+/// fragment and leaves `ka` in clear text. Entities cover whole words, and
+/// spans that meet inside one word merge into the first.
+fn widen_to_words(text: &str, results: Vec<RecognizerResult>) -> Vec<RecognizerResult> {
+    let mut out: Vec<RecognizerResult> = Vec::with_capacity(results.len());
+    for mut r in results {
+        (r.start, r.end) = word_bounds(text, r.start, r.end);
+        if let Some(prev) = out.last_mut() {
+            if r.start < prev.end {
+                prev.end = prev.end.max(r.end);
+                prev.score = prev.score.max(r.score);
+                continue;
+            }
+        }
+        out.push(r);
+    }
+    out
+}
+
+/// Letters and digits of scripts that separate words with spaces. A run of
+/// Han, kana or Thai is a clause, not a word, so spans there stay as labelled.
+fn joins_word(c: char) -> bool {
+    c.is_alphanumeric()
+        && matches!(c as u32, 0x30..=0x39 | 0x41..=0x5A | 0x61..=0x7A | 0xC0..=0x24F | 0x370..=0x52F | 0x1E00..=0x1FFF)
+}
+
+/// Byte span widened to the enclosing word when either edge is inside one.
+fn word_bounds(text: &str, start: usize, end: usize) -> (usize, usize) {
+    let mut start = start.min(text.len());
+    while !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = end.clamp(start, text.len());
+    while !text.is_char_boundary(end) {
+        end += 1;
+    }
+    if text[start..end].chars().next().is_some_and(joins_word) {
+        while let Some(c) = text[..start].chars().next_back() {
+            if !joins_word(c) {
+                break;
+            }
+            start -= c.len_utf8();
+        }
+    }
+    if text[start..end].chars().next_back().is_some_and(joins_word) {
+        while let Some(c) = text[end..].chars().next() {
+            if !joins_word(c) {
+                break;
+            }
+            end += c.len_utf8();
+        }
+    }
+    (start, end)
 }
 
 impl NerRecognizer {
@@ -859,6 +915,127 @@ mod tests {
         // Should return empty results
         let results = recognizer.analyze("John Doe", "en").unwrap();
         assert_eq!(results.len(), 0);
+    }
+
+    const O: usize = 0;
+    const B_PER: usize = 1;
+    const B_ORG: usize = 3;
+    const I_ORG: usize = 4;
+    const B_LOC: usize = 5;
+    const I_LOC: usize = 6;
+
+    /// Offsets are byte spans of each piece; `(0, 0)` marks [CLS]/[SEP].
+    fn spans(text: &str, tagged: &[(usize, (usize, usize))]) -> Vec<(EntityType, String)> {
+        let recognizer = NerRecognizer::from_config(NerConfig::default()).unwrap();
+        let (predictions, offsets): (Vec<usize>, Vec<(usize, usize)>) =
+            tagged.iter().copied().unzip();
+        let probabilities = vec![0.9; predictions.len()];
+        recognizer
+            .parse_bio_tags(text, &predictions, &probabilities, &offsets)
+            .into_iter()
+            .map(|r| (r.entity_type, text[r.start..r.end].to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn subword_entity_covers_the_whole_word() {
+        // Ho ##ka sneakers
+        let got = spans(
+            "Hoka sneakers",
+            &[
+                (O, (0, 0)),
+                (B_ORG, (0, 2)),
+                (O, (2, 4)),
+                (O, (5, 13)),
+                (O, (0, 0)),
+            ],
+        );
+        assert_eq!(got, vec![(EntityType::Organization, "Hoka".to_string())]);
+    }
+
+    #[test]
+    fn entity_ending_on_a_subword_keeps_the_rest_of_the_word() {
+        let text = "including Beyond Wow Plumbing & Drains, and";
+        // Beyond Wow P ##lumbing & Drains
+        let got = spans(
+            text,
+            &[
+                (O, (0, 9)),
+                (B_ORG, (10, 16)),
+                (I_ORG, (17, 20)),
+                (I_ORG, (21, 22)),
+                (O, (22, 29)),
+                (O, (30, 31)),
+                (B_ORG, (32, 38)),
+                (O, (38, 39)),
+            ],
+        );
+        assert_eq!(
+            got,
+            vec![
+                (EntityType::Organization, "Beyond Wow Plumbing".to_string()),
+                (EntityType::Organization, "Drains".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn pieces_of_one_word_merge_into_the_first_entity() {
+        // H ##OKA labelled as two entities
+        let got = spans(
+            "Foot Locker’s HOKA selection",
+            &[
+                (B_ORG, (0, 4)),
+                (I_ORG, (5, 11)),
+                (O, (11, 14)),
+                (O, (14, 15)),
+                (B_ORG, (16, 17)),
+                (B_PER, (17, 20)),
+                (O, (21, 30)),
+            ],
+        );
+        assert_eq!(
+            got,
+            vec![
+                (EntityType::Organization, "Foot Locker".to_string()),
+                (EntityType::Organization, "HOKA".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn word_widening_stops_at_punctuation_and_multibyte_letters_count() {
+        // Zoë ##s ’ s bike: the possessive stays outside the widened word.
+        let text = "Zoës’s bike";
+        let got = spans(
+            text,
+            &[
+                (B_PER, (0, 4)),
+                (O, (4, 5)),
+                (O, (5, 8)),
+                (O, (8, 9)),
+                (O, (10, 14)),
+            ],
+        );
+        assert_eq!(got, vec![(EntityType::Person, "Zoës".to_string())]);
+    }
+
+    #[test]
+    fn unspaced_scripts_keep_the_labelled_span() {
+        // 我 在 北 京 工 作: only 北京 is labelled.
+        let text = "我在北京工作很开心";
+        let tagged: Vec<(usize, (usize, usize))> = (0..9)
+            .map(|i| {
+                let label = match i {
+                    2 => B_LOC,
+                    3 => I_LOC,
+                    _ => O,
+                };
+                (label, (i * 3, i * 3 + 3))
+            })
+            .collect();
+        let got = spans(text, &tagged);
+        assert_eq!(got, vec![(EntityType::Location, "北京".to_string())]);
     }
 
     #[test]

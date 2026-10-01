@@ -286,7 +286,13 @@ pub fn restore_text(text: &str, lookup: &HashMap<String, String>) -> (String, Re
         let after = &rest[open..];
         match after.find(']') {
             Some(close) => {
-                let candidate = &after[..=close];
+                // A token can only start at the last `[` before this `]`. In a
+                // markdown link label `[[ORGANIZATION_3]](url)` the first `[` is
+                // the label's own bracket.
+                let group = &after[..=close];
+                let token_open = group.rfind('[').unwrap_or(0);
+                result.push_str(&group[..token_open]);
+                let candidate = &group[token_open..];
                 if is_token_shaped(candidate) {
                     match lookup.get(candidate) {
                         Some(original) => {
@@ -535,6 +541,26 @@ mod tests {
         let (text, outcome) = restore_text("array[0] and [see note] and [unclosed", &lookup);
         assert_eq!(text, "array[0] and [see note] and [unclosed");
         assert_eq!(outcome, RestoreOutcome::default());
+    }
+
+    #[test]
+    fn restore_finds_tokens_inside_markdown_link_labels() {
+        let mut lookup = HashMap::new();
+        lookup.insert(
+            "[ORGANIZATION_3]".to_string(),
+            "Aloha Plumbing LLC".to_string(),
+        );
+        lookup.insert("[ORGANIZATION_4]".to_string(), "Foot Locker".to_string());
+        let (text, outcome) = restore_text(
+            "See [[ORGANIZATION_3]](https://a.example/) or [[ORGANIZATION_4]’s [ORGANIZATION_9] picks](https://b.example/) [[x] [[ORGANIZATION_3]",
+            &lookup,
+        );
+        assert_eq!(
+            text,
+            "See [Aloha Plumbing LLC](https://a.example/) or [Foot Locker’s [ORGANIZATION_9] picks](https://b.example/) [[x] [Aloha Plumbing LLC"
+        );
+        assert_eq!(outcome.restored, 3);
+        assert_eq!(outcome.missing, 1);
     }
 
     #[test]
