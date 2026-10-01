@@ -921,6 +921,8 @@ mod tests {
     const B_PER: usize = 1;
     const B_ORG: usize = 3;
     const I_ORG: usize = 4;
+    const B_LOC: usize = 5;
+    const I_LOC: usize = 6;
 
     /// Offsets are byte spans of each piece; `(0, 0)` marks [CLS]/[SEP].
     fn spans(text: &str, tagged: &[(usize, (usize, usize))]) -> Vec<(EntityType, String)> {
@@ -1024,16 +1026,12 @@ mod tests {
         let text = "我在北京工作很开心";
         let tagged: Vec<(usize, (usize, usize))> = (0..9)
             .map(|i| {
-                (
-                    if i == 2 {
-                        5
-                    } else if i == 3 {
-                        6
-                    } else {
-                        O
-                    },
-                    (i * 3, i * 3 + 3),
-                )
+                let label = match i {
+                    2 => B_LOC,
+                    3 => I_LOC,
+                    _ => O,
+                };
+                (label, (i * 3, i * 3 + 3))
             })
             .collect();
         let got = spans(text, &tagged);
