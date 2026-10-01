@@ -60,7 +60,8 @@ spawn a replacement). Current-thread tests stay in-place.
 | `dslim/bert-base-NER` | ~420MB | **Default.** Image `NER_MODEL`. Do not swap without the gate below. |
 | `dslim/distilbert-NER` | ~250MB | Faster same-task candidate. **Gated.** See below. |
 | `dbmdz/bert-large-cased-finetuned-conll03-english` | ~1.2GB | Highest accuracy, slower |
-| `Davlan/distilbert-base-multilingual-cased-ner-hrl` | ~500MB | Multilingual |
+| `Davlan/bert-base-multilingual-cased-ner-hrl` | ~680MB ONNX | **Verification model** for Spanish and simplified Chinese. Published `onnx/` directory. AFL-3.0 — do not bake into the image. |
+| `Davlan/distilbert-base-multilingual-cased-ner-hrl` | ~540MB | Same training card as the bert row. No published ONNX; export it. AFL-3.0. |
 
 Models must use a CoNLL-2003-style BIO scheme (`B-PER`, `I-PER`, `B-ORG`,
 `I-ORG`, `B-LOC`, `I-LOC`). DistilBERT exports omit `token_type_ids`; the
@@ -91,3 +92,24 @@ python scripts/export_ner_model.py \
 export CENSGATE_NER_MODEL_PATH=$PWD/models/distilbert-ner/model.onnx
 ./scripts/validate-distilbert-ner.sh
 ```
+
+## Reference languages (Spanish, simplified Chinese, Vietnamese)
+
+Pattern keywords for `es`, `zh`, and `vi` ship in this branch. NER does not.
+The default image model is English. Point a local process at the Davlan
+bert ONNX bundle to run the reference-language smoke test. Load that
+bundle with `NerRecognizer::from_file` so `config.json` sets `id2label`.
+`NerConfig::default()` uses a different label order and will mis-tag it.
+
+```bash
+# Published files: onnx/model.onnx, onnx/tokenizer.json, onnx/config.json
+# from Davlan/bert-base-multilingual-cased-ner-hrl (AFL-3.0).
+export REDACT_NER_SMOKE_DIR=$PWD/models/multilingual-ner
+export ORT_DYLIB_PATH=/path/to/libonnxruntime.so
+cargo test -p redact-ner --test ner_e2e -- --ignored test_reference_language_ner_smoke
+```
+
+The engine still does not run NER for `vi`. `NerRecognizer::analyze` ignores
+the language argument, which is why the smoke test can call it directly.
+Details, the two sentences that failed, and how to add another language:
+[NER language spike](ner-languages-spike.md) and [Languages](languages.md).

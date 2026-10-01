@@ -160,7 +160,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Compile benchmarks
-        run: cargo bench --package redact-core --no-run
+        run: |
+          cargo bench --package redact-core --no-run
+          cargo bench --package redact-gateway --no-run
+
+      - name: Gateway hot-path budget
+        run: cargo test -p redact-gateway --release --test hot_path_budget -- --nocapture
 
   security-audit:
     name: Security Audit

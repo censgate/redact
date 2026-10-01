@@ -2,10 +2,12 @@
 
 - [Installation](install.md) — Cargo, source, Docker, full NER image
 - [Entity types](entity-types.md) — 61 compiled types (`list-entities` / `data/facts.json`)
+- [Languages](languages.md) — English, Vietnamese, Spanish, Simplified Chinese, and how to add a locale
 - [Secrets detection](secrets-detection.md) — Entropy model, exclusions, named types, optional pack
 - [Postgres scanning model](scanning-model.md) — `redact-scan` layers, safety rails, report shape
 - [WebAssembly](wasm.md) — Pattern engine for browsers and Workers
 - [NER](ner.md) — Optional ONNX named-entity recognition
+- [NER language spike](ner-languages-spike.md) — Verification models for Spanish, simplified Chinese, and Vietnamese
 - [Gateway getting started](gateway/getting-started.md) — Local redaction, Ollama, OpenAI SDK
 - [Gateway](gateway/) — Configuration, policy, tokenization, auth, telemetry, audit, streaming, deployment
 - [Benchmarks](benchmarks/) — oha vs Presidio (p50 **32×** on the 2026-04-18 payload)

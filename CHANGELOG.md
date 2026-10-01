@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Pattern, secret, and pack recognizers no longer skip non-`en` language
+  codes. Callers that passed `vi`, `es`, or any other code previously got
+  no detections at all. English callers, the gateway, and WASM are
+  unchanged because they already requested `en` or hardcoded it.
+
+### Added
+
+- Context keywords are concepts shared by English, Vietnamese, Spanish, and
+  Simplified Chinese. A translation does not dilute an English hit. Age,
+  PO Box, medical-record, and bank-account phrases in those languages are
+  detected. See [docs/languages.md](docs/languages.md) to add another locale.
+- NER verification for Spanish, simplified Chinese, and a Vietnamese smoke
+  check uses `Davlan/bert-base-multilingual-cased-ner-hrl` (local ONNX,
+  not the default image). See [docs/ner-languages-spike.md](docs/ner-languages-spike.md).
+- Gateway hot-path microbenchmark (`cargo bench -p redact-gateway --bench hot_path`)
+  and a release-mode budget test so CI rejects a large latency regression on
+  text redaction and chat-request redaction.
+
 ## [0.12.5] - 2026-09-26
 
 ### Security

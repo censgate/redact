@@ -28,6 +28,7 @@ blake3 = { workspace = true }
 aes-gcm = { workspace = true }
 pbkdf2 = { workspace = true }
 rand = { workspace = true }
+unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

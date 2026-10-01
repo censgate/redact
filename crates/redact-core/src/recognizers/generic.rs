@@ -294,6 +294,11 @@ impl Recognizer for GenericSecretRecognizer {
         MIN_SCORE
     }
 
+    fn supports_language(&self, _language: &str) -> bool {
+        // Entropy and keyword gates do not depend on the request language.
+        true
+    }
+
     fn analyze(&self, text: &str, _language: &str) -> Result<Vec<RecognizerResult>> {
         let _span = crate::operations_enabled()
             .then(|| tracing::info_span!("redact.gateway.detect.patterns").entered());

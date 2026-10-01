@@ -283,7 +283,7 @@ Confirm the idea is in [project scope](docs/PROJECT_SCOPE.md) before starting.
 - [ ] WASM + inline NER (deferred; see [docs/wasm.md](docs/wasm.md))
 - [ ] Mobile FFI bindings
 - [ ] Additional anonymization strategies
-- [ ] Multi-language pattern support
+- [ ] Further locales beyond Vietnamese, Spanish, and Simplified Chinese ([docs/languages.md](docs/languages.md))
 - [ ] Streaming API for large texts
 
 ### Low Priority

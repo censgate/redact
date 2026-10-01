@@ -22,7 +22,9 @@
 /// Recommended models for testing:
 /// - `dslim/bert-base-NER` (~420MB) - Excellent accuracy, CoNLL-2003 trained
 /// - `dbmdz/bert-large-cased-finetuned-conll03-english` (~1.2GB) - High accuracy
-/// - `Davlan/distilbert-base-multilingual-cased-ner-hrl` (~500MB) - Multilingual
+/// - `Davlan/bert-base-multilingual-cased-ner-hrl` — Spanish, simplified
+///   Chinese, and a Vietnamese smoke check. Load with `from_file` so
+///   `config.json` supplies `id2label`. See `docs/ner-languages-spike.md`.
 ///
 /// For faster CI testing, use quantized or distilled models (~50-100MB).
 ///
@@ -680,6 +682,121 @@ fn test_ner_honors_censgate_ner_model_path() -> Result<()> {
                 expected_text,
                 test_case.text,
                 model_path,
+                results
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Spans the phase-2 reference languages produced on
+/// `Davlan/bert-base-multilingual-cased-ner-hrl` (published `onnx/`).
+///
+/// Set `REDACT_NER_SMOKE_DIR` to that directory (`model.onnx`,
+/// `tokenizer.json`, and `config.json`). The default path is
+/// `tests/fixtures/models/multilingual-ner`. Missing weights skip.
+///
+/// `NerRecognizer::analyze` does not consult the language gate.
+/// `AnalyzerEngine` still skips `vi`. Spans are checked with
+/// `text[start..end]` because the recognizer leaves `text` empty.
+/// Two sentences that failed this model are documented in
+/// `docs/ner-languages-spike.md` and are not expected here:
+/// `华为` split into a false person, and `Đại học Bách khoa Hà Nội`
+/// lost its last syllable.
+#[test]
+#[ignore]
+fn test_reference_language_ner_smoke() -> Result<()> {
+    let model_dir = std::env::var("REDACT_NER_SMOKE_DIR")
+        .unwrap_or_else(|_| "tests/fixtures/models/multilingual-ner".to_string());
+    if !model_exists(&model_dir) {
+        eprintln!("skip: no model at {model_dir}");
+        return Ok(());
+    }
+
+    let recognizer = NerRecognizer::from_file(Path::new(&model_dir).join("model.onnx"))?;
+    anyhow::ensure!(
+        recognizer.is_available(),
+        "NER did not load from {model_dir}"
+    );
+
+    let cases = [
+        (
+            "en",
+            "John Doe works at Microsoft in Seattle.",
+            vec![
+                (EntityType::Person, "John Doe"),
+                (EntityType::Organization, "Microsoft"),
+                (EntityType::Location, "Seattle"),
+            ],
+        ),
+        (
+            "es",
+            "María García trabaja en Telefónica en Madrid.",
+            vec![
+                (EntityType::Person, "María García"),
+                (EntityType::Organization, "Telefónica"),
+                (EntityType::Location, "Madrid"),
+            ],
+        ),
+        (
+            "es",
+            "Pedro Sánchez visitó Barcelona y habló con Iberdrola.",
+            vec![
+                (EntityType::Person, "Pedro Sánchez"),
+                (EntityType::Location, "Barcelona"),
+                (EntityType::Organization, "Iberdrola"),
+            ],
+        ),
+        (
+            "zh",
+            "张伟就职于腾讯，住在深圳。",
+            vec![
+                (EntityType::Person, "张伟"),
+                (EntityType::Organization, "腾讯"),
+                (EntityType::Location, "深圳"),
+            ],
+        ),
+        (
+            "zh",
+            "马云创立了阿里巴巴，总部位于杭州。",
+            vec![
+                (EntityType::Person, "马云"),
+                (EntityType::Organization, "阿里巴巴"),
+                (EntityType::Location, "杭州"),
+            ],
+        ),
+        (
+            "vi",
+            "Nguyễn Văn An làm việc tại FPT ở Hà Nội.",
+            vec![
+                (EntityType::Person, "Nguyễn Văn An"),
+                (EntityType::Organization, "FPT"),
+                (EntityType::Location, "Hà Nội"),
+            ],
+        ),
+        (
+            "vi",
+            "Trần Thị Mai làm việc tại Vietcombank ở Thành phố Hồ Chí Minh.",
+            vec![
+                (EntityType::Person, "Trần Thị Mai"),
+                (EntityType::Organization, "Vietcombank"),
+                (EntityType::Location, "Thành phố Hồ Chí Minh"),
+            ],
+        ),
+    ];
+
+    for (language, text, expected) in cases {
+        let results = recognizer.analyze(text, language)?;
+        for (expected_type, expected_text) in &expected {
+            let found = results.iter().any(|r| {
+                r.entity_type == *expected_type && text.get(r.start..r.end) == Some(*expected_text)
+            });
+            anyhow::ensure!(
+                found,
+                "expected {:?} '{}' in '{}' ({language}); got {:?}",
+                expected_type,
+                expected_text,
+                text,
                 results
             );
         }

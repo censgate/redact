@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See the LICENSE file
 // in the project root for license information.
 
+pub(crate) mod context;
 pub mod entropy;
 pub mod generic;
 pub mod pattern;

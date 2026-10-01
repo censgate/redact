@@ -867,18 +867,37 @@ impl Recognizer for NerRecognizer {
     }
 
     fn supports_language(&self, language: &str) -> bool {
-        // Most multilingual NER models support these languages
-        matches!(
-            language,
-            "en" | "es" | "fr" | "de" | "it" | "pt" | "nl" | "pl" | "ru" | "zh" | "ja" | "ko"
-        )
+        ner_model_supports_language(language)
     }
+}
+
+/// Request languages for which the analyzer will invoke NER.
+///
+/// This list is not read from the loaded ONNX file. `es` and `zh` are on it
+/// because the verification model was trained on them. `vi` is absent: that
+/// model was not trained on Vietnamese, and a few transferred smoke spans
+/// are not a support claim. See `docs/ner-languages-spike.md`.
+/// Pattern detection still runs for every code.
+pub(crate) fn ner_model_supports_language(language: &str) -> bool {
+    matches!(
+        language,
+        "en" | "es" | "fr" | "de" | "it" | "pt" | "nl" | "pl" | "ru" | "zh" | "ja" | "ko"
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn vietnamese_is_outside_the_ner_language_list() {
+        assert!(super::ner_model_supports_language("en"));
+        assert!(super::ner_model_supports_language("es"));
+        assert!(super::ner_model_supports_language("zh"));
+        assert!(!super::ner_model_supports_language("vi"));
+        assert!(!super::ner_model_supports_language("xx"));
+    }
 
     #[test]
     fn test_default_config() {

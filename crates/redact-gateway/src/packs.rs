@@ -699,6 +699,11 @@ impl Recognizer for PackRecognizer {
     fn min_score(&self) -> f32 {
         self.min_score
     }
+
+    fn supports_language(&self, _language: &str) -> bool {
+        // Pack regexes do not depend on the request language.
+        true
+    }
 }
 
 /// Last identifier-like token in the text immediately before a captured value.
@@ -788,6 +793,10 @@ patterns:
         let hits = recognizer.analyze("DISABLED LOWCONF", "en").unwrap();
         assert!(hits.iter().all(|h| h.text.as_deref() != Some("DISABLED")));
         assert!(hits.iter().any(|h| h.text.as_deref() == Some("LOWCONF")));
+        let vietnamese = recognizer.analyze("DISABLED LOWCONF", "vi").unwrap();
+        assert_eq!(vietnamese.len(), hits.len());
+        assert!(recognizer.supports_language("vi"));
+        assert!(recognizer.supports_language("zh"));
     }
 
     #[test]

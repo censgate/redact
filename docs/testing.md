@@ -9,9 +9,17 @@ cargo test --workspace -- --nocapture
 
 # Run benchmarks
 cargo bench --package redact-core
+cargo bench -p redact-gateway --bench hot_path
+
+# Release-mode gateway latency ceiling (also runs in CI)
+cargo test -p redact-gateway --release --test hot_path_budget -- --nocapture
 
 # Run NER E2E tests (requires ONNX model)
 cargo test --package redact-ner --test ner_e2e -- --ignored
+
+# Reference-language smoke (Davlan ONNX directory; see docs/ner.md)
+REDACT_NER_SMOKE_DIR=models/multilingual-ner \
+  cargo test -p redact-ner --test ner_e2e -- --ignored test_reference_language_ner_smoke
 
 # Run specific test suites
 cargo test --package redact-core --test pattern_coverage
