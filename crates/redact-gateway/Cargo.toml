@@ -54,14 +54,14 @@ subtle = "2.6"
 
 # OpenTelemetry: API, SDK and bridges are always compiled so the gateway can
 # emit spec-conformant telemetry even without the OTLP exporter feature.
-opentelemetry = { version = "0.32", features = ["trace", "metrics", "logs"] }
-opentelemetry_sdk = { version = "0.32", features = ["trace", "metrics", "logs", "rt-tokio"] }
-opentelemetry-semantic-conventions = { version = "0.32", features = ["semconv_experimental"] }
-opentelemetry-appender-tracing = "0.32"
-tracing-opentelemetry = "0.33"
+opentelemetry = { version = "0.33", features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.33", features = ["trace", "metrics", "logs", "rt-tokio"] }
+opentelemetry-semantic-conventions = { version = "0.33", features = ["semconv_experimental"] }
+opentelemetry-appender-tracing = "0.33"
+tracing-opentelemetry = "0.34"
 
-opentelemetry-otlp = { version = "0.32", features = ["trace", "metrics", "logs", "grpc-tonic", "http-proto", "reqwest-client"], optional = true }
-opentelemetry-prometheus = { version = "0.32", optional = true }
+opentelemetry-otlp = { version = "0.33", features = ["trace", "metrics", "logs", "grpc-tonic", "http-proto", "reqwest-client"], optional = true }
+opentelemetry-prometheus = { version = "0.33", optional = true }
 prometheus = { version = "0.14", optional = true }
 jsonwebtoken = { version = "11", optional = true, features = ["aws_lc_rs"] }
 vaultrs = { version = "0.8", optional = true }
