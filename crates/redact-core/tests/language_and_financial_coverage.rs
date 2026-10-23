@@ -5,7 +5,7 @@ use redact_core::{
     AnalyzerEngine, EntityType,
 };
 
-const LANGUAGES: [&str; 4] = ["es", "vi", "zh", "de"];
+const LANGUAGES: [&str; 5] = ["es", "vi", "zh", "de", "ja"];
 
 fn sample_aws_access_key() -> String {
     format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE")
@@ -176,7 +176,7 @@ fn spaced_iban_is_detected() {
 fn context_bank_number_masks_whole_16_to_19_digits() {
     let engine = AnalyzerEngine::new();
     let number = "123456789012345678";
-    let text = format!("bank account {number} noted");
+    let text = format!("account number {number} noted");
     let result = engine.analyze(&text, Some("en")).unwrap();
     let bank = result
         .detected_entities
@@ -191,6 +191,25 @@ fn context_bank_number_masks_whole_16_to_19_digits() {
     let anonymized = engine.anonymize(&text, Some("en"), &config).unwrap();
     assert!(anonymized.text.contains("[US_BANK_NUMBER]"));
     assert!(!anonymized.text.contains(number));
+    for phrase_text in [
+        "acct 12345678901234567",
+        "account no 12345678901234567",
+        "Kontonummer 12345678901234567",
+        "número de cuenta 12345678901234567",
+        "số tài khoản 12345678901234567",
+        "账号12345678901234567",
+        "口座番号12345678901234567",
+    ] {
+        let result = engine.analyze(phrase_text, Some("en")).unwrap();
+        assert!(
+            result
+                .detected_entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::UsBankNumber),
+            "expected bank number for {phrase_text:?}: {:?}",
+            result.detected_entities
+        );
+    }
     assert!(
         !anonymized.text.contains(&number[number.len() - 4..]),
         "trailing digits left in {}",
@@ -208,32 +227,73 @@ fn email_and_card_detected_next_to_cjk() {
 #[test]
 fn anonymize_leaves_no_four_plus_digit_substring() {
     let engine = AnalyzerEngine::new();
-    let aws_key = sample_aws_access_key();
-    let bank = "123456789012345678";
+    let bank_18 = "123456789012345678";
+    let bank_19 = "1234567890123456789";
+    let originals = [
+        "maria@example.es",
+        "4532 0151 1283 0366",
+        "4532-0151-1283-0366",
+        "3782 822463 10005",
+        "DE89 3704 0044 0532 0130 00",
+        bank_18,
+        bank_19,
+    ];
     let text = format!(
-        "correo maria@example.es Amex 3782 822463 10005 clave {aws_key} \
-         IBAN DE89 3704 0044 0532 0130 00 bank account {bank}"
+        "correo maria@example.es tarjeta 4532 0151 1283 0366 \
+         card 4532-0151-1283-0366 Amex 3782 822463 10005 \
+         IBAN DE89 3704 0044 0532 0130 00 \
+         account number {bank_18} account number {bank_19}"
     );
-    let originals = ["3782 822463 10005", "DE89 3704 0044 0532 0130 00", bank];
     let config = AnonymizerConfig {
         strategy: AnonymizationStrategy::Replace,
         ..Default::default()
     };
-    let anonymized = engine.anonymize(&text, Some("es"), &config).unwrap();
-
-    for original in originals {
-        for fragment in four_plus_digit_substrings(original) {
-            assert!(
-                !anonymized.text.contains(&fragment),
-                "digit substring {fragment} from {original} survived in {}",
+    for language in LANGUAGES {
+        let anonymized = engine
+            .anonymize(&text, Some(language), &config)
+            .unwrap_or_else(|e| panic!("anonymize {language}: {e}"));
+        for original in originals {
+            for fragment in four_plus_digit_substrings(original) {
+                assert!(
+                    !anonymized.text.contains(&fragment),
+                    "{language}: digit substring {fragment} from {original} survived in {}",
+                    anonymized.text
+                );
+            }
+        }
+        for run in digit_runs_of_at_least(&anonymized.text, 4) {
+            panic!(
+                "{language}: anonymized text still has 4+ digit run {run} in {}",
                 anonymized.text
             );
         }
-    }
-    for run in digit_runs_of_at_least(&anonymized.text, 4) {
-        panic!(
-            "anonymized text still has 4+ digit run {run} in {}",
+        assert!(
+            !anonymized.text.contains("maria@example.es"),
+            "{language}: email left in {}",
             anonymized.text
         );
     }
+}
+
+fn assert_not_bank_number(text: &str) {
+    let engine = AnalyzerEngine::new();
+    let result = engine.analyze(text, Some("en")).unwrap();
+    assert!(
+        result
+            .detected_entities
+            .iter()
+            .all(|e| e.entity_type != EntityType::UsBankNumber),
+        "unexpected US_BANK_NUMBER in {text:?}: {:?}",
+        result.detected_entities
+    );
+}
+
+#[test]
+fn bank_number_ignores_dates_phones_and_order_ids() {
+    assert_not_bank_number("account opened 20240115");
+    assert_not_bank_number("call the bank at 5551234567");
+    assert_not_bank_number("routing order 1234567890123");
+    assert_not_bank_number("meeting on 2024-01-15");
+    assert_not_bank_number("call 555-123-4567");
+    assert_not_bank_number("order 1234567890123");
 }

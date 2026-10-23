@@ -96,7 +96,7 @@ fn test_iban_code() {
 #[test]
 fn test_us_bank_number() {
     assert_entity_detected(
-        "bank account 123456789012345678",
+        "account number 123456789012345678",
         EntityType::UsBankNumber,
         0.5,
     );

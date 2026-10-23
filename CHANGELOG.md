@@ -11,16 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Pattern, secret, and pack recognizers run for every language. The CLI
+- Pattern, secret, and pack recognizers now apply across languages. The CLI
   `-l` / `--language` flag, the REST `language` field, and
-  `AnalyzerEngine::analyze(..., Some(language))` no longer skip those
-  recognizers when the hint is not `en`. NER stays language-specific.
+  `AnalyzerEngine::analyze(..., Some(language))` take that hint. NER stays
+  language-specific.
 - Card patterns accept 13–19 digit numbers, including groups separated by
   spaces or dashes. Luhn runs on the stripped digits. A spaced Amex
   (4-6-5) is masked as one span.
 - IBANs match the spaced form (groups of 4) as well as the compact form.
-- Context-gated bank account numbers consume the whole 8–19 digit run, so
-  a 16–19 digit value is not truncated.
+- Bank account numbers require a strong account phrase near the number
+  (`account number`, `acct`, `account no`, `Kontonummer`,
+  `número de cuenta`, `số tài khoản`, `账号`, `口座番号`) and consume the
+  whole 8–19 digit run, so a 16–19 digit value is not truncated.
 - Email and card patterns use explicit start/end classes so a value
   directly next to CJK text (for example `邮箱maria@example.com`) keeps
   its full local part or digit run.

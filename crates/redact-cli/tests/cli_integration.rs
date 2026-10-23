@@ -273,7 +273,7 @@ fn test_languages_detect_and_redact_financial_and_secrets() {
         "correo maria@example.es tarjeta 4532015112830366 clave {aws_key} \
          IBAN DE89370400440532013000"
     );
-    for language in ["es", "vi", "zh", "de"] {
+    for language in ["es", "vi", "zh", "de", "ja"] {
         cli()
             .arg("-l")
             .arg(language)

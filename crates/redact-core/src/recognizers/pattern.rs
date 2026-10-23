@@ -503,19 +503,22 @@ impl PatternRecognizer {
             ],
         );
 
-        // US Bank Account Number. Context-gated; 8–19 digits so a 16–19
-        // digit value is consumed whole (a 17-digit cap left a tail).
-        // One nearby context word is enough to clear min_score.
+        // US Bank Account Number. Strong account phrases only; a single
+        // weak word (bank, routing, order) must not reach min_score.
+        // 8–19 digits so a 16–19 digit value is consumed whole.
         let _ = self.add_pattern_with_context(
             EntityType::UsBankNumber,
             r"(?:^|[^0-9A-Za-z])(\d{8,19})(?:[^0-9]|$)",
-            0.45,
+            0.3,
             vec![
-                "account".to_string(),
-                "bank".to_string(),
-                "routing".to_string(),
-                "checking".to_string(),
-                "savings".to_string(),
+                "account number".to_string(),
+                "acct".to_string(),
+                "account no".to_string(),
+                "kontonummer".to_string(),
+                "número de cuenta".to_string(),
+                "số tài khoản".to_string(),
+                "账号".to_string(),
+                "口座番号".to_string(),
             ],
         );
 
@@ -772,10 +775,17 @@ impl Recognizer for PatternRecognizer {
                         // Base score from pattern
                         let mut score = pattern.score;
 
-                        // Boost score based on context if context words are provided
-                        if !pattern.context_words.is_empty() {
+                        if *entity_type == EntityType::UsBankNumber {
+                            // Require a strong account phrase. The proportional
+                            // boost is too small across the phrase list, and a
+                            // weak word must stay below min_score.
+                            if self.check_context(text, start, end, &pattern.context_words) == 0.0 {
+                                continue;
+                            }
+                            score = 0.6;
+                        } else if !pattern.context_words.is_empty() {
                             score += self.check_context(text, start, end, &pattern.context_words);
-                            score = score.min(1.0); // Cap at 1.0
+                            score = score.min(1.0);
                         }
 
                         // Apply validation (checksum, format validation)
