@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Nightly workflow on `main` (Ubuntu test matrix, `cargo audit`, MSRV, beta).
+- Markdown link check on pull requests and nightly (`lychee` over README and `docs/`).
+- CI job that runs documented `redact` CLI examples from README and docs.
+- Multilingual redaction coverage job over per-locale fixtures.
+- Public-hygiene gate driven by `PUBLIC_HYGIENE_PATTERNS` (skipped when unset).
+- Weekly lockfile-only `cargo update` workflow.
+- Bug and feature issue templates.
+- Stale workflow for Dependabot and this repository's automation pull requests only.
+
+### Changed
+
+- Facts check also verifies CLI `--help` flags, documented crate versions, and the `SECURITY.md` support table.
+- Dependabot ignores `uuid` 1.28+ (MSRV above the workspace 1.88 pin).
+
 ## [0.12.6] - 2026-10-23
 
 ### Fixed

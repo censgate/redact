@@ -30,6 +30,7 @@ Published crates: [`redact-scan`](https://crates.io/crates/redact-scan) · [`red
 
 ## From source
 
+<!-- redact-doc-examples: skip -->
 ```bash
 git clone https://github.com/censgate/redact.git
 cd redact

@@ -1,0 +1,3 @@
+# Optional paths skipped by the public-hygiene scan.
+# One repo-relative path per line. A trailing slash matches a prefix.
+# Comments start with #.

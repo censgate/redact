@@ -73,5 +73,48 @@
   "pattern_count": 81,
   "pattern_count_enabled": 70,
   "optional_pack_rule_count": 25,
-  "optional_pack_rule_count_enabled": 25
+  "optional_pack_rule_count_enabled": 25,
+  "cli_flags": {
+    "global": [
+      "--format",
+      "--help",
+      "--language",
+      "--version"
+    ],
+    "analyze": [
+      "--disable",
+      "--entities",
+      "--fail-on-detect",
+      "--fail-on-find",
+      "--file",
+      "--format",
+      "--help",
+      "--language"
+    ],
+    "anonymize": [
+      "--disable",
+      "--entities",
+      "--file",
+      "--format",
+      "--help",
+      "--language",
+      "--strategy"
+    ],
+    "list-entities": [
+      "--format",
+      "--help",
+      "--language"
+    ]
+  },
+  "workspace_version": "0.12.6",
+  "crate_versions": {
+    "redact-core": "0.12.6",
+    "redact-ner": "0.12.6",
+    "redact-api": "0.12.6",
+    "redact-cli": "0.12.6",
+    "redact-wasm": "0.12.6",
+    "redact-gateway": "0.12.6",
+    "redact-scan": "0.12.6",
+    "redact-verify": "0.12.6"
+  }
 }

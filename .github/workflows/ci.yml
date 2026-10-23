@@ -82,6 +82,89 @@ jobs:
       - name: Check data/facts.json
         run: node scripts/extract-facts.mjs --check --bin ./target/debug/redact
 
+      - name: Upload redact CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: redact-cli-linux
+          path: target/debug/redact
+          if-no-files-found: error
+          retention-days: 1
+
+  doc-examples:
+    name: README and docs examples
+    runs-on: ubuntu-latest
+    needs: facts
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download redact CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: redact-cli-linux
+          path: target/debug
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Run documented redact CLI examples
+        run: |
+          chmod +x ./target/debug/redact
+          node scripts/run-doc-examples.mjs --bin ./target/debug/redact
+
+  multilingual-coverage:
+    name: Multilingual redaction coverage
+    runs-on: ubuntu-latest
+    needs: facts
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download redact CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: redact-cli-linux
+          path: target/debug
+
+      - name: Run multilingual redaction coverage
+        run: |
+          chmod +x ./target/debug/redact
+          ./scripts/ci/check-multilingual-coverage.sh ./target/debug/redact
+
+  links:
+    name: Markdown links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check README and docs links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config .lychee.toml --no-progress README.md docs
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  public-hygiene:
+    name: Public hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Public hygiene
+        env:
+          PUBLIC_HYGIENE_PATTERNS: ${{ secrets.PUBLIC_HYGIENE_PATTERNS }}
+        run: node scripts/check-public-hygiene.mjs
+
   wasm:
     name: WASM (pattern-only)
     runs-on: ubuntu-latest

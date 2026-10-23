@@ -14,7 +14,7 @@ support@censgate.com.
 
 ### Reporting Bugs
 
-Before creating bug reports, please check existing issues to avoid duplicates. When creating a bug report, include:
+Use the **Bug report** issue template. Before creating bug reports, please check existing issues to avoid duplicates. When creating a bug report, include:
 
 - **Clear title and description**
 - **Steps to reproduce** the issue
@@ -24,7 +24,7 @@ Before creating bug reports, please check existing issues to avoid duplicates. W
 
 ### Suggesting Enhancements
 
-Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion, include:
+Use the **Feature request** issue template. Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion, include:
 
 - **Clear title and description**
 - **Use cases** and **examples**

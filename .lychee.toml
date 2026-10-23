@@ -1,0 +1,36 @@
+# Link checker for README.md and docs/. External hosts that rate-limit
+# anonymous crawlers are excluded rather than treated as broken.
+
+verbose = "info"
+no_progress = true
+cache = false
+max_retries = 3
+timeout = 20
+max_redirects = 5
+include_mail = false
+insecure = false
+
+# Local / example endpoints used in operator docs.
+exclude = [
+  '^https://crates\.io/',
+  '^https://img\.shields\.io/',
+  '^https://docs\.rs/',
+  '^http://127\.0\.0\.1',
+  '^https://127\.0\.0\.1',
+  '^http://localhost',
+  '^https://localhost',
+  '^http://host\.docker\.internal',
+  '^postgres://',
+  'linkedin\.com',
+  'twitter\.com',
+  'x\.com',
+  '^https://github\.com/[^/]+/redact/security/dependabot/',
+  '^https://github\.com/[^/]+/redact/discussions',
+  # GitHub pull request URLs (private or deleted heads 404).
+  '^https://github\.com/[^/]+/[^/]+/pull/',
+]
+
+exclude_path = [
+  "target",
+  "node_modules",
+]

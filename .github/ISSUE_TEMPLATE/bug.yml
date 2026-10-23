@@ -1,0 +1,72 @@
+name: Bug report
+description: Report incorrect detection, anonymization, or tooling behavior
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for a report. Search existing issues first. Security
+        vulnerabilities go through this repository's private Security
+        advisories, not this form.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands, input text, and configuration.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant stdout/stderr. Do not paste live secrets.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Crate or git revision (`redact --version` or `git rev-parse HEAD`).
+    validations:
+      required: true
+  - type: input
+    id: rust
+    attributes:
+      label: Rust version
+      description: Output of `rustc --version`.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI (`redact`)
+        - redact-core library
+        - Gateway
+        - API
+        - Scanner (`redact-scan`)
+        - Verifier (`redact-verify`)
+        - WASM
+        - Documentation / CI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: OS, feature flags, entity types, language code.
