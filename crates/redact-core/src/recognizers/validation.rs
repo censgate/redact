@@ -482,6 +482,8 @@ mod tests {
         assert_eq!(validate_credit_card("4532015112830366"), 1.0);
         assert_eq!(validate_credit_card("5425233430109903"), 1.0);
         assert_eq!(validate_credit_card("374245455400126"), 1.0);
+        assert_eq!(validate_credit_card("3782 822463 10005"), 1.0);
+        assert_eq!(validate_credit_card("4532-0151-1283-0366"), 1.0);
     }
 
     #[test]
@@ -522,6 +524,8 @@ mod tests {
     fn test_valid_iban() {
         assert_eq!(validate_iban("GB82WEST12345698765432"), 1.0);
         assert_eq!(validate_iban("DE89370400440532013000"), 1.0);
+        assert_eq!(validate_iban("GB82 WEST 1234 5698 7654 32"), 1.0);
+        assert_eq!(validate_iban("DE89 3704 0044 0532 0130 00"), 1.0);
     }
 
     #[test]

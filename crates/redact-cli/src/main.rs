@@ -26,7 +26,7 @@ struct Cli {
     #[arg(short, long, global = true, value_enum, default_value = "text")]
     format: OutputFormat,
 
-    /// Language for analysis
+    /// Language hint (ISO 639-1, e.g. en, es, vi, zh, de). Pattern, secret, and pack recognizers run for every language; NER stays language-specific
     #[arg(short, long, global = true, default_value = "en")]
     language: String,
 }

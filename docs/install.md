@@ -10,6 +10,13 @@ rustup install 1.93.0
 rustup default 1.93.0
 ```
 
+## Prerequisites
+
+From-source builds need a GNU C++ compiler (`g++`; Apple `gcc` is a clang shim
+and does not count), OpenSSL development headers (`libssl-dev` on
+Debian/Ubuntu), and `pkg-config`. `cmake` is also required by some native
+dependencies.
+
 ## Cargo
 
 ```bash
@@ -19,7 +26,7 @@ cargo install redact-scan      # read-only Postgres PII discovery
 cargo install redact-verify    # offline ledger evidence-pack verifier
 ```
 
-Published crates: [`redact-scan`](https://crates.io/crates/redact-scan) · [`redact-verify`](https://crates.io/crates/redact-verify) (0.10.0).
+Published crates: [`redact-scan`](https://crates.io/crates/redact-scan) · [`redact-verify`](https://crates.io/crates/redact-verify) (0.12.6).
 
 ## From source
 

@@ -11,7 +11,9 @@ pub struct AnalyzeRequest {
     /// Text to analyze
     pub text: String,
 
-    /// Language code (e.g., "en", "es")
+    /// Language hint (ISO 639-1, e.g. `"en"`, `"es"`). Pattern, secret, and
+    /// pack recognizers run for every language. NER, when loaded, stays
+    /// language-specific.
     #[serde(default = "default_language")]
     pub language: String,
 
@@ -88,7 +90,9 @@ pub struct AnonymizeRequest {
     /// Text to anonymize
     pub text: String,
 
-    /// Language code
+    /// Language hint (ISO 639-1, e.g. `"en"`, `"es"`). Pattern, secret, and
+    /// pack recognizers run for every language. NER, when loaded, stays
+    /// language-specific.
     #[serde(default = "default_language")]
     pub language: String,
 

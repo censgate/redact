@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.6] - 2026-10-23
+
+### Fixed
+
+- Pattern, secret, and pack recognizers now apply across languages. The CLI
+  `-l` / `--language` flag, the REST `language` field, and
+  `AnalyzerEngine::analyze(..., Some(language))` take that hint. NER stays
+  language-specific.
+- Card patterns accept 13–19 digit numbers, including groups separated by
+  spaces or dashes. Luhn runs on the stripped digits. A spaced Amex
+  (4-6-5) is masked as one span.
+- IBANs match the spaced form (groups of 4) as well as the compact form.
+- Bank account numbers require a strong account phrase near the number
+  (`account number`, `acct`, `account no`, `Kontonummer`,
+  `número de cuenta`, `số tài khoản`, `账号`, `口座番号`) and consume the
+  whole 8–19 digit run, so a 16–19 digit value is not truncated.
+- Email and card patterns use explicit start/end classes so a value
+  directly next to CJK text (for example `邮箱maria@example.com`) keeps
+  its full local part or digit run.
+- NER entity spans widen to the surrounding word so subword pieces are
+  not emitted as a truncated label. Latin, Greek, and Cyrillic letters
+  and digits count as word characters; unspaced scripts are left as
+  labelled. (#186)
+- Gateway restore treats a token inside a markdown link label
+  (`[[TYPE_n]](url)`) as the last `[` before `]`, so the token is
+  restored. (#186)
+
+### Security
+
+- Lockfile-only updates: `rustls` 0.23.45 → 0.23.46,
+  `quinn-proto` 0.11.16 → 0.11.19, `rustls-webpki` 0.103.14 → 0.103.16,
+  `webpki-roots` 1.0.9 → 1.0.11, `webpki-root-certs` 1.0.9 → 1.0.11,
+  `ctutils` 0.4.2 → 0.4.5, `chacha20` 0.10.1 → 0.10.2 (yanked).
+
+### Changed
+
+- Documented CLI `-l` / `--language` and the REST `language` field.
+- `SECURITY.md` supported-versions table lists 0.12.x.
+- Install docs list a GNU C++ compiler, OpenSSL development headers, and
+  `pkg-config` as from-source prerequisites.
+
 ## [0.12.5] - 2026-09-26
 
 ### Security
@@ -452,4 +493,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.12.5 or later.
+Those versions are no longer maintained. Please upgrade to v0.12.6 or later.

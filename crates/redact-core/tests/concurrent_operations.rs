@@ -102,9 +102,7 @@ fn test_concurrent_with_different_languages() {
     let engine = Arc::new(AnalyzerEngine::new());
     let mut handles = vec![];
 
-    // Note: Pattern recognizer currently only supports English
-    // This test verifies that specifying different languages doesn't cause crashes
-    let languages = ["en", "en", "en", "en"]; // Use English for all
+    let languages = ["en", "es", "vi", "zh"];
 
     for (i, lang) in languages.iter().enumerate() {
         let engine_clone = Arc::clone(&engine);

@@ -75,7 +75,11 @@ fi
 redact analyze "Contact Jane at jane@example.com or call (555) 123-4567"
 redact anonymize --strategy mask "Email: jane@example.com"
 redact --format json list-entities
+redact -l es analyze --fail-on-detect "correo maria@example.es"
 ```
+
+`-l` / `--language` is an ISO 639-1 hint (default `en`). Pattern, secret, and pack
+recognizers run for every language. NER, when loaded, stays language-specific.
 
 `--disable` subtracts from the compiled set (or from `--entities` when both are
 set). Gateway equivalent: `{ action: allow }` on the profile.
@@ -90,7 +94,7 @@ cargo install redact-scan
 redact-scan --url postgres://reader@localhost/app --schema public --out report.json
 ```
 
-Crate: [`redact-scan`](https://crates.io/crates/redact-scan) 0.10.0.
+Crate: [`redact-scan`](https://crates.io/crates/redact-scan) 0.12.6.
 
 `--fail-on` exits 1 when findings match. `--include-samples` is a local sidecar
 only and cannot be combined with `--report-url`.
@@ -118,7 +122,7 @@ cargo install redact-verify
 redact-verify --pack <file> --pubkey <file> [--online] [--format json]
 ```
 
-Crate: [`redact-verify`](https://crates.io/crates/redact-verify) 0.10.0. `--online` does not dial the network.
+Crate: [`redact-verify`](https://crates.io/crates/redact-verify) 0.12.6. `--online` does not dial the network.
 
 Exit **0** only if every check passes and R2 (`pack_anchored`) is `pass`.
 **1** on any fail or R2 unproven. **2** if the pack is malformed.
@@ -132,8 +136,8 @@ Library (version pin is updated by Prepare Release):
 
 ```toml
 [dependencies]
-redact-core = "0.12.5"
-redact-ner = "0.12.5"  # optional ONNX NER
+redact-core = "0.12.6"
+redact-ner = "0.12.6"  # optional ONNX NER
 ```
 
 ```rust
@@ -150,7 +154,17 @@ rustup target add wasm32-unknown-unknown
 wasm-pack build --target web crates/redact-wasm
 ```
 
-REST: `cargo run --release -p redact-api` then `POST /api/v1/analyze`.
+REST: `cargo run --release -p redact-api` then `POST /api/v1/analyze` or
+`POST /api/v1/anonymize`. The JSON `language` field is the same ISO 639-1 hint
+as the CLI flag (default `en`). Pattern, secret, and pack recognizers run for
+every language.
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/analyze \
+  -H 'content-type: application/json' \
+  -d '{"text":"correo maria@example.es","language":"es"}'
+```
+
 Install and Docker: [`docs/install.md`](docs/install.md). WASM details:
 [`docs/wasm.md`](docs/wasm.md). NER: [`docs/ner.md`](docs/ner.md).
 
@@ -184,5 +198,4 @@ contributors to sign on the pull request.
 ## Support
 
 - [GitHub Issues](https://github.com/censgate/redact/issues)
-- [GitHub Discussions](https://github.com/censgate/redact/discussions)
 - Email: support@censgate.com

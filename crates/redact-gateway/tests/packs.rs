@@ -64,6 +64,26 @@ fn loads_all_shipped_repo_pattern_packs() {
         "aws key not detected: {hits:?}"
     );
 
+    for language in ["es", "vi", "zh", "de"] {
+        let hits = recognizer
+            .analyze(&text, language)
+            .unwrap_or_else(|e| panic!("analyze {language}: {e}"));
+        assert!(
+            hits.iter().any(|h| {
+                h.entity_type == EntityType::EmailAddress
+                    && h.text.as_deref() == Some("user@example.com")
+            }),
+            "email not detected for {language}: {hits:?}"
+        );
+        assert!(
+            hits.iter().any(|h| {
+                h.entity_type == EntityType::AwsAccessKey
+                    && h.text.as_deref() == Some(aws_key.as_str())
+            }),
+            "aws key not detected for {language}: {hits:?}"
+        );
+    }
+
     let mac = "00:1B:44:11:3A:B7";
     let mac_hits = recognizer.analyze(mac, "en").expect("analyze");
     assert!(

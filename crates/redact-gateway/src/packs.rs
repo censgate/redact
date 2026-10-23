@@ -699,6 +699,10 @@ impl Recognizer for PackRecognizer {
     fn min_score(&self) -> f32 {
         self.min_score
     }
+
+    fn supports_language(&self, _language: &str) -> bool {
+        true
+    }
 }
 
 /// Last identifier-like token in the text immediately before a captured value.

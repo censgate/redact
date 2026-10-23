@@ -247,7 +247,56 @@ fn test_language_flag() {
         .arg("analyze")
         .arg("Email: john@example.com")
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("EmailAddress"))
+        .stdout(predicate::str::contains("john@example.com"));
+}
+
+#[test]
+fn test_language_es_fail_on_detect() {
+    cli()
+        .arg("-l")
+        .arg("es")
+        .arg("analyze")
+        .arg("--fail-on-detect")
+        .arg("correo maria@example.es")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("EmailAddress"))
+        .stdout(predicate::str::contains("maria@example.es"));
+}
+
+#[test]
+fn test_languages_detect_and_redact_financial_and_secrets() {
+    let aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
+    let text = format!(
+        "correo maria@example.es tarjeta 4532015112830366 clave {aws_key} \
+         IBAN DE89370400440532013000"
+    );
+    for language in ["es", "vi", "zh", "de", "ja"] {
+        cli()
+            .arg("-l")
+            .arg(language)
+            .arg("analyze")
+            .arg(&text)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("EmailAddress"))
+            .stdout(predicate::str::contains("CreditCard"))
+            .stdout(predicate::str::contains("AwsAccessKey"))
+            .stdout(predicate::str::contains("IbanCode"));
+        cli()
+            .arg("-l")
+            .arg(language)
+            .arg("anonymize")
+            .arg(&text)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("[EMAIL_ADDRESS]"))
+            .stdout(predicate::str::contains("[CREDIT_CARD]"))
+            .stdout(predicate::str::contains("[AWS_ACCESS_KEY]"))
+            .stdout(predicate::str::contains("[IBAN_CODE]"));
+    }
 }
 
 #[test]

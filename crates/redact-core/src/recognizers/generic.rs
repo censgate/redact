@@ -294,6 +294,10 @@ impl Recognizer for GenericSecretRecognizer {
         MIN_SCORE
     }
 
+    fn supports_language(&self, _language: &str) -> bool {
+        true
+    }
+
     fn analyze(&self, text: &str, _language: &str) -> Result<Vec<RecognizerResult>> {
         let _span = crate::operations_enabled()
             .then(|| tracing::info_span!("redact.gateway.detect.patterns").entered());
@@ -361,6 +365,14 @@ impl Recognizer for GenericSecretRecognizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generic_secret_recognizer_supports_any_language() {
+        let recognizer = GenericSecretRecognizer::new();
+        for language in ["en", "es", "vi", "zh", "de"] {
+            assert!(recognizer.supports_language(language), "{language}");
+        }
+    }
 
     #[test]
     fn shared_secret_is_secret_lhs() {
