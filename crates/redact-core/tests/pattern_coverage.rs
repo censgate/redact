@@ -77,19 +77,29 @@ fn test_credit_card() {
     assert_entity_detected("Mastercard: 5425233430109903", EntityType::CreditCard, 0.9);
     // Amex test card: 374245455400126 (15 digits, passes Luhn)
     assert_entity_detected("Amex: 374245455400126", EntityType::CreditCard, 0.9);
+    assert_entity_detected("Amex 3782 822463 10005", EntityType::CreditCard, 0.9);
+    assert_entity_detected("Card 4532-0151-1283-0366", EntityType::CreditCard, 0.9);
 }
 
 #[test]
 fn test_iban_code() {
-    // Pattern matches IBAN without spaces
     assert_entity_detected("IBAN: GB82WEST12345698765432", EntityType::IbanCode, 0.75);
     assert_entity_detected("DE89370400440532013000", EntityType::IbanCode, 0.75);
+    assert_entity_detected(
+        "IBAN GB82 WEST 1234 5698 7654 32",
+        EntityType::IbanCode,
+        0.75,
+    );
+    assert_entity_detected("DE89 3704 0044 0532 0130 00", EntityType::IbanCode, 0.75);
 }
 
 #[test]
 fn test_us_bank_number() {
-    // Note: Pattern needs to be implemented
-    // Skipping for now - not in default patterns
+    assert_entity_detected(
+        "bank account 123456789012345678",
+        EntityType::UsBankNumber,
+        0.5,
+    );
 }
 
 // ============================================================================

@@ -278,4 +278,91 @@ mod tests {
         assert!(person_spans[0]["end"].is_number());
         assert!(person_spans[0]["score"].as_f64().unwrap() > 0.0);
     }
+
+    #[tokio::test]
+    async fn test_analyze_and_anonymize_for_non_english_languages() {
+        let aws_key = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
+        let text = format!(
+            "correo maria@example.es tarjeta 4532015112830366 clave {aws_key} \
+             IBAN DE89370400440532013000"
+        );
+        for language in ["es", "vi", "zh", "de"] {
+            let state = AppState {
+                engine: Arc::new(AnalyzerEngine::new()),
+            };
+            let app = create_router(state);
+            let body = serde_json::json!({
+                "text": text,
+                "language": language,
+            })
+            .to_string();
+
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/analyze")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{language}");
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let json: Value = serde_json::from_slice(&body).unwrap();
+            let types: Vec<&str> = json["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["entity_type"].as_str().unwrap())
+                .collect();
+            for expected in [
+                "EMAIL_ADDRESS",
+                "CREDIT_CARD",
+                "AWS_ACCESS_KEY",
+                "IBAN_CODE",
+            ] {
+                assert!(
+                    types.contains(&expected),
+                    "{language} missing {expected}: {types:?}"
+                );
+            }
+
+            let state = AppState {
+                engine: Arc::new(AnalyzerEngine::new()),
+            };
+            let app = create_router(state);
+            let body = serde_json::json!({
+                "text": text,
+                "language": language,
+            })
+            .to_string();
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/anonymize")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{language}");
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let json: Value = serde_json::from_slice(&body).unwrap();
+            let redacted = json["text"].as_str().unwrap();
+            assert!(
+                redacted.contains("[EMAIL_ADDRESS]"),
+                "{language}: {redacted}"
+            );
+            assert!(redacted.contains("[CREDIT_CARD]"), "{language}: {redacted}");
+            assert!(
+                redacted.contains("[AWS_ACCESS_KEY]"),
+                "{language}: {redacted}"
+            );
+            assert!(redacted.contains("[IBAN_CODE]"), "{language}: {redacted}");
+        }
+    }
 }

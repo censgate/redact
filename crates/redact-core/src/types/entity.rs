@@ -371,6 +371,20 @@ impl EntityType {
             return *other == EntityType::IbanCode;
         }
 
+        // A compact or spaced IBAN contains long digit runs that also match
+        // the 13–19 digit card pattern. Keep the IBAN.
+        if *self == EntityType::CreditCard {
+            return matches!(other, EntityType::IbanCode | EntityType::Iban);
+        }
+
+        // Bank-number spans lose to a Luhn card or an IBAN on the same digits.
+        if *self == EntityType::UsBankNumber {
+            return matches!(
+                other,
+                EntityType::CreditCard | EntityType::IbanCode | EntityType::Iban
+            );
+        }
+
         // Hash types: longer hashes suppress shorter ones at same position
         // (SHA256 contains valid MD5 and SHA1 patterns)
         // A hex run can also occur inside a PEM key body, so the whole

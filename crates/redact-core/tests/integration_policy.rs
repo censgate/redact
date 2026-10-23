@@ -122,13 +122,16 @@ fn test_financial_entities() {
 
     // Analyze and apply policy
     let analysis = engine.analyze(text, None).unwrap();
+    assert!(analysis
+        .detected_entities
+        .iter()
+        .any(|e| e.entity_type == EntityType::IbanCode));
     let filtered = policy.apply(analysis.detected_entities);
 
     // Verify entities
     assert!(filtered
         .iter()
         .any(|e| e.entity_type == EntityType::CreditCard));
-    // Note: IBAN detection depends on pattern implementation
 
     // Anonymize with mask strategy
     let config = AnonymizerConfig {

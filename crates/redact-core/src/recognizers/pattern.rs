@@ -287,10 +287,12 @@ impl PatternRecognizer {
 
     /// Load default patterns for common PII types
     fn load_default_patterns(&mut self) {
-        // Email addresses
+        // Email addresses. Explicit start/end classes instead of `\b`: CJK
+        // letters are Unicode word characters, so `\b` does not fire between
+        // 邮箱 and the local part. Group 1 is the address only.
         let _ = self.add_pattern(
             EntityType::EmailAddress,
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
+            r"(?:^|[^A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:[^A-Za-z0-9]|$)",
             0.8,
         );
 
@@ -305,10 +307,13 @@ impl PatternRecognizer {
             0.7,
         );
 
-        // Credit cards (4 groups of 4 digits)
+        // Credit cards: 13–19 digits, including space- or dash-separated
+        // groups (Visa 4-4-4-4, Amex 4-6-5). Luhn runs on the stripped
+        // digits. The start class excludes ASCII letters so a compact IBAN
+        // body is not taken as a card; CJK still starts a match.
         let _ = self.add_pattern(
             EntityType::CreditCard,
-            r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b",
+            r"(?:^|[^0-9A-Za-z])((?:\d[ \-]?){12,18}\d)(?:[^0-9]|$)",
             0.9,
         );
 
@@ -380,10 +385,11 @@ impl PatternRecognizer {
         // UK Sort Code
         let _ = self.add_pattern(EntityType::UkSortCode, r"\b\d{2}-\d{2}-\d{2}\b", 0.7);
 
-        // IBAN
+        // IBAN, compact or spaced in groups of 4. Checksum uses stripped
+        // alphanumerics. Group 1 is the IBAN only.
         let _ = self.add_pattern(
             EntityType::IbanCode,
-            r"\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b",
+            r"(?:^|[^A-Z0-9])([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30})(?:[^A-Z0-9]|$)",
             0.75,
         );
 
@@ -497,12 +503,13 @@ impl PatternRecognizer {
             ],
         );
 
-        // US Bank Account Number (typically 8-17 digits)
-        // Very low base score - highly dependent on context
+        // US Bank Account Number. Context-gated; 8–19 digits so a 16–19
+        // digit value is consumed whole (a 17-digit cap left a tail).
+        // One nearby context word is enough to clear min_score.
         let _ = self.add_pattern_with_context(
             EntityType::UsBankNumber,
-            r"\b\d{8,17}\b",
-            0.3,
+            r"(?:^|[^0-9A-Za-z])(\d{8,19})(?:[^0-9]|$)",
+            0.45,
             vec![
                 "account".to_string(),
                 "bank".to_string(),
@@ -750,9 +757,12 @@ impl Recognizer for PatternRecognizer {
                     // PII patterns such as AGE also have a group 1 — using it
                     // globally would shrink those spans to the digits alone.
                     if let Some(matched) = match entity_type {
-                        EntityType::HttpBasicAuth | EntityType::AwsAccessKey => {
-                            capture.get(1).or_else(|| capture.get(0))
-                        }
+                        EntityType::HttpBasicAuth
+                        | EntityType::AwsAccessKey
+                        | EntityType::EmailAddress
+                        | EntityType::CreditCard
+                        | EntityType::IbanCode
+                        | EntityType::UsBankNumber => capture.get(1).or_else(|| capture.get(0)),
                         _ => capture.get(0),
                     } {
                         let start = matched.start();
@@ -795,6 +805,10 @@ impl Recognizer for PatternRecognizer {
 
     fn min_score(&self) -> f32 {
         self.min_score
+    }
+
+    fn supports_language(&self, _language: &str) -> bool {
+        true
     }
 }
 
@@ -852,6 +866,17 @@ mod tests {
     }
 
     #[test]
+    fn pattern_recognizer_supports_any_language() {
+        let recognizer = PatternRecognizer::new();
+        for language in ["en", "es", "vi", "zh", "de", "fr"] {
+            assert!(
+                recognizer.supports_language(language),
+                "{language} should run pattern detection"
+            );
+        }
+    }
+
+    #[test]
     fn test_email_detection() {
         let recognizer = PatternRecognizer::new();
         let text = "Contact me at john.doe@example.com for details";
@@ -893,6 +918,47 @@ mod tests {
             .iter()
             .find(|r| r.entity_type == EntityType::CreditCard);
         assert!(cc_result.is_some());
+    }
+
+    #[test]
+    fn test_spaced_amex_4_6_5_uses_full_span() {
+        let recognizer = PatternRecognizer::new();
+        let text = "Amex 3782 822463 10005";
+        let results = recognizer.analyze(text, "es").unwrap();
+        let card = results
+            .iter()
+            .find(|r| r.entity_type == EntityType::CreditCard)
+            .expect("spaced Amex");
+        assert_eq!(card.text.as_deref(), Some("3782 822463 10005"));
+    }
+
+    #[test]
+    fn test_email_and_card_after_cjk() {
+        let recognizer = PatternRecognizer::new();
+        let text = "邮箱maria@example.com卡4532015112830366";
+        let results = recognizer.analyze(text, "zh").unwrap();
+        let email = results
+            .iter()
+            .find(|r| r.entity_type == EntityType::EmailAddress)
+            .expect("CJK-adjacent email");
+        assert_eq!(email.text.as_deref(), Some("maria@example.com"));
+        let card = results
+            .iter()
+            .find(|r| r.entity_type == EntityType::CreditCard)
+            .expect("CJK-adjacent card");
+        assert_eq!(card.text.as_deref(), Some("4532015112830366"));
+    }
+
+    #[test]
+    fn test_spaced_iban_full_span() {
+        let recognizer = PatternRecognizer::new();
+        let text = "IBAN DE89 3704 0044 0532 0130 00";
+        let results = recognizer.analyze(text, "de").unwrap();
+        let iban = results
+            .iter()
+            .find(|r| r.entity_type == EntityType::IbanCode)
+            .expect("spaced IBAN");
+        assert_eq!(iban.text.as_deref(), Some("DE89 3704 0044 0532 0130 00"));
     }
 
     #[test]
