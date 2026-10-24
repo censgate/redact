@@ -158,12 +158,43 @@ update_doc_versions() {
         return
     fi
 
-    # README library usage example
+    # README library usage example and published crate versions
     sed -i.bak \
         -e "s/^redact-core = \"[^\"]*\"/redact-core = \"$new_version\"/" \
         -e "s/^redact-ner = \"[^\"]*\"/redact-ner = \"$new_version\"/" \
+        -e "s/\\(\\[\`redact-scan\`\\]([^)]*) \\)[0-9][0-9.]*\\./\\1${new_version}./" \
+        -e "s/\\(\\[\`redact-verify\`\\]([^)]*) \\)[0-9][0-9.]*\\./\\1${new_version}./" \
         README.md
     rm -f README.md.bak
+
+    if [[ -f docs/install.md ]]; then
+        sed -i.bak -E \
+            "s/(\\\[`redact-scan`\\]\\([^)]*\\) · \\[`redact-verify`\\]\\([^)]*\\) )\\([0-9]+\\.[0-9]+\\.[0-9]+\\)/\\1(${new_version})/" \
+            docs/install.md
+        rm -f docs/install.md.bak
+    fi
+
+    if [[ -f crates/redact-scan/README.md ]]; then
+        sed -i.bak -E \
+            "s/(\"scanner\"[[:space:]]*:[[:space:]]*\\{[^}]*\"version\"[[:space:]]*:[[:space:]]*\")[0-9]+\\.[0-9]+\\.[0-9]+(\")/\\1${new_version}\\2/" \
+            crates/redact-scan/README.md
+        rm -f crates/redact-scan/README.md.bak
+    fi
+
+    if [[ -f SECURITY.md ]]; then
+        local major minor prior
+        major="${new_version%%.*}"
+        minor="${new_version#*.}"
+        minor="${minor%%.*}"
+        if [[ "$minor" =~ ^[0-9]+$ ]] && [[ "$minor" -gt 0 ]]; then
+            prior=$((minor - 1))
+            sed -i.bak \
+                -e "s/^| 0\\.[0-9]\\+\\.x  | ✅ Yes | Current release |$/| ${major}.${minor}.x  | ✅ Yes | Current release |/" \
+                -e "s/^| 0\\.[0-9]\\+\\.x  | ✅ Yes | Prior minor (security fixes) |$/| ${major}.${prior}.x  | ✅ Yes | Prior minor (security fixes) |/" \
+                SECURITY.md
+            rm -f SECURITY.md.bak
+        fi
+    fi
 
     # Benchmarks "current release" pointer
     sed -i.bak -E \

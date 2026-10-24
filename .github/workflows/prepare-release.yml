@@ -60,7 +60,24 @@ jobs:
           sed -i \
             -e "s/^redact-core = \"[^\"]*\"/redact-core = \"$VERSION\"/" \
             -e "s/^redact-ner = \"[^\"]*\"/redact-ner = \"$VERSION\"/" \
+            -e "s/\\(\\[\`redact-scan\`\\]([^)]*) \\)[0-9][0-9.]*\\./\\1${VERSION}./" \
+            -e "s/\\(\\[\`redact-verify\`\\]([^)]*) \\)[0-9][0-9.]*\\./\\1${VERSION}./" \
             README.md
+          sed -i -E \
+            "s/(\\\[`redact-scan`\\]\\([^)]*\\) · \\[`redact-verify`\\]\\([^)]*\\) )\\([0-9]+\\.[0-9]+\\.[0-9]+\\)/\\1(${VERSION})/" \
+            docs/install.md
+          sed -i -E \
+            "s/(\"scanner\"[[:space:]]*:[[:space:]]*\\{[^}]*\"version\"[[:space:]]*:[[:space:]]*\")[0-9]+\\.[0-9]+\\.[0-9]+(\")/\\1${VERSION}\\2/" \
+            crates/redact-scan/README.md
+          MAJOR="${VERSION%%.*}"
+          MINOR="${VERSION#*.}"; MINOR="${MINOR%%.*}"
+          if [[ "$MINOR" =~ ^[0-9]+$ ]] && [[ "$MINOR" -gt 0 ]]; then
+            PRIOR=$((MINOR - 1))
+            sed -i \
+              -e "s/^| 0\\.[0-9]\\+\\.x  | ✅ Yes | Current release |$/| ${MAJOR}.${MINOR}.x  | ✅ Yes | Current release |/" \
+              -e "s/^| 0\\.[0-9]\\+\\.x  | ✅ Yes | Prior minor (security fixes) |$/| ${MAJOR}.${PRIOR}.x  | ✅ Yes | Prior minor (security fixes) |/" \
+              SECURITY.md
+          fi
           sed -i -E \
             "s|The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*|The **current** release is **[v${VERSION}](https://github.com/censgate/redact/releases/tag/v${VERSION})**|" \
             docs/benchmarks/README.md

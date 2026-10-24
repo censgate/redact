@@ -1,0 +1,52 @@
+name: Feature request
+description: Propose a change that is in project scope
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read docs/PROJECT_SCOPE.md before filing. Out-of-scope work will
+        not be accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing or hard to do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change, and in which crate or docs?
+    validations:
+      required: true
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Primary crate or area
+      options:
+        - redact-core
+        - redact-ner
+        - redact-cli
+        - redact-gateway
+        - redact-api
+        - redact-scan
+        - redact-verify
+        - redact-wasm
+        - Documentation / CI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I have read docs/PROJECT_SCOPE.md and this request is in scope.
+          required: true

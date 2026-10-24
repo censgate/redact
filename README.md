@@ -56,6 +56,7 @@ Verifier: [`crates/redact-verify/README.md`](crates/redact-verify/README.md).
 
 Zero extra services. Deterministic pattern engine; NER is off unless you add it.
 
+<!-- redact-doc-examples: skip -->
 ```bash
 cargo install redact-cli
 redact analyze --fail-on-detect -i secrets-check.txt
@@ -64,6 +65,7 @@ redact analyze --fail-on-detect -i secrets-check.txt
 `--fail-on-detect` exits 1 when anything is detected; output still prints.
 Without the flag, `analyze` exits 0 on success regardless of detections.
 
+<!-- redact-doc-examples: skip -->
 ```bash
 # Pre-commit (NUL-safe paths; skip when nothing is staged)
 if [ "$(git diff --cached --name-only -z --diff-filter=ACMRT | wc -c)" -gt 0 ]; then

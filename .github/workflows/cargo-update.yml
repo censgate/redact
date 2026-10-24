@@ -1,0 +1,48 @@
+# Weekly lockfile-only refresh. Dependabot still owns Cargo.toml requirement
+# bumps (and the MSRV ignore rules in .github/dependabot.yml).
+
+name: Lockfile update
+
+on:
+  schedule:
+    - cron: "20 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cargo-update:
+    name: cargo update (lockfile only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: cargo-update
+
+      - name: Refresh Cargo.lock within existing semver ranges
+        run: cargo update
+
+      - name: Open pull request if the lockfile changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(deps): cargo update (lockfile only)"
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          signoff: true
+          title: "chore(deps): cargo update (lockfile only)"
+          body: |
+            Weekly `cargo update` that refreshes `Cargo.lock` only.
+
+            Version requirements in `Cargo.toml` are unchanged. Review the
+            lockfile diff and the existing `cargo audit` job before merge.
+          branch: chore/cargo-update
+          delete-branch: true

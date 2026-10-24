@@ -1,0 +1,6 @@
+# Original values that must not survive `redact anonymize`.
+# Digit runs of length >= 4 are also forbidden in the output.
+coverage@example.com
+4532015112830366
+AKIAIOSFODNN7EXAMPLE
+12345678901234567

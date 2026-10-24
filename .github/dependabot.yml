@@ -19,6 +19,9 @@ updates:
       # still ships 1.24.4 (ort 2.0.0-rc.12). See workspace Cargo.toml.
       - dependency-name: ort
         versions: [">=2.0.0-rc.13"]
+      # uuid 1.29 sets rust-version 1.89, above workspace MSRV 1.88.
+      - dependency-name: uuid
+        versions: [">=1.28"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
