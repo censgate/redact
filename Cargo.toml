@@ -66,8 +66,9 @@ rand = "0.10"
 # Time handling
 chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 
-# UUID generation
-uuid = { version = "1.23", features = ["v4", "serde"] }
+# UUID generation. 1.27+ sets rust-version 1.89, above workspace MSRV 1.88.
+# Caret "1.23" would still resolve 1.29; keep an exclusive upper bound.
+uuid = { version = ">=1.23, <1.27", features = ["v4", "serde"] }
 
 # CLI
 clap = { version = "4.6", features = ["derive", "env"] }

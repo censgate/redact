@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Facts check also verifies CLI `--help` flags, documented crate versions, and the `SECURITY.md` support table.
-- Dependabot ignores `uuid` 1.28+ (MSRV above the workspace 1.88 pin).
+- Dependabot ignores `uuid` 1.27+ (MSRV above the workspace 1.88 pin).
+  Workspace `uuid` is capped at `<1.27` so a grouped lockfile update cannot
+  resolve 1.27+.
 
 ## [0.12.6] - 2026-10-23
 
