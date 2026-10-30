@@ -30,7 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gateway `POST /v1/redact`: parallel requests on one session no longer fail
   with 503 `token map write failed` when they mint the same token label. The
   handler now re-reads the session and re-mints on a merge conflict, within a
-  bounded number of attempts.
+  bounded number of attempts. When the attempts are exhausted the request
+  still fails closed and the gateway logs a warning that carries no token
+  labels or values.
 
 ## [0.12.6] - 2026-10-23
 

@@ -1478,6 +1478,14 @@ async fn redact_endpoint(
                     tokio::time::sleep(mint_retry_backoff(attempt)).await;
                     continue;
                 }
+                if matches!(err, TokenMapError::Conflict(_)) {
+                    // Static message on purpose: the conflict error text names a
+                    // token label, which must not reach logs.
+                    warn!(
+                        attempts = attempt,
+                        "token label conflicts persisted after bounded retries; failing closed"
+                    );
+                }
                 // Conflicts are integrity failures even when fail_closed is off:
                 // returning a colliding token that was not persisted is unsafe.
                 if matches!(err, TokenMapError::Conflict(_)) || profile.fail_closed {
