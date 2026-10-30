@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Workspace `uuid` is capped at `<1.27` so a grouped lockfile update cannot
   resolve 1.27+.
 
+### Fixed
+
+- Gateway `POST /v1/redact`: parallel requests on one session no longer fail
+  with 503 `token map write failed` when they mint the same token label. The
+  handler now re-reads the session and re-mints on a merge conflict, within a
+  bounded number of attempts.
+
 ## [0.12.6] - 2026-10-23
 
 ### Fixed
