@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::header::AUTHORIZATION;
@@ -23,7 +23,7 @@ use axum::{Extension, Json, Router};
 use redact_core::AnalyzerEngine;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::{warn, Instrument};
+use tracing::{debug, warn, Instrument};
 use uuid::Uuid;
 
 use crate::audit::{AuditContext, AuditDispatcher, AuditEvent, AuditOutcome};
@@ -1349,6 +1349,22 @@ fn resolve_profile(
         .map_err(|e| GatewayError::InvalidRequest(e.to_string()))
 }
 
+/// Maximum redact-and-persist attempts for one `/v1/redact` call.
+///
+/// A token-label merge conflict only happens when another request persisted
+/// new mappings after this request's read, so every failed attempt implies a
+/// concurrent writer made progress. Eight attempts cover far more simultaneous
+/// writers on one session than a client should issue, while still bounding the
+/// work and failing closed if conflicts never clear.
+const MAX_MINT_ATTEMPTS: u32 = 8;
+
+/// Short jittered pause before re-reading the session after a merge conflict.
+fn mint_retry_backoff(attempt: u32) -> Duration {
+    use rand::RngExt as _;
+    let ceiling_ms = 5u64.saturating_mul(u64::from(attempt)).clamp(5, 40);
+    Duration::from_millis(rand::rng().random_range(0..=ceiling_ms))
+}
+
 async fn redact_endpoint(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
@@ -1369,95 +1385,122 @@ async fn redact_endpoint(
         None => session_id.clone(),
     };
     let level = config.telemetry.operations;
-    // Resume prior mappings so sequential /v1/redact calls with one session
-    // continue the counter instead of reminting `[ENTITY_1]` and clobbering.
-    let mut session = if state.tokens.backend_name() != "off" {
-        let get_span = spans::tokenmap_get(
-            level,
-            state.tokens.backend_name(),
-            0,
-            config.vault.address.as_deref(),
-            None,
-        );
-        let get_fut = state.tokens.get(&auth.tenant, &token_map_session);
-        let got = if let Some(span) = get_span.clone() {
-            get_fut.instrument(span).await
+    let mut attempt = 0u32;
+    let (text, outcome) = loop {
+        attempt += 1;
+        // Resume prior mappings so sequential /v1/redact calls with one session
+        // continue the counter instead of reminting `[ENTITY_1]` and clobbering.
+        // Re-read on every attempt: a merge conflict means a concurrent request
+        // persisted labels this snapshot did not have.
+        let mut session = if state.tokens.backend_name() != "off" {
+            let get_span = spans::tokenmap_get(
+                level,
+                state.tokens.backend_name(),
+                0,
+                config.vault.address.as_deref(),
+                None,
+            );
+            let get_fut = state.tokens.get(&auth.tenant, &token_map_session);
+            let got = if let Some(span) = get_span.clone() {
+                get_fut.instrument(span).await
+            } else {
+                get_fut.await
+            };
+            match got {
+                Ok(existing) => {
+                    if let Some(span) = &get_span {
+                        spans::finish_tokenmap(span, existing.len(), None);
+                    }
+                    TokenSession::resume(
+                        session_id.clone(),
+                        &auth.tenant,
+                        state.dek.clone(),
+                        existing,
+                    )
+                }
+                Err(err) if profile.fail_closed => {
+                    if let Some(span) = &get_span {
+                        spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                    }
+                    return GatewayError::DependencyUnavailable(format!(
+                        "token map read failed: {err}"
+                    ))
+                    .into_response();
+                }
+                Err(err) => {
+                    if let Some(span) = &get_span {
+                        spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                    }
+                    warn!(error = %err, "token map read failed; starting a fresh session");
+                    TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
+                }
+            }
         } else {
-            get_fut.await
+            TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
         };
-        match got {
-            Ok(existing) => {
-                if let Some(span) = &get_span {
-                    spans::finish_tokenmap(span, existing.len(), None);
-                }
-                TokenSession::resume(
-                    session_id.clone(),
-                    &auth.tenant,
-                    state.dek.clone(),
-                    existing,
-                )
-            }
-            Err(err) if profile.fail_closed => {
-                if let Some(span) = &get_span {
-                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
-                }
-                return GatewayError::DependencyUnavailable(format!(
-                    "token map read failed: {err}"
-                ))
-                .into_response();
-            }
-            Err(err) => {
-                if let Some(span) = &get_span {
-                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
-                }
-                warn!(error = %err, "token map read failed; starting a fresh session");
-                TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
-            }
-        }
-    } else {
-        TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
-    };
-    let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session)
-        .with_trace_level(level);
-    let text = match ctx.redact(&request.text) {
-        Ok(text) => text,
-        Err(err) => return redaction_error(err).into_response(),
-    };
-    let outcome = ctx.finish();
+        let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session)
+            .with_trace_level(level);
+        let text = match ctx.redact(&request.text) {
+            Ok(text) => text,
+            Err(err) => return redaction_error(err).into_response(),
+        };
+        let outcome = ctx.finish();
 
-    let minted = session.take_new_mappings();
-    if !minted.is_empty() && state.tokens.backend_name() != "off" {
-        let put_span = spans::tokenmap_put(
-            level,
-            state.tokens.backend_name(),
-            minted.len(),
-            config.vault.address.as_deref(),
-            None,
-        );
-        let put_fut = state.tokens.put(&auth.tenant, &token_map_session, &minted);
-        let put_result = if let Some(span) = put_span.clone() {
-            put_fut.instrument(span).await
-        } else {
-            put_fut.await
-        };
-        if let Err(err) = put_result {
-            if let Some(span) = &put_span {
-                spans::finish_tokenmap(span, 0, Some("token_map_error"));
+        let minted = session.take_new_mappings();
+        if !minted.is_empty() && state.tokens.backend_name() != "off" {
+            let put_span = spans::tokenmap_put(
+                level,
+                state.tokens.backend_name(),
+                minted.len(),
+                config.vault.address.as_deref(),
+                None,
+            );
+            let put_fut = state.tokens.put(&auth.tenant, &token_map_session, &minted);
+            let put_result = if let Some(span) = put_span.clone() {
+                put_fut.instrument(span).await
+            } else {
+                put_fut.await
+            };
+            if let Err(err) = put_result {
+                if let Some(span) = &put_span {
+                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                }
+                use crate::vault::TokenMapError;
+                // The losing request's labels were never persisted, so nothing is
+                // overwritten. Re-resume from the winner's mappings and redact
+                // again so this request mints fresh labels (or reuses the winner's
+                // label for an identical value).
+                if matches!(err, TokenMapError::Conflict(_)) && attempt < MAX_MINT_ATTEMPTS {
+                    debug!(
+                        attempt,
+                        "token label conflict; re-reading session and re-minting"
+                    );
+                    tokio::time::sleep(mint_retry_backoff(attempt)).await;
+                    continue;
+                }
+                if matches!(err, TokenMapError::Conflict(_)) {
+                    // Static message on purpose: the conflict error text names a
+                    // token label, which must not reach logs.
+                    warn!(
+                        attempts = attempt,
+                        "token label conflicts persisted after bounded retries; failing closed"
+                    );
+                }
+                // Conflicts are integrity failures even when fail_closed is off:
+                // returning a colliding token that was not persisted is unsafe.
+                if matches!(err, TokenMapError::Conflict(_)) || profile.fail_closed {
+                    return GatewayError::DependencyUnavailable(format!(
+                        "token map write failed: {err}"
+                    ))
+                    .into_response();
+                }
+                warn!(error = %err, "token map write failed");
+            } else if let Some(span) = &put_span {
+                spans::finish_tokenmap(span, minted.len(), None);
             }
-            use crate::vault::TokenMapError;
-            // Conflicts are integrity failures even when fail_closed is off:
-            // returning a colliding token that was not persisted is unsafe.
-            if matches!(err, TokenMapError::Conflict(_)) || profile.fail_closed {
-                return GatewayError::DependencyUnavailable(format!(
-                    "token map write failed: {err}"
-                ))
-                .into_response();
-            }
-            warn!(error = %err, "token map write failed");
-        } else if let Some(span) = &put_span {
-            spans::finish_tokenmap(span, minted.len(), None);
         }
-    }
+        break (text, outcome);
+    };
 
     state
         .telemetry
