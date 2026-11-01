@@ -41,7 +41,7 @@ show_usage() {
     echo "  - crates/redact-scan/Cargo.toml (redact-core dependency)"
     echo "  - README.md (library Cargo.toml example versions)"
     echo "  - docs/benchmarks/README.md (current release link)"
-    echo "  - CHANGELOG.md (adds new version entry)"
+    echo "  - CHANGELOG.md (moves Unreleased notes under the new version)"
 }
 
 validate_version() {
@@ -99,50 +99,24 @@ update_changelog() {
     local new_version=$1
     local dry_run=$2
     local file="CHANGELOG.md"
-    
+    local today script
+
     if [[ ! -f "$file" ]]; then
         print_warning "CHANGELOG.md not found, skipping"
         return
     fi
-    
+
+    today=$(date -u +"%Y-%m-%d")
+    script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci/version-changelog.sh"
     print_status "Updating CHANGELOG.md"
-    
+
     if [[ $dry_run == "true" ]]; then
-        echo "  Would add new version entry for $new_version"
+        echo "  Would move Unreleased notes to ## [$new_version] - $today"
         return
     fi
-    
-    local today=$(date +"%Y-%m-%d")
-    local temp_file=$(mktemp)
-    
-    # Check if this version already exists
-    if grep -q "## \[$new_version\]" "$file"; then
-        print_warning "Version $new_version already exists in CHANGELOG.md, skipping"
-        return
-    fi
-    
-    # Find the line with "# Changelog" or first "## [" and insert after header
-    awk -v ver="$new_version" -v date="$today" '
-    /^# Changelog/ { 
-        print; 
-        getline; 
-        print;
-        print "";
-        print "## [" ver "] - " date;
-        print "";
-        print "### Added";
-        print "";
-        print "### Changed";
-        print "";
-        print "### Fixed";
-        print "";
-        next;
-    }
-    { print }
-    ' "$file" > "$temp_file"
-    
-    mv "$temp_file" "$file"
-    print_success "Added $new_version entry to CHANGELOG.md"
+
+    "$script" "$new_version" "$today" "$file"
+    print_success "Versioned $new_version in CHANGELOG.md"
 }
 
 update_doc_versions() {
