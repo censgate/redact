@@ -64,11 +64,17 @@ jobs:
             -e "s/\\(\\[\`redact-scan\`\\]([^)]*) \\)[0-9][0-9.]*\\./\\1${VERSION}./" \
             -e "s/\\(\\[\`redact-verify\`\\]([^)]*) \\)[0-9][0-9.]*\\./\\1${VERSION}./" \
             README.md
+          # Backticks must be quoted so the shell does not treat them as
+          # command substitution. The published pin is a single parenthetical
+          # version after both crate links.
           sed -i -E \
-            "s/(\\\[`redact-scan`\\]\\([^)]*\\) · \\[`redact-verify`\\]\\([^)]*\\) )\\([0-9]+\\.[0-9]+\\.[0-9]+\\)/\\1(${VERSION})/" \
+            's/(\[`redact-scan`\]\([^)]*\) · \[`redact-verify`\]\([^)]*\) )\([0-9]+\.[0-9]+\.[0-9]+\)/\1('"${VERSION}"')/' \
             docs/install.md
+          # scanner.version is on the following line. Default sed does not
+          # match across newlines, so limit the substitution to that object.
+          # The target.version above it is Postgres, not this crate.
           sed -i -E \
-            "s/(\"scanner\"[[:space:]]*:[[:space:]]*\\{[^}]*\"version\"[[:space:]]*:[[:space:]]*\")[0-9]+\\.[0-9]+\\.[0-9]+(\")/\\1${VERSION}\\2/" \
+            '/"scanner"[[:space:]]*:/,/^[[:space:]]*\}/ s/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"${VERSION}"'\2/' \
             crates/redact-scan/README.md
           MAJOR="${VERSION%%.*}"
           MINOR="${VERSION#*.}"; MINOR="${MINOR%%.*}"
@@ -91,8 +97,27 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: facts
+
       - name: Verify build
         run: cargo check --workspace
+
+      # data/facts.json records workspace and crate versions. Regenerate it
+      # after the bump and before the release commit, with the same Rust
+      # toolchain and Node setup as the Facts check.
+      - name: Regenerate data/facts.json
+        run: |
+          cargo build -p redact-cli
+          node scripts/extract-facts.mjs --bin ./target/debug/redact
 
       - name: Show changes (dry run)
         if: inputs.dry_run
