@@ -13,10 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lockfile workflow) prefers dependency versions compatible with
   rust-version 1.88 and does not pass `--ignore-rust-version`. The root
   `redact-examples` package inherits that rust-version. `aes` 0.9.3
-  requires rustc 1.89 and is not locked. The `uuid` requirement is caret
-  `1.23` again; resolver 3 keeps 1.27+ out of the lockfile. Dependabot
-  still ignores `uuid` 1.27+ because `cargo update --precise` can select
-  an MSRV-incompatible version.
+  requires rustc 1.89 and is not locked. Workspace `uuid` stays
+  `>=1.23, <1.27`. Resolver 3 only protects this repo's lockfile.
+  `redact-core`, `redact-gateway`, and `redact-scan` are published and
+  inherit that requirement, so a downstream resolver-2 user on Rust 1.88
+  would otherwise pull uuid 1.29. Dependabot still ignores `uuid` 1.27+
+  because `cargo update --precise` can select an MSRV-incompatible version.
 
 ## [0.12.7] - 2026-11-01
 

@@ -19,11 +19,11 @@ updates:
       # still ships 1.24.4 (ort 2.0.0-rc.12). See workspace Cargo.toml.
       - dependency-name: ort
         versions: [">=2.0.0-rc.13"]
-      # uuid 1.27+ sets rust-version 1.89. Workspace resolver 3 already keeps
-      # plain `cargo update` (including the weekly lockfile workflow) on an
-      # MSRV-compatible uuid, so Cargo.toml no longer caps the requirement.
-      # Dependabot still picks the newest crates.io release and may apply it
-      # with `cargo update --precise`, which is allowed to select a higher
+      # uuid 1.27+ sets rust-version 1.89. Workspace resolver 3 keeps plain
+      # `cargo update` on an MSRV-compatible uuid, and Cargo.toml caps the
+      # requirement at <1.27 so published crates do not hand a caret to
+      # downstream resolver-2 users. Dependabot may still apply a direct
+      # bump with `cargo update --precise`, which can select a higher
       # rust-version. Keep this ignore so that path cannot land.
       - dependency-name: uuid
         versions: [">=1.27"]
