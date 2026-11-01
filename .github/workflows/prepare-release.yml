@@ -16,6 +16,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   prepare:
@@ -119,3 +120,13 @@ jobs:
             --head release/v${{ env.VERSION }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # pull_request runs are not started for events created by GITHUB_TOKEN.
+      # workflow_dispatch is. security-audit and msrv are jobs in ci.yml.
+      - name: Dispatch CI on the release branch
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run ci.yml --ref "release/v${{ env.VERSION }}"
+          echo "Dispatched ci.yml on release/v${{ env.VERSION }}"

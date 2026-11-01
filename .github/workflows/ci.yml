@@ -5,6 +5,13 @@ on:
     branches: [main, develop, feature/*, coder*]
   pull_request:
     branches: [main, develop, feature/*, coder*]
+  # Lockfile update and Prepare Release open pull requests with GITHUB_TOKEN.
+  # That token does not start pull_request runs, but it does start
+  # workflow_dispatch. Those workflows dispatch this file on the PR head
+  # branch so tests, security-audit, and msrv run and attach to the head
+  # commit. This event has no pull_request payload: do not read
+  # github.event.pull_request unless the expression is guarded by event name.
+  workflow_dispatch:
 
 permissions:
   contents: read

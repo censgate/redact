@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Lockfile update and Prepare Release dispatch the full CI workflow on the
+  pull request head after opening a pull request with `GITHUB_TOKEN`. Tests,
+  the MSRV check, and `cargo audit` run on those pull requests. No extra
+  token is required (`workflow_dispatch` is started by `GITHUB_TOKEN`).
 - Facts check also verifies CLI `--help` flags, documented crate versions, and the `SECURITY.md` support table.
 - Dependabot ignores `uuid` 1.27+ (MSRV above the workspace 1.88 pin).
   Workspace `uuid` is capped at `<1.27` so a grouped lockfile update cannot
