@@ -1,5 +1,7 @@
 # Weekly lockfile-only refresh. Dependabot still owns Cargo.toml requirement
 # bumps (and the MSRV ignore rules in .github/dependabot.yml).
+# The pull request is opened with GITHUB_TOKEN, which does not start
+# pull_request workflows. CI is dispatched explicitly afterwards.
 
 name: Lockfile update
 
@@ -11,6 +13,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   cargo-update:
@@ -32,6 +35,7 @@ jobs:
         run: cargo update
 
       - name: Open pull request if the lockfile changed
+        id: cpr
         uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore(deps): cargo update (lockfile only)"
@@ -43,6 +47,24 @@ jobs:
             Weekly `cargo update` that refreshes `Cargo.lock` only.
 
             Version requirements in `Cargo.toml` are unchanged. Review the
-            lockfile diff and the existing `cargo audit` job before merge.
+            lockfile diff. This workflow dispatches CI on the pull request
+            head, including tests, the MSRV check, and `cargo audit`.
           branch: chore/cargo-update
           delete-branch: true
+
+      # pull_request runs are not started for events created by GITHUB_TOKEN.
+      # workflow_dispatch is. security-audit and msrv are jobs in ci.yml.
+      - name: Dispatch CI on the pull request head
+        if: steps.cpr.outputs.pull-request-operation == 'created' || steps.cpr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_OPERATION: ${{ steps.cpr.outputs.pull-request-operation }}
+          PR_HEAD_SHA: ${{ steps.cpr.outputs.pull-request-head-sha }}
+          PR_HEAD_BRANCH: ${{ steps.cpr.outputs.pull-request-branch }}
+        run: |
+          if [ -z "${PR_HEAD_SHA}" ] || [ -z "${PR_HEAD_BRANCH}" ]; then
+            echo "create-pull-request reported ${PR_OPERATION} without a head SHA or branch" >&2
+            exit 1
+          fi
+          gh workflow run ci.yml --ref "${PR_HEAD_BRANCH}"
+          echo "Dispatched ci.yml on ${PR_HEAD_BRANCH} at ${PR_HEAD_SHA}"
