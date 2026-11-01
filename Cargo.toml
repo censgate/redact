@@ -9,7 +9,12 @@ members = [
     "crates/redact-scan",
     "crates/redact-verify",
 ]
-resolver = "2"
+# Resolver 3 keeps resolver 2's feature unification and changes the default
+# of `resolver.incompatible-rust-versions` from `allow` to `fallback`.
+# `cargo update` then prefers releases whose rust-version is at or below
+# this workspace's 1.88 (for example aes 0.9.2, not 0.9.3). Requires Rust
+# 1.84+, which the MSRV already satisfies. Do not pass `--ignore-rust-version`.
+resolver = "3"
 
 [workspace.package]
 version = "0.12.7"
@@ -66,9 +71,10 @@ rand = "0.10"
 # Time handling
 chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 
-# UUID generation. 1.27+ sets rust-version 1.89, above workspace MSRV 1.88.
-# Caret "1.23" would still resolve 1.29; keep an exclusive upper bound.
-uuid = { version = ">=1.23, <1.27", features = ["v4", "serde"] }
+# UUID generation. 1.27+ sets rust-version 1.89. Resolver 3 keeps those
+# releases out of Cargo.lock. Dependabot still ignores them: it can apply
+# a direct bump with `cargo update --precise`, which bypasses the fallback.
+uuid = { version = "1.23", features = ["v4", "serde"] }
 
 # CLI
 clap = { version = "4.6", features = ["derive", "env"] }
@@ -99,6 +105,7 @@ inherits = "release"
 name = "redact-examples"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 
 [dependencies]
