@@ -94,6 +94,12 @@ jobs:
               CHANGELOG.md
           fi
 
+      # Date the Unreleased notes as ## [VERSION] before the release commit.
+      # Create Release reads that section; a tag cut while the notes are
+      # still under Unreleased fails changelog extraction (run 41326026034).
+      - name: Version CHANGELOG section
+        run: ./scripts/ci/version-changelog.sh "${VERSION}" "$(date -u +%Y-%m-%d)"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 

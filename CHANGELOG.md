@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.7] - 2026-11-01
+
 ### Added
 
 - Nightly workflow on `main` (Ubuntu test matrix, `cargo audit`, MSRV, beta).

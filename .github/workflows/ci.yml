@@ -386,3 +386,17 @@ jobs:
         env:
           REDACT_SCAN_INTEGRATION: "1"
         run: cargo test -p redact-scan --test postgres -- --nocapture
+
+  release-scripts:
+    name: Release scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Self-test changelog and GitHub release helpers
+        run: |
+          ./scripts/ci/changelog-notes.sh --self-test
+          ./scripts/ci/version-changelog.sh --self-test
+          ./scripts/ci/publish-github-release.sh --self-test
+          ./scripts/ci/changelog-notes.sh 0.12.7 >/dev/null

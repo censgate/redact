@@ -10,6 +10,11 @@ on:
         description: 'Tag to release (e.g., v0.8.2)'
         required: true
         type: string
+      github_release_only:
+        description: 'Skip crates.io and Docker. Build binaries for this existing tag and create the GitHub release from CHANGELOG.md on main.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -111,12 +116,29 @@ jobs:
   create-release:
     name: Create Release
     needs: [build-binaries, verify-pushed-images]
+    # github_release_only skips image verification. The job still waits for
+    # that skipped dependency, then runs when the binaries built.
+    if: >-
+      always() &&
+      needs.build-binaries.result == 'success' &&
+      (
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.github_release_only == 'true') ||
+        needs.verify-pushed-images.result == 'success'
+      )
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout tag
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true'
         uses: actions/checkout@v7
         with:
           ref: ${{ env.VERSION }}
+
+      # The tag commit may predate the version heading. Notes come from main.
+      - name: Checkout main for release notes
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.github_release_only == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: main
 
       - name: Download binary artifacts
         uses: actions/download-artifact@v8
@@ -131,10 +153,13 @@ jobs:
       - name: List artifacts
         run: ls -la artifacts/
 
+      # Tag releases read CHANGELOG.md at the tag. github_release_only
+      # checks out main above, so the same command reads main's notes.
       - name: Extract CHANGELOG notes
         run: ./scripts/ci/changelog-notes.sh "${VERSION#v}" > release-notes.md
 
       - name: Create draft GitHub Release and upload assets
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.VERSION }}
@@ -148,8 +173,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish release
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true'
         run: |
           gh release edit ${{ env.VERSION }} --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Re-running updates the notes and publishes. It does not create the tag.
+      - name: Create or update GitHub Release
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.github_release_only == 'true'
+        run: ./scripts/ci/publish-github-release.sh "${VERSION}" release-notes.md artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -157,7 +190,14 @@ jobs:
     name: Publish to crates.io
     # Least reversible publish step: wait until every image family has been
     # pushed and smoke-tested on the digest a stranger would pull.
+    # github_release_only leaves crates.io alone; those versions are already
+    # published and this job must not run when image verification was skipped.
     needs: [build-binaries, verify-pushed-images]
+    if: >-
+      always() &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true') &&
+      needs.build-binaries.result == 'success' &&
+      needs.verify-pushed-images.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -229,8 +269,11 @@ jobs:
         env:
           TAG_VERSION: ${{ env.TAG_VERSION }}
 
+  # Skipped when github_release_only is set. That path builds binaries
+  # and creates the GitHub release for a tag whose images are already published.
   docker:
     name: Build and Push Docker Image
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -297,6 +340,7 @@ jobs:
 
   docker-full:
     name: Build and Push Docker Image (full + NER)
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -374,6 +418,7 @@ jobs:
   # rather than a :gateway tag on the main API image — gateway is a separate binary.
   docker-gateway:
     name: Build and Push Docker Image (gateway)
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -530,6 +575,11 @@ jobs:
   stranger-path:
     name: Consume as a stranger
     needs: [verify-pushed-images, publish-crates]
+    if: >-
+      always() &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true') &&
+      needs.verify-pushed-images.result == 'success' &&
+      needs.publish-crates.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
