@@ -1,5 +1,8 @@
 # Weekly lockfile-only refresh. Dependabot still owns Cargo.toml requirement
-# bumps (and the MSRV ignore rules in .github/dependabot.yml).
+# bumps (and the ignore rules in .github/dependabot.yml).
+# `cargo update` uses the workspace resolver (v3). That prefers versions
+# compatible with rust-version 1.88. Do not pass `--ignore-rust-version`
+# and do not set CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=allow.
 # The pull request is opened with GITHUB_TOKEN, which does not start
 # pull_request workflows. CI is dispatched explicitly afterwards.
 
@@ -46,7 +49,9 @@ jobs:
           body: |
             Weekly `cargo update` that refreshes `Cargo.lock` only.
 
-            Version requirements in `Cargo.toml` are unchanged. Review the
+            Version requirements in `Cargo.toml` are unchanged. The workspace
+            resolver (v3) prefers versions compatible with rust-version 1.88,
+            so this update does not pass `--ignore-rust-version`. Review the
             lockfile diff. This workflow dispatches CI on the pull request
             head, including tests, the MSRV check, and `cargo audit`.
           branch: chore/cargo-update
