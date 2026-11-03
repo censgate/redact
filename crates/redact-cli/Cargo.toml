@@ -8,9 +8,10 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-keywords.workspace = true
-categories.workspace = true
-documentation = "https://docs.rs/redact-cli"
+keywords = ["pii", "redaction", "privacy", "cli", "anonymization"]
+categories = ["command-line-utilities", "text-processing"]
+# Binary-only crate: docs.rs has no library to document, so point at the source docs.
+documentation = "https://github.com/censgate/redact/tree/main/crates/redact-cli"
 description = "CLI tool for PII detection and anonymization"
 
 [dependencies]
