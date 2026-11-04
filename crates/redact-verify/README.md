@@ -215,6 +215,15 @@ format. That path depended on placeholder trust anchors and did not establish
 the claimed signature trust; those inputs return
 unproven: unsupported_legacy_anchor_format.
 
+External anchoring (EUTL-qualified timestamp / Rekor transparency log) is kept
+as an optional, informational `external_anchoring` check in every report. It is
+`unproven` with reason `external_anchor_absent` when no attestation is present,
+and `unproven` with reason `external_anchor_present_eutl_rekor_trust_not_pinned`
+when one is present, because no pinned EUTL snapshot or Rekor log key ships with
+the crate yet. It never changes the overall result or exit code. (Before this
+change, exit 0 required R2 `pass`, but the compiled-in EUTL check always
+returned false.)
+
 BagIt layouts, JSONL export, signed coverage boundaries, and independent Redact
 attestation wire formats are future contracts absent from the current
 reference. The current canonicalisation is platform-v1 deterministic JSON,

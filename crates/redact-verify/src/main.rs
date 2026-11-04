@@ -109,31 +109,21 @@ fn render_report(report: &VerificationReport, format: OutputFormat) {
             serde_json::to_string_pretty(report).expect("report serializes")
         ),
         OutputFormat::Text => {
-            println!(
-                "result={}",
-                format!("{:?}", report.result).to_ascii_lowercase()
-            );
+            println!("result={}", label(&report.result));
             println!("checked={}", report.checked);
             println!("erased={}", report.erased);
-            println!(
-                "body_hash={}",
-                format!("{:?}", report.body_hash.status).to_ascii_lowercase()
-            );
-            println!(
-                "body_signature={}",
-                format!("{:?}", report.body_signature.status).to_ascii_lowercase()
-            );
-            println!(
-                "key_binding={}",
-                format!("{:?}", report.key_binding.status).to_ascii_lowercase()
-            );
-            println!(
-                "anchoring_status={}",
-                format!("{:?}", report.anchoring_status).to_ascii_lowercase()
-            );
+            println!("body_hash={}", label(&report.body_hash.status));
+            println!("body_signature={}", label(&report.body_signature.status));
+            println!("key_binding={}", label(&report.key_binding.status));
+            println!("anchoring_status={}", label(&report.anchoring_status));
             println!(
                 "merkle_inclusion={}",
-                format!("{:?}", report.merkle_inclusion.status).to_ascii_lowercase()
+                label(&report.merkle_inclusion.status)
+            );
+            println!(
+                "external_anchoring={} ({})",
+                label(&report.external_anchoring.status),
+                report.external_anchoring.reason
             );
             for issue in &report.issues {
                 println!(
@@ -158,4 +148,12 @@ fn render_error(error: &InputError, format: OutputFormat) {
         ),
         OutputFormat::Text => println!("result=unproven reason={} {}", error.code, error.message),
     }
+}
+
+/// Renders an enum with the same spelling as the JSON report (serde names).
+fn label<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default()
 }

@@ -221,6 +221,7 @@ pub(crate) fn verify_decoded(
                 false,
                 "current_format_has_no_inclusion_proof",
             ),
+            external_anchoring: external_anchoring(&envelope, &body),
             raw_commitment: if raw_commitment_present {
                 check(
                     CheckStatus::Unproven,
@@ -831,9 +832,35 @@ pub(crate) fn verify_decoded(
         tree_head_signature,
         anchoring_status,
         merkle_inclusion,
+        external_anchoring: external_anchoring(&envelope, &body),
         raw_commitment,
         coverage,
         issues,
+    }
+}
+
+/// Optional EUTL/Rekor external anchoring. Informational only (`required=false`):
+/// it never passes offline because no pinned EUTL snapshot or Rekor log key is
+/// compiled in, and it never changes the overall result.
+fn external_anchoring(envelope: &Envelope, body: &Body) -> CheckResult {
+    let present = envelope
+        .raw
+        .get("attestation")
+        .is_some_and(|v| !v.is_null())
+        || body.raw.get("r2").is_some_and(|v| !v.is_null())
+        || body
+            .raw
+            .get("r1")
+            .and_then(|r1| r1.get("rekor"))
+            .is_some_and(|v| !v.is_null());
+    if present {
+        check(
+            CheckStatus::Unproven,
+            false,
+            "external_anchor_present_eutl_rekor_trust_not_pinned",
+        )
+    } else {
+        check(CheckStatus::Unproven, false, "external_anchor_absent")
     }
 }
 

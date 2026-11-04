@@ -227,6 +227,11 @@ pub struct VerificationReport {
     pub anchoring_status: AnchoringStatus,
     /// Merkle inclusion result; current packs carry no inclusion proof.
     pub merkle_inclusion: CheckResult,
+    /// Optional EUTL-qualified timestamp / Rekor transparency-log anchoring.
+    /// Informational: reported `unproven` when absent, and also when present,
+    /// because no pinned EUTL or Rekor trust material exists yet. Never affects
+    /// the overall result.
+    pub external_anchoring: CheckResult,
     /// Opaque raw commitment status; no opening is performed offline.
     pub raw_commitment: CheckResult,
     /// Observed coverage and authenticated-coverage limitations.
