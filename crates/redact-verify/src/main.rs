@@ -15,6 +15,7 @@ enum OutputFormat {
 #[command(
     name = "redact-verify",
     about = "Offline verifier for sealed ledger evidence packs",
+    after_help = "Exit codes:\n  0  pass      all required checks succeeded\n  1  fail      evidence is contradictory, invalid, or privacy-forbidden\n  2  unproven  required independent evidence missing, unsupported format,\n               unreadable/malformed input, or usage error\n  3  erased    verified; at least one record replaced by a signed tombstone",
     group(ArgGroup::new("trust").required(true).args(["keys", "pubkey"]))
 )]
 struct Args {

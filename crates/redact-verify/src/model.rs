@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Verification result. Exit codes are stable for automation.
+/// Verification result. Exit codes are stable for automation:
+/// 0 = pass, 1 = fail, 2 = unproven (also unreadable input and CLI usage
+/// errors), 3 = erased (verified, but at least one record was replaced by a
+/// signed tombstone).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerificationResult {
@@ -21,9 +24,10 @@ impl VerificationResult {
     /// Returns the process exit code associated with this result.
     pub fn exit_code(self) -> u8 {
         match self {
-            Self::Pass | Self::Erased => 0,
+            Self::Pass => 0,
             Self::Fail => 1,
             Self::Unproven => 2,
+            Self::Erased => 3,
         }
     }
 }

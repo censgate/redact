@@ -54,8 +54,8 @@ because there is no authenticated close boundary or heartbeat contract.
 redact-verify is offline and has no redact-core dependency. The reserved
 --online option prints a notice and makes no network calls. Exit 0 means the
 required local checks passed; exit 1 means evidence failed; exit 2 means
-required evidence is unproven or input could not be read or parsed. A verified
-signed tombstone extension returns erased with exit 0.
+required evidence is unproven or input could not be read or parsed; exit 3
+means erased (verified, with at least one signed tombstone replacing a record).
 
 Pack and ledger hashes refer to redacted material. The verifier rejects
 explicit raw-input plain-hash fields and treats a keyed raw commitment as
@@ -118,7 +118,7 @@ redact-scan --url postgres://reader@localhost/app --schema public --out report.j
 
 Crate: redact-verify 0.12.7. The verifier checks local body and record signatures;
 an R1 signature is optional and requires an independently trusted tree-head key.
-Exit 0 is pass or erased, exit 1 is fail, and exit 2 is unproven or unreadable input.
+Exit 0 is pass, 1 is fail, 2 is unproven or unreadable input, and 3 is erased.
 Gateway walkthrough: [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md).
 Image: `ghcr.io/censgate/redact-gateway:latest`.
 

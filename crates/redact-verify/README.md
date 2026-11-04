@@ -123,9 +123,12 @@ pack-signed only.
 | Result | Exit | Meaning |
 |---|---:|---|
 | pass | 0 | Required current-format checks succeeded |
-| erased | 0 | Required checks succeeded and a signed tombstone was verified |
+| erased | 3 | Required checks succeeded and a signed tombstone was verified |
 | fail | 1 | Required evidence is contradictory, invalid, or privacy-forbidden |
-| unproven | 2 | Required independent evidence is missing or the format is unsupported |
+| unproven | 2 | Required independent evidence is missing or the format is unsupported; also unreadable/malformed input and CLI usage errors |
+
+Erased has its own exit code so automation that treats 0 as "every record
+intact" does not silently accept a pack with erased records. Codes are stable.
 
 | Report check | Required behavior |
 |---|---|
@@ -207,6 +210,25 @@ have separate roles.
 
 The library reads only the byte slice or local path supplied by its caller. It
 does not print, exit, fetch keys, or use network services.
+
+## Upgrading from 0.12.x
+
+
+- **Exit codes:** 0 = pass, 1 = fail, 2 = unproven (including unreadable or malformed input and usage errors), 3 = erased (new). Automation that treats any non-zero code as "not verified" needs to decide how to handle 3.
+- **Report field names now align with the AAT draft (draft-09).** Old wire field → report field:
+  - `event_id` → `record_id`
+  - `seq` → `sequence_number`
+  - `hash` → `record_hash`
+  - `prev_hash` stays `prev_hash`, but is `null` at genesis
+  - `action` → `action_type`
+  - `caller` → `principal.id`
+  - `canonical` → `canonical_json` plus `canonicalisation: "platform_v1"`
+  - `event_name`, `profile` and `content_sha256` → `action_detail.censgate_event_name`, `censgate_profile` and `censgate_redacted_content_sha256`; other legacy metadata → `action_detail.censgate_*`
+  - `signer_kid` is the RFC 7638 thumbprint of the trusted key, not `key_name` or `key_id`
+
+  The signed pack bytes on disk are unchanged; only the verifier's normalized output is renamed.
+- **New library API:** `verify_pack(&[u8], &TrustedKeys)`, `verify_file(path, &TrustedKeys)`, `TrustedKeys::{from_json, from_ed25519, with_tree_head, with_erasure_authority}`, and `VerificationResult::exit_code()`. The library is offline and does no printing. The CLI is `--pack` with `--keys` or `--pubkey`, plus `[--tree-head-pubkey] [--format text|json]`.
+- **Anchoring:** the old R1/R2 receipt mode is removed, and proof-only legacy packs return `unproven: unsupported_legacy_anchor_format`. EUTL/Rekor external anchoring is now an informational `external_anchoring` check: always `unproven` until trust material is pinned, and it never affects the result. The R1 tree-head signature is checked only against an independently supplied key, and Merkle inclusion is reported as `unproven`.
 
 ## Compatibility and future formats
 

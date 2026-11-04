@@ -129,3 +129,29 @@ pub fn signer_kid(key: &SigningKey) -> String {
     let thumbprint = format!(r#"{{"crv":"Ed25519","kty":"OKP","x":"{x}"}}"#);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(thumbprint.as_bytes()))
 }
+
+/// A one-record pack whose record was replaced by a valid signed tombstone
+/// from `authority` (test-only key). Returns the body; sign with ledger seed 7.
+pub fn tombstone_body(authority: &SigningKey) -> Value {
+    let genesis = "0000000000000000000000000000000000000000000000000000000000000000";
+    let hash = "ab".repeat(32);
+    let kid = signer_kid(authority);
+    let fields = format!(
+        r#"{{"chain_id":"test-chain","erased_at":"2025-02-01T00:00:00Z","prev_hash":"{genesis}","reason_code":"gdpr_erasure","record_hash":"{hash}","record_id":"test-record-1","schema_version":1,"sequence_number":1,"sig_alg":"Ed25519","signer_kid":"{kid}","tenant_id":"test-tenant"}}"#
+    );
+    let sig = authority.sign(format!("redact-tombstone|v1|{fields}").as_bytes());
+    json!({
+        "schema_version": 1, "pack_id": "test-pack", "tenant_id": "test-tenant",
+        "batches": [{
+            "event": null,
+            "record": {"seq": 1, "prev_hash": "", "hash": hash, "event_id": "test-record-1", "chain_id": "test-chain"},
+            "tombstone": {
+                "schema_version": 1, "record_id": "test-record-1", "sequence_number": 1,
+                "chain_id": "test-chain", "record_hash": hash, "prev_hash": genesis,
+                "tenant_id": "test-tenant", "erased_at": "2025-02-01T00:00:00Z",
+                "reason_code": "gdpr_erasure", "signer_kid": kid, "sig_alg": "Ed25519",
+                "signature": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes())
+            }
+        }]
+    })
+}

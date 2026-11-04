@@ -147,3 +147,77 @@ fn json_and_text_output_agree_on_pass_and_fail() {
         }
     }
 }
+
+#[test]
+fn every_result_has_its_own_exit_code() {
+    use common::{fixture_from_body, public_key_hex, tombstone_body};
+    use ed25519_dalek::SigningKey;
+    let dir = tempdir().unwrap();
+    let ledger = SigningKey::from_bytes(&[7; 32]);
+    let authority = SigningKey::from_bytes(&[8; 32]);
+    let keys = dir.path().join("keys.json");
+    fs::write(
+        &keys,
+        serde_json::json!({
+            "chain": {"public_key": public_key_hex(&ledger)},
+            "erasure_authority": {"public_key": public_key_hex(&authority)}
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let pass = valid_fixture();
+    let mut bad = pass.envelope.clone();
+    bad["body_hash"] = serde_json::json!("00".repeat(32));
+    let mut r1_body = pass.body.clone();
+    r1_body["r1"] = serde_json::json!({"merkle_root": "test-root", "signature": "AAAA"});
+    let unproven = fixture_from_body(r1_body, ledger.clone(), "test-tenant", "test-pack");
+    let erased = fixture_from_body(
+        tombstone_body(&authority),
+        ledger,
+        "test-tenant",
+        "test-pack",
+    );
+
+    let cases: [(&str, Vec<u8>, i32); 5] = [
+        ("pass", pass.raw.clone(), 0),
+        ("fail", serde_json::to_vec(&bad).unwrap(), 1),
+        ("unproven", unproven.raw, 2),
+        ("unproven", b"not-json".to_vec(), 2),
+        ("erased", erased.raw, 3),
+    ];
+    for (i, (result, raw, code)) in cases.into_iter().enumerate() {
+        let pack = dir.path().join(format!("pack-{i}.json"));
+        fs::write(&pack, raw).unwrap();
+        for format in ["json", "text"] {
+            let out = Command::cargo_bin("redact-verify")
+                .unwrap()
+                .args([
+                    "--pack",
+                    pack.to_str().unwrap(),
+                    "--keys",
+                    keys.to_str().unwrap(),
+                    "--format",
+                    format,
+                ])
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            assert_eq!(out.status.code(), Some(code), "{result} {format}: {stdout}");
+            assert!(stdout.contains(result), "{result} {format}: {stdout}");
+        }
+    }
+}
+
+#[test]
+fn help_documents_all_exit_codes() {
+    let out = Command::cargo_bin("redact-verify")
+        .unwrap()
+        .arg("--help")
+        .output()
+        .unwrap();
+    let help = String::from_utf8_lossy(&out.stdout);
+    for line in ["0  pass", "1  fail", "2  unproven", "3  erased"] {
+        assert!(help.contains(line), "missing {line:?} in --help");
+    }
+}

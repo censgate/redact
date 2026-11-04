@@ -21,7 +21,7 @@ fn verifies_current_pack_and_ignores_embedded_claim() {
     );
     assert_eq!(report.tree_head_signature.status, CheckStatus::NotAnchored);
     assert_eq!(report.merkle_inclusion.status, CheckStatus::Unproven);
-    assert_eq!(VerificationResult::Erased.exit_code(), 0);
+    assert_eq!(VerificationResult::Erased.exit_code(), 3);
     assert_eq!(VerificationResult::Unproven.exit_code(), 2);
 }
 
