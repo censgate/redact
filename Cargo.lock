@@ -3479,16 +3479,18 @@ dependencies = [
 name = "redact-verify"
 version = "0.12.7"
 dependencies = [
- "anyhow",
  "assert_cmd",
  "base64 0.23.1",
+ "chrono",
  "clap",
  "ed25519-dalek",
  "hex",
  "predicates",
+ "ring",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "spki 0.8.1",
  "tempfile",
 ]
 
@@ -4158,6 +4160,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef958a98b9d5da290cfc78946e9f3e61e1e62a18db0d92cac0b83cc161491a9"
 dependencies = [
+ "base64ct",
  "der 0.8.3",
 ]
 
