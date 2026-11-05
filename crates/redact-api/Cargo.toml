@@ -8,10 +8,14 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-keywords.workspace = true
-categories.workspace = true
+keywords = ["pii", "redaction", "privacy", "http", "axum"]
+categories = ["web-programming::http-server", "text-processing"]
 documentation = "https://docs.rs/redact-api"
 description = "REST API service for PII detection and anonymization"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 redact-core = { path = "../redact-core", version = "0.12.7" }

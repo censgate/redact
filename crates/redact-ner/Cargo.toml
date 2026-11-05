@@ -7,11 +7,15 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
-categories.workspace = true
+keywords = ["pii", "ner", "onnx", "privacy", "redaction"]
+categories = ["text-processing", "science"]
 readme.workspace = true
 documentation = "https://docs.rs/redact-ner"
 description = "Named Entity Recognition for PII detection using ONNX Runtime"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 redact-core = { path = "../redact-core", version = "0.12.7" }

@@ -13,6 +13,10 @@ description = "Independent offline verifier for Censgate ledger evidence packs (
 keywords = ["attestation", "ledger", "merkle", "privacy", "cli"]
 categories = ["command-line-utilities", "cryptography"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [[bin]]
 name = "redact-verify"
 path = "src/main.rs"
