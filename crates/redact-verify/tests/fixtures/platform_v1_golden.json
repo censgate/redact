@@ -1,0 +1,12 @@
+{
+  "canonical_json": "{\"action\":\"chat\",\"boundary\":\"\",\"caller\":\"test-principal\",\"content_sha256\":\"\",\"destination_class\":\"\",\"destination_id\":\"\",\"destination_vendor\":\"\",\"entity_types\":null,\"epoch\":\"\",\"error_type\":\"\",\"event_id\":\"test-record-1\",\"event_name\":\"test.event\",\"gateway_instance\":\"\",\"outcome\":\"allowed\",\"profile\":\"strict\",\"redactions\":0,\"region\":\"test-region\",\"session_id\":\"\",\"shard\":\"\",\"span_id\":\"\",\"subject_ref\":\"\",\"tenant_id\":\"test-tenant\",\"timestamp\":\"2025-01-02T03:04:05Z\",\"tokens_issued\":0,\"trace_id\":\"\"}",
+  "ed25519_public_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=\n-----END PUBLIC KEY-----\n",
+  "p256_public_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaxfR8uEsQkf4vOblY6RA8ncDfYEt\n6zOg9KE5RdiYwpZP40Li/hp/m47n60p8D54WK84zV2sxXs7LtkBoN79R9Q==\n-----END PUBLIC KEY-----\n",
+  "p256_signature": "MEQCIBgaxbLF25OLJfee0DaD14tG7mo2om4S4Tbj1ZuJ+v+yAiAHhb6rIv/UuqpSU3piRBee2tvg2A0SJxDCydz/OgKQXA==",
+  "p384_public_pem": "-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEqofKIr6LBTeOscce8yCtdG4dO2KLp5uY\nWfdB4IJUKjhVAvJdv1UpbDpUXjhydgq3NhfeSpYmLG9dnpi/kpLcKfj0Hb0omhR8\n6doxE7XwuMAKYLHOHX6BnXpDHXyQ6g5f\n-----END PUBLIC KEY-----\n",
+  "p384_signature": "MGQCMCcvk4kikNsRN2Q5+6VaKBSPZjcVTHQTWoH7PamwBIUwEKUipLs7rx7pD1rWmWJz6AIwOo7Ya+K/pWj0lv3mftYTZpOyxB9lDle8kcgxmnfzv1Jf0BjNIwuQIhJPCK6a5DR9",
+  "record_hash": "c05e3062267e0c44697cb043bcb6ae73e7af72e6674ffd0249f40f93ad9a8a9a",
+  "record_signature": "G3zpCE6HF4HJn+tbMSvpsuvS5xSs+uvtf3S7SGvG06IwSTthUWJ/bTn5z+O3nuHRu+xaSaMcS/OpPaGKB5kPAQ==",
+  "signature_input": "test-chain|1|c05e3062267e0c44697cb043bcb6ae73e7af72e6674ffd0249f40f93ad9a8a9a",
+  "trusted_public_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+}

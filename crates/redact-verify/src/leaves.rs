@@ -1,5 +1,11 @@
+//! Legacy vector leaf formulas retained as compatibility utilities.
+//!
+//! These formulas are not part of the current sealed pack verifier and do not
+//! establish inclusion of exported records.
+
 use sha2::{Digest, Sha256};
 
+/// Computes legacy tip leaf data as SHA-256 of chain, sequence, and tip hash.
 pub fn tip_leaf_data(chain_id: &str, seq: u64, tip_hash_hex: &str) -> Result<Vec<u8>, String> {
     validate_tip_chain_id(chain_id)?;
     if tip_hash_hex.is_empty() {
@@ -9,6 +15,7 @@ pub fn tip_leaf_data(chain_id: &str, seq: u64, tip_hash_hex: &str) -> Result<Vec
     Ok(Sha256::digest(pre.as_bytes()).to_vec())
 }
 
+/// Computes legacy pack leaf data as SHA-256 of the pack id and body hash.
 pub fn pack_leaf_data(pack_id: &str, body_hash_hex: &str) -> Result<Vec<u8>, String> {
     if pack_id.is_empty() || pack_id.contains('|') {
         return Err("invalid pack_id".into());
@@ -20,6 +27,7 @@ pub fn pack_leaf_data(pack_id: &str, body_hash_hex: &str) -> Result<Vec<u8>, Str
     Ok(Sha256::digest(pre.as_bytes()).to_vec())
 }
 
+/// Rejects ambiguous legacy chain identifiers reserved by pack leaf formulas.
 pub fn validate_tip_chain_id(chain_id: &str) -> Result<(), String> {
     if chain_id.is_empty() || chain_id.contains('|') {
         return Err("invalid chain_id".into());
@@ -30,14 +38,17 @@ pub fn validate_tip_chain_id(chain_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Builds the legacy signed tree-head input bytes.
 pub fn root_preimage(merkle_root_hex: &str) -> Vec<u8> {
     format!("anchor-root|v1|{merkle_root_hex}").into_bytes()
 }
 
+/// Hashes the legacy signed tree-head input bytes.
 pub fn root_digest(merkle_root_hex: &str) -> [u8; 32] {
     Sha256::digest(root_preimage(merkle_root_hex)).into()
 }
 
+/// Builds the legacy pack signature input bytes.
 pub fn pack_sign_preimage(pack_id: &str, tenant_id: &str, body_hash: &str) -> Vec<u8> {
     format!("anchor-pack|v1|{pack_id}|{tenant_id}|{body_hash}").into_bytes()
 }

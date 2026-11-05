@@ -1,8 +1,15 @@
+//! Retained RFC 6962 compatibility Merkle primitives.
+//!
+//! These standalone utilities are covered by local vectors. The current sealed
+//! pack format does not define a relationship between its root and exported
+//! records and therefore does not use these functions to claim inclusion.
+
 use sha2::{Digest, Sha256};
 
-/// RFC 6962: leaf = SHA256(0x00 || data), node = SHA256(0x01 || left || right).
-/// No padding. Empty path only when tree_size==1 and leaf==root.
+// RFC 6962: leaf = SHA256(0x00 || data), node = SHA256(0x01 || left || right).
+// No padding. Empty path only when tree_size==1 and leaf==root.
 
+/// Computes SHA-256 over the RFC 6962 leaf prefix and data.
 pub fn leaf_hash(data: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update([0x00]);
@@ -10,6 +17,7 @@ pub fn leaf_hash(data: &[u8]) -> [u8; 32] {
     h.finalize().into()
 }
 
+/// Computes SHA-256 over the RFC 6962 node prefix and child hashes.
 pub fn node_hash(left: &[u8], right: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update([0x01]);
@@ -26,6 +34,7 @@ fn largest_power_of_two_less_than(n: usize) -> usize {
     p
 }
 
+/// Computes an unpadded RFC 6962 Merkle tree root.
 pub fn root(datas: &[Vec<u8>]) -> Result<[u8; 32], String> {
     if datas.is_empty() {
         return Err("empty tree".into());
@@ -41,6 +50,7 @@ fn mth(datas: &[Vec<u8>]) -> [u8; 32] {
     node_hash(&mth(&datas[..k]), &mth(&datas[k..]))
 }
 
+/// Creates bottom-up sibling hashes for an RFC 6962 inclusion proof.
 pub fn prove(datas: &[Vec<u8>], index: usize) -> Result<Vec<[u8; 32]>, String> {
     if index >= datas.len() {
         return Err("leaf index out of range".into());
@@ -64,6 +74,7 @@ fn prove_rec(datas: &[Vec<u8>], index: usize) -> Vec<[u8; 32]> {
     }
 }
 
+/// Verifies an RFC 6962 inclusion path and exact tree dimensions.
 pub fn verify_inclusion(
     data: &[u8],
     index: usize,
@@ -118,6 +129,7 @@ fn reconstruct(
     }
 }
 
+/// Decodes a sequence of 32-byte hexadecimal sibling hashes.
 pub fn decode_path(hexes: &[String]) -> Result<Vec<[u8; 32]>, String> {
     let mut out = Vec::new();
     for h in hexes {

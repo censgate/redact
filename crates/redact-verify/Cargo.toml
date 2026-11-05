@@ -18,14 +18,16 @@ name = "redact-verify"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = { workspace = true }
 base64 = "0.23"
+chrono = { workspace = true }
 clap = { workspace = true }
+ring = "=0.17.14"
 ed25519-dalek = { version = "3.0", features = ["pkcs8"] }
 hex = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+spki = { version = "=0.8.1", features = ["std"] }
 
 [dev-dependencies]
 assert_cmd = "2.2"

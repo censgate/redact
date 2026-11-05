@@ -33,22 +33,42 @@ p50 latency vs Presidio was **32×** on the 2026-04-18 oha payload ([benchmark](
 
 ## Evidence and attestation
 
-A log you control is not evidence. The gateway can emit audit records
-([schema](docs/gateway/audit.md)), but those records are written by the same
-operator who ran the proxy: the in-process queue can drop under load, the sink
-is yours, and nothing stops a rewrite.
+Gateway audit records ([schema](docs/gateway/audit.md)) are written by the
+operator who ran the proxy. The in-process queue can drop under load, the sink
+is operator-controlled, and records can be rewritten.
 
-Censgate ledger evidence packs are a different artifact:
+Censgate ledger evidence packs are a different artifact. The current sealed
+format is one JSON envelope with the exact body bytes encoded in standard
+base64. The offline redact-verify library checks the body SHA-256, pack
+Ed25519 signature, each per-record Ed25519 signature, each platform-v1 record
+hash projection, and chain continuity. Pack-supplied public keys are compared
+with independently supplied local keys and never establish trust themselves.
 
-1. **Hash chaining** — each event is bound to the previous tip. `redact-verify` recomputes `body_hash` and checks `prev_hash` chain consistency. Tip-signature fields must be present; Ed25519 verification is applied to `body_signature` (builder-signed), not to each tip.
-2. **External anchoring** — Merkle inclusion plus a Rekor receipt. `pack_anchored` (R2) is **computed** from the receipt and the compiled-in trust set (`src/trust.rs`, EUTL snapshot). Pack-supplied keys cannot pass the offline test. `attestation.status` is a hint, never a pass.
-3. **Offline third-party verification** — `redact-verify` has no `redact-core` dependency and does not dial the network. `--online` is accepted and unused; it does not re-query Rekor. Exit 0 only if every check passes **and** R2 is `pass`. Stripped attestation is `unproven`, never pass.
+An optional R1 tree head carries a root string and ECDSA signature. The
+verifier checks that signature only when an independent local P-256 or P-384
+key is supplied. The current format has no inclusion path or specified link
+between its root and exported records, so a valid root signature is not
+reported as record inclusion. Tail and global coverage also remain unproven
+because there is no authenticated close boundary or heartbeat contract.
 
-Compliance YAML under `patterns/compliance/` is a **mapping input** (which
-entity types a profile treats as in-scope). It is not SOC 2, GDPR, HIPAA, or
-ISO 27001 certification.
+redact-verify is offline and has no redact-core dependency. The reserved
+--online option prints a notice and makes no network calls. Exit 0 means the
+required local checks passed; exit 1 means evidence failed; exit 2 means
+required evidence is unproven or input could not be read or parsed; exit 3
+means erased (verified, with at least one signed tombstone replacing a record).
 
-Verifier: [`crates/redact-verify/README.md`](crates/redact-verify/README.md).
+Pack and ledger hashes refer to redacted material. The verifier rejects
+explicit raw-input plain-hash fields and treats a keyed raw commitment as
+opaque; it never requests raw input, a salt, keys, or an online opening.
+Current public metadata is aligned with the AAT draft (draft-09), while the
+platform-v1 canonicalisation differs from native JCS/AAT chaining. BagIt,
+JSONL, authenticated coverage, and independent Redact attestation wire formats
+remain future contracts absent from the current reference.
+
+Compliance YAML under patterns/compliance/ maps which entity types a profile
+treats as in-scope.
+
+Verifier: [crates/redact-verify/README.md](crates/redact-verify/README.md).
 
 ## Quick Start
 
@@ -96,39 +116,9 @@ cargo install redact-scan
 redact-scan --url postgres://reader@localhost/app --schema public --out report.json
 ```
 
-Crate: [`redact-scan`](https://crates.io/crates/redact-scan) 0.12.7.
-
-`--fail-on` exits 1 when findings match. `--include-samples` is a local sidecar
-only and cannot be combined with `--report-url`.
-
-Layers and safety rails: [`docs/scanning-model.md`](docs/scanning-model.md).
-
-### Prove what left
-
-The gateway redacts prompts on the way to a provider. The ledger pack is what
-you hand a third party. Verify the pack offline; do not trust a self-hosted
-log viewer.
-
-```bash
-cargo install redact-gateway
-export OTEL_SDK_DISABLED=true
-redact-gateway --host 127.0.0.1
-
-curl -s http://127.0.0.1:8080/v1/redact \
-  -H 'content-type: application/json' \
-  -d '{"text":"Email me at jane@example.com"}'
-```
-
-```bash
-cargo install redact-verify
-redact-verify --pack <file> --pubkey <file> [--online] [--format json]
-```
-
-Crate: [`redact-verify`](https://crates.io/crates/redact-verify) 0.12.7. `--online` does not dial the network.
-
-Exit **0** only if every check passes and R2 (`pack_anchored`) is `pass`.
-**1** on any fail or R2 unproven. **2** if the pack is malformed.
-
+Crate: redact-verify 0.12.7. The verifier checks local body and record signatures;
+an R1 signature is optional and requires an independently trusted tree-head key.
+Exit 0 is pass, 1 is fail, 2 is unproven or unreadable input, and 3 is erased.
 Gateway walkthrough: [`docs/gateway/getting-started.md`](docs/gateway/getting-started.md).
 Image: `ghcr.io/censgate/redact-gateway:latest`.
 
