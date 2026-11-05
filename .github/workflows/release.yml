@@ -193,6 +193,10 @@ jobs:
     # github_release_only leaves crates.io alone; those versions are already
     # published and this job must not run when image verification was skipped.
     needs: [build-binaries, verify-pushed-images]
+    # Trusted publishing: GitHub OIDC -> short-lived crates.io token. No stored secret.
+    permissions:
+      id-token: write
+      contents: read
     if: >-
       always() &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.github_release_only != 'true') &&
@@ -224,44 +228,48 @@ jobs:
             exit 1
           fi
 
+      - name: Authenticate with crates.io (trusted publishing)
+        id: crates-auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
       - name: Publish redact-core
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-core
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-core
         continue-on-error: true
 
       - name: Wait for redact-core
         run: sleep 45
 
       - name: Publish redact-ner
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-ner
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-ner
         continue-on-error: true
 
       - name: Wait for redact-ner
         run: sleep 45
 
       - name: Publish redact-api
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-api
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-api
         continue-on-error: true
 
       - name: Publish redact-cli
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-cli
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-cli
         continue-on-error: true
 
       - name: Wait for crates.io index
         run: sleep 45
 
       - name: Publish redact-gateway
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-gateway
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-gateway
         continue-on-error: true
 
       - name: Wait for crates.io index
         run: sleep 45
 
       - name: Publish redact-scan
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-scan
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-scan
         continue-on-error: true
 
       - name: Publish redact-verify
-        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} -p redact-verify
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-verify
         continue-on-error: true
 
       - name: Verify crates.io versions
