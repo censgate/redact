@@ -70,6 +70,8 @@ pub struct ServerDocument {
     pub enable_http_trace: Option<bool>,
     /// Serve `/metrics`.
     pub metrics_endpoint: Option<bool>,
+    /// Advertise and accept field-preserving redact batches.
+    pub redact_batch_enabled: Option<bool>,
 }
 
 /// Provider section.
@@ -255,6 +257,10 @@ impl GatewayDocument {
                 server.enable_http_trace,
             );
             apply_opt(&mut config.server.metrics_endpoint, server.metrics_endpoint);
+            apply_opt(
+                &mut config.server.redact_batch_enabled,
+                server.redact_batch_enabled,
+            );
         }
 
         if let Some(provider) = self.provider {

@@ -352,6 +352,13 @@ pub struct ServerSettings {
     pub enable_http_trace: bool,
     /// Serve a pull-based metrics endpoint at `/metrics`.
     pub metrics_endpoint: bool,
+    /// Advertise and accept field-preserving `/v1/redact` batches.
+    #[serde(default = "batch_enabled_default")]
+    pub redact_batch_enabled: bool,
+}
+
+fn batch_enabled_default() -> bool {
+    true
 }
 
 impl Default for ServerSettings {
@@ -361,6 +368,7 @@ impl Default for ServerSettings {
             port: 8080,
             enable_http_trace: true,
             metrics_endpoint: true,
+            redact_batch_enabled: true,
         }
     }
 }
@@ -955,6 +963,7 @@ impl ResolvedConfig {
                 "bind": self.bind_address(),
                 "http_trace": self.server.enable_http_trace,
                 "metrics_endpoint": self.server.metrics_endpoint,
+                "redact_batch_enabled": self.server.redact_batch_enabled,
             },
             "provider": {
                 "name": self.provider.name,
