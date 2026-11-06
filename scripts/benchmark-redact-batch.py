@@ -94,33 +94,42 @@ def main():
                 raise RuntimeError("local gateway startup timed out")
             if status.get("token_map_backend") != "vault_kv2" or status.get("capabilities", {}).get("redact_texts_v1") is not True:
                 raise RuntimeError("real KV-v2 batch gateway required")
+            result = dict(environment=dict(machine=platform.platform(), cpu=platform.processor(), cpu_count=os.cpu_count(), gateway_version=status["version"], vault_version=health.get("version"), model_sha256=hashlib.sha256(model.read_bytes()).hexdigest(), runtime=str(runtime), profiling="Sequential leaf inference; use gateway detect spans for ONNX share. KV metadata versions count successful writes, not rejected CAS attempts."), rows=rows)
+            def checkpoint():
+                args.output.write_text(json.dumps(result, indent=2) + "\n")
             for leaves in (139, 347, 800):
                 fixture = [f"synthetic record {i}: batchfixture{i}@example.test; quoted \"雪\"\n" for i in range(leaves)]
                 for mode in ("serial", "batch"):
                     walls, requests, writes = [], [], []
-                    for sample in range(args.samples + 1):
-                        session = f"{mode}-{leaves}-{sample}"
-                        common = {"profile": "reversible", "session_id": session}
-                        start = time.perf_counter()
-                        if mode == "serial":
-                            outputs = [call(base, "/v1/redact", dict(common, text=leaf))["text"] for leaf in fixture]
-                        else:
-                            response = call(base, "/v1/redact", dict(common, texts=fixture))
-                            if response.get("blocked") or len(response.get("texts", [])) != leaves:
-                                raise RuntimeError("batch blocked or shape mismatch")
-                            outputs = response["texts"]
-                        elapsed = (time.perf_counter() - start) * 1000
-                        if any(f"batchfixture{i}@example.test" in output for i, output in enumerate(outputs)):
-                            raise RuntimeError("synthetic fixture redaction coverage failed")
-                        metadata = call(vault, f"/v1/{mount}/metadata/{prefix}/default/{session}", token=token)
-                        version = metadata["data"]["current_version"]
-                        if sample:  # sample 0 warms NER/transport separately for each shape/mode
-                            walls.append(elapsed)
-                            requests.append(leaves if mode == "serial" else 1)
-                            writes.append(version)
+                    try:
+                        for sample in range(args.samples + 1):
+                            session = f"{mode}-{leaves}-{sample}"
+                            common = {"profile": "reversible", "session_id": session}
+                            start = time.perf_counter()
+                            if mode == "serial":
+                                outputs = [call(base, "/v1/redact", dict(common, text=leaf))["text"] for leaf in fixture]
+                            else:
+                                response = call(base, "/v1/redact", dict(common, texts=fixture))
+                                if response.get("blocked") or len(response.get("texts", [])) != leaves:
+                                    raise RuntimeError("batch blocked or shape mismatch")
+                                outputs = response["texts"]
+                            elapsed = (time.perf_counter() - start) * 1000
+                            if any(f"batchfixture{i}@example.test" in output for i, output in enumerate(outputs)):
+                                raise RuntimeError("synthetic fixture redaction coverage failed")
+                            metadata = call(vault, f"/v1/{mount}/metadata/{prefix}/default/{session}", token=token)
+                            version = metadata["data"]["current_version"]
+                            if sample:  # sample 0 warms NER/transport separately for each shape/mode
+                                walls.append(elapsed)
+                                requests.append(leaves if mode == "serial" else 1)
+                                writes.append(version)
+                    except RuntimeError as err:
+                        # Keep completed shapes. Status only: response bodies can contain leaf text.
+                        rows.append(dict(mode=mode, leaves=leaves, error=str(err)))
+                        checkpoint()
+                        print(json.dumps(result, indent=2))
+                        return 1
                     rows.append(dict(mode=mode, leaves=leaves, samples=args.samples, warm=True, p50_ms=statistics.median(walls), p95_ms=percentile(walls, .95), wall_ms=walls, http_requests=requests, vault_successful_writes=writes))
-            result = dict(environment=dict(machine=platform.platform(), cpu=platform.processor(), cpu_count=os.cpu_count(), gateway_version=status["version"], vault_version=health.get("version"), model_sha256=hashlib.sha256(model.read_bytes()).hexdigest(), runtime=str(runtime), profiling="Sequential leaf inference; use gateway detect spans for ONNX share. KV metadata versions count successful writes, not rejected CAS attempts."), rows=rows)
-            args.output.write_text(json.dumps(result, indent=2) + "\n")
+                    checkpoint()
             print(json.dumps(result, indent=2))
         finally:
             proc.terminate()

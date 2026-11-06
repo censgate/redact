@@ -99,6 +99,9 @@ python3 scripts/benchmark-redact-batch.py --samples 10 --output /workspace/plans
 The same synthetic fixtures run serial and batch at 139, 347 and 800 leaves,
 with a warmup and fresh session per sample. Output includes p50/p95, sample
 walls, HTTP counts, successful vault-write counts, model hash and versions.
+Completed rows are written as each shape finishes. A later HTTP failure keeps
+those rows, adds a status-only error for the failing shape, and exits non-zero.
+An 800-leaf batch can hit the 30-second deadline on a single CPU and fail closed.
 Use existing detect spans/profiling to attribute ONNX/transport time separately;
 the harness does not invent an inference-time split. It deliberately preserves
 local synthetic mapping records for review; dispose of the dedicated mount
