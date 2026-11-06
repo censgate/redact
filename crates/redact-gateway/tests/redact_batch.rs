@@ -454,3 +454,97 @@ async fn admission_rejects_a_second_batch_before_detection_or_write() {
     assert_eq!(recognizer.seen.load(Ordering::SeqCst), 2);
     assert_eq!(store.writes.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn session_documents_reuse_tokens_and_reject_an_oversized_request() {
+    let store = Arc::new(TestStore::default());
+    let (mut state, _, _) = harness(store).await;
+    let maps = Arc::new(MemoryStore::with_doc_limit(
+        std::time::Duration::from_secs(3600),
+        2,
+    ));
+    state.tokens = maps.clone();
+    let router = create_router(state);
+    let first = batch(router.clone(), json!(["person-a person-b"])).await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+    assert_eq!(first.json()["texts"][0], "[PERSON_1] [PERSON_2]");
+    let second = batch(router.clone(), json!(["person-c person-d"])).await;
+    assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+    assert_eq!(second.json()["texts"][0], "[PERSON_3] [PERSON_4]");
+    let reused = batch(router.clone(), json!(["person-a person-c"])).await;
+    assert_eq!(reused.status, StatusCode::OK, "{}", reused.body);
+    assert_eq!(reused.json()["texts"][0], "[PERSON_1] [PERSON_3]");
+    assert_eq!(
+        maps.get("default", "batch-synthetic").await.unwrap().len(),
+        4
+    );
+
+    let oversized = post_json(
+        router,
+        "/v1/redact",
+        json!({"texts":["person-a person-b person-c"], "session_id":"fresh-synthetic"}),
+    )
+    .await;
+    assert_eq!(oversized.status, StatusCode::CONFLICT);
+    assert_eq!(oversized.json()["error"]["type"], "session_map_full");
+    assert!(!oversized.body.contains("person-a"));
+    assert!(maps
+        .get("default", "fresh-synthetic")
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn admission_waits_in_a_bounded_queue() {
+    let store = Arc::new(TestStore {
+        pause_write: true,
+        ..TestStore::default()
+    });
+    let (mut state, _, _) = harness(store.clone()).await;
+    state.batch_admission = Arc::new(tokio::sync::Semaphore::new(1));
+    state.batch_queue = std::time::Duration::from_secs(2);
+    state.batch_queue_depth = 1;
+    state.batch_waiters = Arc::new(AtomicUsize::new(0));
+    let waiters = state.batch_waiters.clone();
+    let router = create_router(state);
+    let running = tokio::spawn({
+        let router = router.clone();
+        async move { batch(router, json!(["person-a"])).await }
+    });
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        store.write_started.notified(),
+    )
+    .await
+    .expect("admitted batch did not reach the write");
+    let queued = tokio::spawn({
+        let router = router.clone();
+        async move {
+            post_json(
+                router,
+                "/v1/redact",
+                json!({"texts":["person-c"], "session_id":"queue-synthetic"}),
+            )
+            .await
+        }
+    });
+    let started = tokio::time::Instant::now();
+    while waiters.load(Ordering::SeqCst) == 0 {
+        if started.elapsed() > std::time::Duration::from_secs(2) {
+            panic!("second batch did not wait");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let rejected = post_json(
+        router,
+        "/v1/redact",
+        json!({"texts":["person-d"], "session_id":"overflow-synthetic"}),
+    )
+    .await;
+    assert_eq!(rejected.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(rejected.json()["error"]["type"], "overload");
+    assert!(!rejected.body.contains("person-d"));
+    running.abort();
+    queued.abort();
+}

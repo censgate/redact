@@ -94,7 +94,7 @@ impl GatewayServer {
             .context("could not build the provider client")?;
 
         let handle = ConfigHandle::new(config);
-        let (batch_admission, batch_queue) = batch_limits_from_env();
+        let (batch_admission, batch_queue, batch_queue_depth) = batch_limits_from_env();
         let state = AppState {
             config: handle.clone(),
             engine,
@@ -106,6 +106,8 @@ impl GatewayServer {
             telemetry,
             batch_admission,
             batch_queue,
+            batch_queue_depth,
+            batch_waiters: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
 
         Ok(Self {

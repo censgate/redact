@@ -67,6 +67,10 @@ pub struct AppState {
     pub batch_admission: Arc<tokio::sync::Semaphore>,
     /// How long a texts[] request waits for a permit. Zero rejects immediately.
     pub batch_queue: Duration,
+    /// How many texts[] requests may wait. Further arrivals are overload.
+    pub batch_queue_depth: usize,
+    /// Requests currently waiting for a permit.
+    pub batch_waiters: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 /// Leaves passed to one detection call. The NER pack splits this further by length.
@@ -74,7 +78,11 @@ const DETECT_CHUNK: usize = 32;
 const BATCH_QUEUE_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-queue-ms");
 
 /// Production default is one in-flight texts[] request. The cap is 8.
-pub(crate) fn batch_limits_from_env() -> (Arc<tokio::sync::Semaphore>, Duration) {
+///
+/// The default queue holds up to four arrivals for five seconds. That is
+/// backpressure, not extra throughput: a waiter does not run beside the
+/// in-flight request. `CENSGATE_REDACT_BATCH_QUEUE_MS=0` rejects immediately.
+pub(crate) fn batch_limits_from_env() -> (Arc<tokio::sync::Semaphore>, Duration, usize) {
     let permits = std::env::var("CENSGATE_REDACT_BATCH_INFLIGHT")
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
@@ -83,11 +91,17 @@ pub(crate) fn batch_limits_from_env() -> (Arc<tokio::sync::Semaphore>, Duration)
     let queue_ms = std::env::var("CENSGATE_REDACT_BATCH_QUEUE_MS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .filter(|ms| *ms <= 5_000)
-        .unwrap_or(0);
+        .filter(|ms| *ms <= 30_000)
+        .unwrap_or(5_000);
+    let depth = std::env::var("CENSGATE_REDACT_BATCH_QUEUE_DEPTH")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|depth| (1..=32).contains(depth))
+        .unwrap_or(4);
     (
         Arc::new(tokio::sync::Semaphore::new(permits)),
         Duration::from_millis(queue_ms),
+        depth,
     )
 }
 
@@ -1505,14 +1519,28 @@ async fn redact_endpoint(
     let permit = if state.batch_queue.is_zero() {
         state.batch_admission.clone().try_acquire_owned().ok()
     } else {
-        match tokio::time::timeout(
-            state.batch_queue,
-            state.batch_admission.clone().acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => Some(permit),
-            _ => None,
+        let previous = state
+            .batch_waiters
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if previous >= state.batch_queue_depth {
+            state
+                .batch_waiters
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            None
+        } else {
+            let acquired = match tokio::time::timeout(
+                state.batch_queue,
+                state.batch_admission.clone().acquire_owned(),
+            )
+            .await
+            {
+                Ok(Ok(permit)) => Some(permit),
+                _ => None,
+            };
+            state
+                .batch_waiters
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            acquired
         }
     };
     let queue_ms = waited.elapsed().as_millis();
@@ -1748,6 +1776,9 @@ async fn redact_request(
                     spans::finish_tokenmap(span, 0, Some("token_map_error"));
                 }
                 use crate::vault::TokenMapError;
+                if matches!(err, TokenMapError::SessionFull) {
+                    return GatewayError::SessionMapFull.into_response();
+                }
                 // The losing request's labels were never persisted, so nothing is
                 // overwritten. Re-resume from the winner's mappings and redact
                 // again so this request mints fresh labels (or reuses the winner's

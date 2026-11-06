@@ -41,6 +41,10 @@ pub enum GatewayError {
     #[error("redact batch overloaded")]
     Overloaded,
 
+    /// The caller session has no document that can take this request's new mappings.
+    #[error("redact session map full")]
+    SessionMapFull,
+
     /// Detection or anonymization failed.
     #[error("redaction failed: {0}")]
     Redaction(String),
@@ -63,6 +67,7 @@ impl GatewayError {
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::PolicyBlocked(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::DependencyUnavailable(_) | Self::Overloaded => StatusCode::SERVICE_UNAVAILABLE,
+            Self::SessionMapFull => StatusCode::CONFLICT,
             Self::Redaction(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Provider(_) => StatusCode::BAD_GATEWAY,
         }
@@ -77,6 +82,7 @@ impl GatewayError {
             Self::PolicyBlocked(_) => "policy_violation",
             Self::DependencyUnavailable(_) => "dependency_unavailable",
             Self::Overloaded => "overload",
+            Self::SessionMapFull => "session_map_full",
             Self::Redaction(_) => "redaction_error",
             Self::Provider(_) => "provider_error",
             Self::Internal(_) => "internal_error",
@@ -126,6 +132,11 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         assert_eq!(GatewayError::Overloaded.error_type(), "overload");
+        assert_eq!(GatewayError::SessionMapFull.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            GatewayError::SessionMapFull.error_type(),
+            "session_map_full"
+        );
     }
 
     #[test]

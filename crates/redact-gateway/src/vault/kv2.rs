@@ -27,9 +27,9 @@ use vaultrs::error::ClientError;
 use vaultrs::kv2;
 
 use super::{
-    lineage_tenant_path, merge_mappings, register_direct_predecessor, session_path,
-    subject_closure, CredentialLineage, LineagePersistError, TenantLineageGraph, TokenMapError,
-    TokenMapStore,
+    lineage_tenant_path, map_doc_limit_from_env, map_doc_session, place_mappings,
+    register_direct_predecessor, session_path, subject_closure, CredentialLineage,
+    LineagePersistError, TenantLineageGraph, TokenMapError, TokenMapStore, MAP_DOC_SLOTS,
 };
 use crate::config::{VaultAuthMethod, VaultSettings};
 use crate::redact::token::TokenMapping;
@@ -69,6 +69,7 @@ pub struct Kv2Store {
     mount: String,
     path_prefix: String,
     ttl_secs: u64,
+    map_doc_limit: usize,
     health: Mutex<Option<(Instant, Result<(), String>)>>,
 }
 
@@ -147,6 +148,7 @@ impl Kv2Store {
             mount: settings.mount.clone(),
             path_prefix: settings.path_prefix.clone(),
             ttl_secs: settings.ttl_secs,
+            map_doc_limit: map_doc_limit_from_env(),
             health: Mutex::new(None),
         })
     }
@@ -275,26 +277,6 @@ impl Kv2Store {
         Ok(())
     }
 
-    async fn read_entry(&self, path: &str) -> Result<Option<StoredSession>, TokenMapError> {
-        self.ensure_fresh_token().await?;
-        let inner = self.inner.read().await;
-        match kv2::read::<StoredSession>(&inner.client, &self.mount, path).await {
-            Ok(entry) => {
-                if entry.expires_at <= Utc::now() {
-                    // Treat as absent without calling delete_latest: a concurrent
-                    // put can CAS-write a fresh version between this read and a
-                    // delete, and delete_latest would then wipe the new data.
-                    // The next put overwrites expired payloads via CAS.
-                    Ok(None)
-                } else {
-                    Ok(Some(entry))
-                }
-            }
-            Err(ClientError::APIError { code: 404, .. }) => Ok(None),
-            Err(err) => Err(map_client_error(err)),
-        }
-    }
-
     /// Read session data and the KV v2 version needed for a CAS write.
     ///
     /// Uses the raw read endpoint (rather than [`kv2::read`]) so the version in
@@ -327,6 +309,51 @@ impl Kv2Store {
             Ok((entry.mappings, cas))
         }
     }
+
+    /// Documents for one caller session. A missing key ends the scan.
+    /// An expired key keeps its compare-and-set version and contributes no rows.
+    async fn read_map_docs(
+        &self,
+        tenant: &str,
+        session: &str,
+    ) -> Result<Vec<(Vec<TokenMapping>, u32)>, TokenMapError> {
+        let mut docs = Vec::new();
+        for index in 0..MAP_DOC_SLOTS {
+            let name = map_doc_session(session, index)?;
+            let (mappings, cas) = self.read_for_cas(&self.path(tenant, &name)).await?;
+            if mappings.is_empty() && cas == 0 {
+                break;
+            }
+            docs.push((mappings, cas));
+        }
+        Ok(docs)
+    }
+
+    /// Write one document. `Ok(true)` is a compare-and-set conflict.
+    async fn write_doc(
+        &self,
+        tenant: &str,
+        session: &str,
+        index: usize,
+        mappings: &[TokenMapping],
+        cas: u32,
+        expires_at: DateTime<Utc>,
+    ) -> Result<bool, TokenMapError> {
+        let name = map_doc_session(session, index)?;
+        let path = self.path(tenant, &name);
+        let payload = StoredSession {
+            mappings: mappings.to_vec(),
+            expires_at,
+        };
+        let options = SetSecretRequestOptions { cas };
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        match kv2::set_with_options(&inner.client, &self.mount, &path, &payload, options).await {
+            Ok(_) => Ok(false),
+            Err(err) if is_cas_conflict(&err) => Ok(true),
+            Err(err) => Err(map_client_error(err)),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -345,35 +372,61 @@ impl TokenMapStore for Kv2Store {
         if mappings.is_empty() {
             return Ok(());
         }
-
-        let path = self.path(tenant, session);
+        let _ = map_doc_session(session, 0)?;
         let mut last_cas_error = None;
 
         for attempt in 1..=PUT_CAS_ATTEMPTS {
-            let (existing, cas) = self.read_for_cas(&path).await?;
-            let merged = merge_mappings(existing, mappings)?;
-            let payload = StoredSession {
-                mappings: merged,
-                expires_at: Utc::now() + chrono::Duration::seconds(self.ttl_secs as i64),
+            let docs = self.read_map_docs(tenant, session).await?;
+            let contents: Vec<Vec<TokenMapping>> =
+                docs.iter().map(|(mappings, _)| mappings.clone()).collect();
+            let Some(placement) = place_mappings(&contents, mappings, self.map_doc_limit)? else {
+                return Ok(());
             };
-            let options = SetSecretRequestOptions { cas };
-
-            let result = {
-                self.ensure_fresh_token().await?;
-                let inner = self.inner.read().await;
-                kv2::set_with_options(&inner.client, &self.mount, &path, &payload, options).await
-            };
-
-            match result {
-                Ok(_) => return Ok(()),
-                Err(err) if is_cas_conflict(&err) => {
-                    last_cas_error = Some(err.to_string());
+            let expires_at = Utc::now() + chrono::Duration::seconds(self.ttl_secs as i64);
+            let mut conflict = false;
+            for (index, (existing, cas)) in docs.iter().enumerate() {
+                if index == placement.index {
+                    continue;
+                }
+                if existing.is_empty() {
+                    continue;
+                }
+                if self
+                    .write_doc(tenant, session, index, existing, *cas, expires_at)
+                    .await?
+                {
+                    conflict = true;
+                    break;
+                }
+            }
+            if conflict {
+                last_cas_error = Some("map document expiry refresh conflict".to_string());
+                if attempt == PUT_CAS_ATTEMPTS {
+                    break;
+                }
+                tokio::time::sleep(cas_backoff(attempt)).await;
+                continue;
+            }
+            let cas = docs.get(placement.index).map(|(_, cas)| *cas).unwrap_or(0);
+            match self
+                .write_doc(
+                    tenant,
+                    session,
+                    placement.index,
+                    &placement.mappings,
+                    cas,
+                    expires_at,
+                )
+                .await?
+            {
+                false => return Ok(()),
+                true => {
+                    last_cas_error = Some("map document write conflict".to_string());
                     if attempt == PUT_CAS_ATTEMPTS {
                         break;
                     }
                     tokio::time::sleep(cas_backoff(attempt)).await;
                 }
-                Err(err) => return Err(map_client_error(err)),
             }
         }
 
@@ -384,38 +437,65 @@ impl TokenMapStore for Kv2Store {
     }
 
     async fn get(&self, tenant: &str, session: &str) -> Result<Vec<TokenMapping>, TokenMapError> {
-        let path = self.path(tenant, session);
-        Ok(self
-            .read_entry(&path)
-            .await?
-            .map(|entry| entry.mappings)
-            .unwrap_or_default())
+        let docs = self.read_map_docs(tenant, session).await?;
+        let mut out = Vec::new();
+        for (mappings, _) in docs {
+            out.extend(mappings);
+        }
+        Ok(out)
     }
 
     async fn exists(&self, tenant: &str, session: &str) -> Result<bool, TokenMapError> {
-        self.metadata_exists(&self.path(tenant, session)).await
+        for index in 0..MAP_DOC_SLOTS {
+            let name = map_doc_session(session, index)?;
+            if self.metadata_exists(&self.path(tenant, &name)).await? {
+                return Ok(true);
+            }
+            if index == 0 {
+                return Ok(false);
+            }
+        }
+        Ok(false)
     }
 
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
-        let path = self.path(tenant, session);
-        self.ensure_fresh_token().await?;
-        let inner = self.inner.read().await;
-        match kv2::delete_latest(&inner.client, &self.mount, &path).await {
-            Ok(()) => Ok(()),
-            Err(ClientError::APIError { code: 404, .. }) => Ok(()),
-            Err(err) => Err(map_client_error(err)),
+        for index in 0..MAP_DOC_SLOTS {
+            let name = map_doc_session(session, index)?;
+            let path = self.path(tenant, &name);
+            self.ensure_fresh_token().await?;
+            let inner = self.inner.read().await;
+            match kv2::delete_latest(&inner.client, &self.mount, &path).await {
+                Ok(()) => {}
+                Err(ClientError::APIError { code: 404, .. }) => {
+                    if index == 0 {
+                        return Ok(());
+                    }
+                    break;
+                }
+                Err(err) => return Err(map_client_error(err)),
+            }
         }
+        Ok(())
     }
 
     async fn purge(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
-        let path = self.path(tenant, session);
-        self.ensure_fresh_token().await?;
-        let inner = self.inner.read().await;
-        match kv2::delete_metadata(&inner.client, &self.mount, &path).await {
-            Ok(()) => Ok(()),
-            Err(ClientError::APIError { code: 404, .. }) => Ok(()),
-            Err(err) => Err(map_client_error(err)),
+        for index in 0..MAP_DOC_SLOTS {
+            let name = map_doc_session(session, index)?;
+            let path = self.path(tenant, &name);
+            self.ensure_fresh_token().await?;
+            let inner = self.inner.read().await;
+            match kv2::delete_metadata(&inner.client, &self.mount, &path).await {
+                Ok(()) => {}
+                Err(ClientError::APIError { code: 404, .. }) => {
+                    if index == 0 {
+                        return Ok(());
+                    }
+                    break;
+                }
+                Err(err) => return Err(map_client_error(err)),
+            }
         }
+        Ok(())
     }
 
     async fn get_lineage(

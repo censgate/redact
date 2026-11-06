@@ -53,18 +53,31 @@ simultaneously deploying both repositories.
   limit counts keys and string values, not one string per entity. The default
   limit is 1000 and rejects a growing map near 124 entities. A candidate
   listener value of 10000 accepted 1249 mappings (9998 strings, about 205 KiB
-  for the short sealed-value probe) and rejected 1250. One 800-leaf batch of
-  unique values fits. A second 800-leaf batch on the same session does not:
-  the write fails closed and the stored version does not advance. The listener
-  change does not shard a session. Near-cap and over-cap failures are closed.
+  for the short sealed-value probe) and   rejected 1250. One 800-leaf batch of unique values fits in that document.
+  The listener change is paired with a document limit, not with an
+  unbounded map. `CENSGATE_REDACT_MAP_DOC_LIMIT` defaults to 1249, the
+  measured ceiling at 10000 strings. A caller keeps one session id. Mappings
+  that still fit stay in that document. A later request whose new mappings
+  do not fit is written, in one compare-and-set, to `:mapdoc:N` (at most 8
+  documents). That suffix is not the platform client's `:kvshard:` cursor.
+  Token numbers keep counting across documents, so a repeated value keeps its
+  token and restore uses the same session id. One request that itself exceeds
+  a document, or that arrives after all 8 documents are full, returns HTTP 409
+  `session_map_full` and writes nothing. Set the document limit no higher
+  than the listener accepts. Near-cap and over-cap failures are closed.
 - Detection of a texts[] request packs equal-length token rows into one ONNX
   forward, at most 32 sequences and 2048 tokens. Each text is tokenized,
   decoded, and minted on its own. Texts are not concatenated. Pattern and
   contextual recognizers still run per text. One TokenSession and one mapping
   write cover the request. `CENSGATE_REDACT_BATCH_INFLIGHT` (default 1, cap 8)
   admits that many texts[] requests. `CENSGATE_REDACT_BATCH_QUEUE_MS` (default
-  0, cap 5000) is how long a request waits for a permit. Past that, the
-  response is HTTP 503 `error.type=overload` and nothing is detected or written.
+  5000, cap 30000) is how long a request waits, and
+  `CENSGATE_REDACT_BATCH_QUEUE_DEPTH` (default 4, cap 32) is how many may wait.
+  A waiter does not detect beside the in-flight request. Past the depth or the
+  wait, the response is HTTP 503 `error.type=overload` and nothing is detected
+  or written. Set the wait to 0 to reject immediately. This queue is
+  backpressure. Throughput for concurrent sessions is additional gateway
+  replicas, each with its own CPU.
 - Batch read, detect, tokenize, CAS-exhaustion and persist failures always
   error, even for profiles with legacy `fail_closed: false`. No mixed result
   list is returned. Batch error bodies contain static classes, never detector

@@ -19,8 +19,9 @@ use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 
 use super::{
-    merge_mappings, register_direct_predecessor, session_path, subject_closure, CredentialLineage,
-    LineagePersistError, TenantLineageGraph, TokenMapError, TokenMapStore,
+    map_doc_limit_from_env, map_doc_session, place_mappings, register_direct_predecessor,
+    session_path, subject_closure, CredentialLineage, LineagePersistError, TenantLineageGraph,
+    TokenMapError, TokenMapStore, MAP_DOC_SLOTS,
 };
 use crate::redact::token::TokenMapping;
 
@@ -37,6 +38,7 @@ struct SessionEntry {
 /// touches their key. There is no background sweeper.
 pub struct MemoryStore {
     ttl: Duration,
+    map_doc_limit: usize,
     entries: RwLock<HashMap<String, SessionEntry>>,
     /// Tenant → predecessor graph. One lock serializes predecessor register.
     lineage: RwLock<HashMap<String, TenantLineageGraph>>,
@@ -48,6 +50,7 @@ impl std::fmt::Debug for MemoryStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MemoryStore")
             .field("ttl", &self.ttl)
+            .field("map_doc_limit", &self.map_doc_limit)
             .finish_non_exhaustive()
     }
 }
@@ -62,12 +65,22 @@ impl MemoryStore {
     ///
     /// Prefer this in tests when a sub-second TTL is needed.
     pub fn with_ttl(ttl: Duration) -> Self {
+        Self::with_doc_limit(ttl, map_doc_limit_from_env())
+    }
+
+    /// Create a store that opens another document after `limit` mappings.
+    pub fn with_doc_limit(ttl: Duration, limit: usize) -> Self {
         Self {
             ttl,
+            map_doc_limit: limit,
             entries: RwLock::new(HashMap::new()),
             lineage: RwLock::new(HashMap::new()),
             now: RwLock::new(None),
         }
+    }
+
+    fn doc_key(&self, tenant: &str, session: &str, index: usize) -> Result<String, TokenMapError> {
+        Ok(Self::key(tenant, &map_doc_session(session, index)?))
     }
 
     /// Override the clock used for expiry decisions.
@@ -108,29 +121,59 @@ impl TokenMapStore for MemoryStore {
         session: &str,
         mappings: &[TokenMapping],
     ) -> Result<(), TokenMapError> {
-        let key = Self::key(tenant, session);
+        if mappings.is_empty() {
+            return Ok(());
+        }
         let now = self.current_time().await;
         let expires_at = now
             + chrono::Duration::from_std(self.ttl)
                 .map_err(|e| TokenMapError::Backend(format!("invalid TTL {:?}: {e}", self.ttl)))?;
-
-        let mut guard = self.entries.write().await;
-        if let Some(entry) = guard.get(&key) {
-            if entry.expires_at <= now {
-                guard.remove(&key);
-            }
+        let mut keys = Vec::with_capacity(MAP_DOC_SLOTS);
+        for index in 0..MAP_DOC_SLOTS {
+            keys.push(self.doc_key(tenant, session, index)?);
         }
 
-        // Clone first so a merge conflict leaves the incumbent mappings intact.
-        let existing = guard
-            .get(&key)
-            .map(|entry| entry.mappings.clone())
-            .unwrap_or_default();
-        let merged = merge_mappings(existing, mappings)?;
+        let mut guard = self.entries.write().await;
+        let mut loaded = Vec::with_capacity(MAP_DOC_SLOTS);
+        let mut last = None;
+        for (index, key) in keys.iter().enumerate() {
+            match guard.get(key) {
+                Some(entry) if entry.expires_at > now => {
+                    loaded.push(Some(entry.mappings.clone()));
+                    last = Some(index);
+                }
+                Some(_) => {
+                    guard.remove(key);
+                    loaded.push(None);
+                }
+                None => loaded.push(None),
+            }
+        }
+        let docs: Vec<Vec<TokenMapping>> = match last {
+            None => Vec::new(),
+            Some(last) => loaded
+                .into_iter()
+                .take(last + 1)
+                .map(|mappings| mappings.unwrap_or_default())
+                .collect(),
+        };
+        let Some(placement) = place_mappings(&docs, mappings, self.map_doc_limit)? else {
+            return Ok(());
+        };
+        // Refresh documents this write does not replace so their TTL stays
+        // aligned with the tail. One lock makes the set atomic.
+        for (index, key) in keys.iter().enumerate().take(docs.len()) {
+            if index == placement.index {
+                continue;
+            }
+            if let Some(entry) = guard.get_mut(key) {
+                entry.expires_at = expires_at;
+            }
+        }
         guard.insert(
-            key,
+            keys[placement.index].clone(),
             SessionEntry {
-                mappings: merged,
+                mappings: placement.mappings,
                 expires_at,
             },
         );
@@ -138,17 +181,20 @@ impl TokenMapStore for MemoryStore {
     }
 
     async fn get(&self, tenant: &str, session: &str) -> Result<Vec<TokenMapping>, TokenMapError> {
-        let key = Self::key(tenant, session);
         let now = self.current_time().await;
         let mut guard = self.entries.write().await;
-        match guard.get(&key) {
-            Some(entry) if entry.expires_at > now => Ok(entry.mappings.clone()),
-            Some(_) => {
-                guard.remove(&key);
-                Ok(Vec::new())
+        let mut out = Vec::new();
+        for index in 0..MAP_DOC_SLOTS {
+            let key = self.doc_key(tenant, session, index)?;
+            match guard.get(&key) {
+                Some(entry) if entry.expires_at > now => out.extend(entry.mappings.clone()),
+                Some(_) => {
+                    guard.remove(&key);
+                }
+                None => {}
             }
-            None => Ok(Vec::new()),
         }
+        Ok(out)
     }
 
     async fn exists(&self, tenant: &str, session: &str) -> Result<bool, TokenMapError> {
@@ -156,8 +202,10 @@ impl TokenMapStore for MemoryStore {
     }
 
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
-        let key = Self::key(tenant, session);
-        self.entries.write().await.remove(&key);
+        let mut guard = self.entries.write().await;
+        for index in 0..MAP_DOC_SLOTS {
+            guard.remove(&self.doc_key(tenant, session, index)?);
+        }
         Ok(())
     }
 
