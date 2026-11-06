@@ -142,16 +142,25 @@ impl Recognizer for IdentityRecognizer {
     }
 
     fn analyze(&self, text: &str, language: &str) -> Result<Vec<RecognizerResult>> {
-        let contextual = {
-            let _span = redact_core::operations_enabled()
-                .then(|| tracing::info_span!("redact.gateway.detect.contextual").entered());
-            detect_contextual_identities(text)
+        let mut rows = self.analyze_batch(std::slice::from_ref(&text), language)?;
+        Ok(rows.pop().unwrap_or_default())
+    }
+
+    fn analyze_batch(&self, texts: &[&str], _language: &str) -> Result<Vec<Vec<RecognizerResult>>> {
+        let ner_rows = match &self.ner {
+            Some(ner) if ner.is_available() => ner.analyze_many(texts)?,
+            _ => vec![Vec::new(); texts.len()],
         };
-        let ner = match &self.ner {
-            Some(ner) if ner.is_available() => ner.analyze(text, language)?,
-            _ => Vec::new(),
-        };
-        Ok(merge_identity(text, contextual, ner))
+        let mut out = Vec::with_capacity(texts.len());
+        for (text, ner) in texts.iter().zip(ner_rows) {
+            let contextual = {
+                let _span = redact_core::operations_enabled()
+                    .then(|| tracing::info_span!("redact.gateway.detect.contextual").entered());
+                detect_contextual_identities(text)
+            };
+            out.push(merge_identity(text, contextual, ner));
+        }
+        Ok(out)
     }
 
     fn supports_language(&self, language: &str) -> bool {

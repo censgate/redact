@@ -49,20 +49,35 @@ simultaneously deploying both repositories.
   The handler re-reads/re-mints after conflicts, with eight handler attempts;
   KV-v2 also has an eight-attempt CAS budget. Contention can therefore cause
   more than one attempted write, but only one successful batch commit.
-  The existing KV-v2 mapping representation has four strings per mapping.
-  OpenBao defaults can reject a document above roughly 124 entities; leaf
-  count is not an entity-count guarantee. A larger batch or accumulated session
-  requires adequate local/deployed KV JSON-string limits. Capacity errors fail
-  closed, with no splitting into independent writes or automatic batch sharding.
+  A stored mapping has four keys and four string values. OpenBao's listener
+  limit counts keys and string values, not one string per entity. The default
+  limit is 1000 and rejects a growing map near 124 entities. A candidate
+  listener value of 10000 accepted 1249 mappings (9998 strings, about 205 KiB
+  for the short sealed-value probe) and rejected 1250. One 800-leaf batch of
+  unique values fits. A second 800-leaf batch on the same session does not:
+  the write fails closed and the stored version does not advance. The listener
+  change does not shard a session. Near-cap and over-cap failures are closed.
+- Detection of a texts[] request packs equal-length token rows into one ONNX
+  forward, at most 32 sequences and 2048 tokens. Each text is tokenized,
+  decoded, and minted on its own. Texts are not concatenated. Pattern and
+  contextual recognizers still run per text. One TokenSession and one mapping
+  write cover the request. `CENSGATE_REDACT_BATCH_INFLIGHT` (default 1, cap 8)
+  admits that many texts[] requests. `CENSGATE_REDACT_BATCH_QUEUE_MS` (default
+  0, cap 5000) is how long a request waits for a permit. Past that, the
+  response is HTTP 503 `error.type=overload` and nothing is detected or written.
 - Batch read, detect, tokenize, CAS-exhaustion and persist failures always
   error, even for profiles with legacy `fail_closed: false`. No mixed result
   list is returned. Batch error bodies contain static classes, never detector
-  or vault error details. Single-text error semantics remain compatible.
-- A batch has a 30-second deadline. `x-censgate-redact-timeout-ms` can shorten
-  it (positive integer milliseconds). Read/write/retry futures are dropped on
-  timeout. Explicit deadline checks and yields occur between leaves and before
-  persistence. Blocking ONNX inference cannot be interrupted inside a leaf;
-  after that leaf finishes no subsequent leaf/persist starts past the deadline.
+  or vault error details. Policy blocks stay `policy_violation`. Vault
+  failures stay `dependency_unavailable`. Admission stays `overload`.
+  Single-text error semantics remain compatible.
+- The batch deadline is 30 seconds. Callers shorten it with
+  `x-censgate-redact-timeout-ms` and cannot extend it. On one CPU, short-leaf
+  800 p99 was 23.8s after micro-batching (n=3). The same shape with one forward
+  per leaf was 42.6s and missed 30s. This is a fail-closed bound, not an SLO.
+  The current micro-batch finishes, then no further chunk or write starts.
+  A full re-detect on a conflict retry can still exceed 30s and fails closed.
+  The deadline does not grow with attempt count.
 - No detached task continues a cancelled handler. Dropping the handler before
   persist leaves no mappings; cancelling an in-flight KV CAS may leave the
   **whole** batch committed if the backend already accepted it. This matches
@@ -94,14 +109,19 @@ CC=gcc CXX=g++ cargo +1.93.0 build --release -p redact-gateway
 # REDACT_BENCH_VAULT_MOUNT to the isolated local stack (credential via env).
 python3 scripts/benchmark-redact-batch.py --check
 python3 scripts/benchmark-redact-batch.py --samples 10 --output /workspace/plans/redaction-batching-realstack.json
+python3 scripts/benchmark-redact-red.py --samples 3 --output /workspace/plans/redaction-batching-red.json
 ```
 
-The same synthetic fixtures run serial and batch at 139, 347 and 800 leaves,
-with a warmup and fresh session per sample. Output includes p50/p95, sample
-walls, HTTP counts, successful vault-write counts, model hash and versions.
-Completed rows are written as each shape finishes. A later HTTP failure keeps
-those rows, adds a status-only error for the failing shape, and exits non-zero.
-An 800-leaf batch can hit the 30-second deadline on a single CPU and fail closed.
+`benchmark-redact-batch.py` compares serial and batch at 139, 347 and 800,
+including a cold sample, warm samples, and one accumulated write. It also
+records the mapping-document ceiling, a near-cap add, and two writers on one
+session. `benchmark-redact-red.py` records short, byte-heavy, and entity-heavy
+shapes, p50/p95/p99 of the sample, queue time, overload versus dependency
+versus invalid-request, shared-session admission, cumulative session growth,
+an 801-leaf reject, cancellation before the write, and a single-flight rate.
+Small-sample p99 is an order statistic, not an approved SLO. Set
+`CENSGATE_REDACT_BATCH_INFLIGHT` and the gateway cgroup before starting it.
+`--leaves 347,800` repeats only those short shapes.
 Use existing detect spans/profiling to attribute ONNX/transport time separately;
 the harness does not invent an inference-time split. It deliberately preserves
 local synthetic mapping records for review; dispose of the dedicated mount

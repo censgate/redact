@@ -160,6 +160,8 @@ async fn harness(store: Arc<TestStore>) -> (AppState, axum::Router, Arc<FixtureR
         .unwrap()
         .state();
     state.tokens = store;
+    // The concurrency proof needs overlapping writers. Production default is 1.
+    state.batch_admission = Arc::new(tokio::sync::Semaphore::new(4));
     (state.clone(), create_router(state), recognizer)
 }
 async fn batch(router: axum::Router, texts: Value) -> TestResponse {
@@ -395,15 +397,18 @@ async fn c9_detector_vault_and_conflict_failures_are_atomic_and_sanitized() {
 async fn c9_deadline_between_leaves_and_cancel_pending_write() {
     let store = Arc::new(TestStore::default());
     let (_, router, recognizer) = harness(store.clone()).await;
+    let mut texts = vec!["slow-leaf person-a".to_string()];
+    texts.extend((0..32).map(|i| format!("leaf-{i}")));
     let response = post_json_with_headers(
         router,
         "/v1/redact",
-        json!({"texts":["slow-leaf person-a", "person-b"],"session_id":"batch-synthetic"}),
+        json!({"texts": texts, "session_id":"batch-synthetic"}),
         &[("x-censgate-redact-timeout-ms", "1")],
     )
     .await;
     assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(recognizer.seen.load(Ordering::SeqCst), 1);
+    // The in-flight micro-batch finishes; the next chunk and the write do not start.
+    assert_eq!(recognizer.seen.load(Ordering::SeqCst), 32);
     assert_eq!(store.writes.load(Ordering::SeqCst), 0);
     let paused = Arc::new(TestStore {
         pause_write: true,
@@ -420,4 +425,32 @@ async fn c9_deadline_between_leaves_and_cancel_pending_write() {
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn admission_rejects_a_second_batch_before_detection_or_write() {
+    let store = Arc::new(TestStore::default());
+    let (mut state, _, recognizer) = harness(store.clone()).await;
+    state.batch_admission = Arc::new(tokio::sync::Semaphore::new(1));
+    state.batch_queue = std::time::Duration::ZERO;
+    let router = create_router(state);
+    let running = tokio::spawn({
+        let router = router.clone();
+        async move { batch(router, json!(["slow-leaf person-a", "slow-leaf person-b"])).await }
+    });
+    let started = tokio::time::Instant::now();
+    while recognizer.seen.load(Ordering::SeqCst) == 0 {
+        if started.elapsed() > std::time::Duration::from_secs(2) {
+            panic!("admitted batch did not start");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let rejected = batch(router, json!(["person-c"])).await;
+    assert_eq!(rejected.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(rejected.json()["error"]["type"], "overload");
+    assert!(!rejected.body.contains("person-c"));
+    let admitted = running.await.unwrap();
+    assert_eq!(admitted.status, StatusCode::OK);
+    assert_eq!(recognizer.seen.load(Ordering::SeqCst), 2);
+    assert_eq!(store.writes.load(Ordering::SeqCst), 1);
 }
