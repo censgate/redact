@@ -23,6 +23,8 @@ BENCH_KEY = "synthetic-openloop-key"
 HEADER = {
     "queue_ms": "x-censgate-redact-queue-ms",
     "ner_ms": "x-censgate-redact-ner-ms",
+    "onnx_ms": "x-censgate-redact-onnx-ms",
+    "onnx_rounds": "x-censgate-redact-onnx-rounds",
     "vault_ms": "x-censgate-redact-vault-ms",
     "leaves": "x-censgate-redact-leaves",
     "bytes": "x-censgate-redact-bytes",

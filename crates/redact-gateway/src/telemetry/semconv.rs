@@ -150,6 +150,10 @@ pub const REDACT_GATEWAY_BATCH_LEAVES: &str = "redact.gateway.batch.leaves";
 pub const REDACT_GATEWAY_BATCH_BYTES: &str = "redact.gateway.batch.bytes";
 /// Counter of tokens persisted by a texts[] request. Unit: `{token}`.
 pub const REDACT_GATEWAY_BATCH_TOKENS: &str = "redact.gateway.batch.tokens";
+/// Counter of ONNX forwards inside texts[] requests. Unit: `{forward}`.
+pub const REDACT_GATEWAY_BATCH_ONNX_ROUNDS: &str = "redact.gateway.batch.onnx_rounds";
+/// Opaque caller operation id. A span attribute, never a metric label.
+pub const REDACT_OPERATION_ID: &str = "redact.operation_id";
 /// Admission or result outcome. Closed set, no caller text.
 pub const REDACT_BATCH_OUTCOME: &str = "redact.batch.outcome";
 /// Stage name for a batch duration (`queue`, `ner`, `vault`).

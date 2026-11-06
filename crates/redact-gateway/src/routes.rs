@@ -78,6 +78,9 @@ const DETECT_CHUNK: usize = 32;
 const BATCH_QUEUE_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-queue-ms");
 
 const BATCH_NER_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-ner-ms");
+const BATCH_ONNX_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-onnx-ms");
+const BATCH_ONNX_ROUNDS_HEADER: HeaderName =
+    HeaderName::from_static("x-censgate-redact-onnx-rounds");
 const BATCH_VAULT_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-vault-ms");
 const BATCH_LEAVES_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-leaves");
 const BATCH_BYTES_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-bytes");
@@ -89,6 +92,8 @@ struct BatchMeter {
     leaves: u64,
     bytes: u64,
     ner: Duration,
+    onnx: Duration,
+    rounds: u64,
     vault: Duration,
     tokens: u64,
 }
@@ -100,6 +105,8 @@ fn header_u64(n: u64) -> HeaderValue {
 fn stamp_batch(response: &mut Response, meter: BatchMeter) {
     let headers = response.headers_mut();
     headers.insert(BATCH_NER_HEADER, header_u64(meter.ner.as_millis() as u64));
+    headers.insert(BATCH_ONNX_HEADER, header_u64(meter.onnx.as_millis() as u64));
+    headers.insert(BATCH_ONNX_ROUNDS_HEADER, header_u64(meter.rounds));
     headers.insert(
         BATCH_VAULT_HEADER,
         header_u64(meter.vault.as_millis() as u64),
@@ -107,6 +114,34 @@ fn stamp_batch(response: &mut Response, meter: BatchMeter) {
     headers.insert(BATCH_LEAVES_HEADER, header_u64(meter.leaves));
     headers.insert(BATCH_BYTES_HEADER, header_u64(meter.bytes));
     headers.insert(BATCH_TOKENS_HEADER, header_u64(meter.tokens));
+}
+
+fn note_detection(stage: &std::sync::Mutex<BatchMeter>, started: Instant) {
+    let stats = redact_ner::take_infer_stats();
+    let mut meter = stage.lock().expect("batch stage");
+    meter.ner += started.elapsed();
+    meter.onnx += stats.duration;
+    meter.rounds += u64::from(stats.rounds);
+}
+
+/// Caller-supplied operation ids are opaque. Anything else is ignored.
+fn operation_id_from(headers: &HeaderMap) -> Option<String> {
+    let raw = headers
+        .get("x-censgate-operation-id")?
+        .to_str()
+        .ok()?
+        .trim();
+    if raw.len() < 1 || raw.len() > 64 {
+        return None;
+    }
+    if raw
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        Some(raw.to_string())
+    } else {
+        None
+    }
 }
 
 fn observe_batch(
@@ -118,8 +153,10 @@ fn observe_batch(
     state.telemetry.metrics().record_batch_result(
         outcome,
         meter.ner.as_secs_f64(),
+        meter.onnx.as_secs_f64(),
         meter.vault.as_secs_f64(),
         meter.tokens,
+        meter.rounds,
     );
     stamp_batch(&mut response, meter);
     response
@@ -206,6 +243,9 @@ async fn observe(State(state): State<AppState>, request: Request, next: Next) ->
     let span = spans::http_server(&method, &route, &scheme);
     // Join the caller's trace when they propagated one.
     spans::adopt_remote_parent(&span, request.headers());
+    if let Some(operation) = operation_id_from(request.headers()) {
+        span.record(semconv::REDACT_OPERATION_ID, operation.as_str());
+    }
 
     let metrics = state.telemetry.metrics();
     metrics.http_server_active_add(1, &method, &scheme);
@@ -1662,8 +1702,10 @@ async fn redact_endpoint(
             state.telemetry.metrics().record_batch_result(
                 "deadline",
                 meter.ner.as_secs_f64(),
+                meter.onnx.as_secs_f64(),
                 meter.vault.as_secs_f64(),
                 0,
+                meter.rounds,
             );
             let mut response =
                 GatewayError::DependencyUnavailable("redact batch deadline exceeded".into())
@@ -1845,14 +1887,15 @@ async fn redact_request(
                 let detected = if pending.is_empty() {
                     Vec::new()
                 } else {
+                    let _ = redact_ner::take_infer_stats();
                     let started = Instant::now();
                     match ctx.detect_many(&pending) {
                         Ok(rows) => {
-                            stage.lock().expect("batch stage").ner += started.elapsed();
+                            note_detection(&stage, started);
                             rows
                         }
                         Err(_) => {
-                            stage.lock().expect("batch stage").ner += started.elapsed();
+                            note_detection(&stage, started);
                             return observe_batch(
                                 &state,
                                 GatewayError::Redaction(

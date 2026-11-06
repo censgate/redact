@@ -160,6 +160,45 @@ the harness does not invent an inference-time split. It deliberately preserves
 local synthetic mapping records for review; dispose of the dedicated mount
 through the local test-stack owner afterward.
 
+Production AKS limits, from `cloud-infrastructure`
+`apps/aks-censgate/platform/deployment-redact-gateway.yaml`, are 1 CPU and
+2Gi. Requests are 100m CPU and 512Mi. There is no HPA and no pod disruption
+budget. The 100m request is the scheduling guarantee and the cgroup weight
+under CPU contention. It is not a promise of 1 CPU. The 1 CPU / 2Gi pair is
+the hard cap. `deploy/kubernetes/redact-gateway.yaml` in this repo is a public
+example at 2 CPU / 4Gi. Measurements taken under a 4Gi cap do not show that
+the process fits in 2Gi. Idle RSS is not load proof.
+
+`scripts/bench-redact-manual.sh` is the manual entrypoint for the ONNX and
+OpenBao load. It exits immediately when `CI` or `GITHUB_ACTIONS` is set. It
+is safe to point a future scheduler at that script. This change does not add
+one. Fast correctness tests stay in `cargo test`. The load script is not a
+CI step.
+
+One fresh cgroup sample at `cpu.max` 100000 100000 and `memory.max` 2147483648
+(2Gi), swap off. Not an approved SLO.
+
+- After the model loaded, memory.current was 576 MiB and memory.peak was
+  576 MiB. After the mixed run, current was 763 MiB and peak was 763 MiB.
+  The process was not killed. This is the peak for this binary, not the
+  production image that idles near 1319 MiB.
+- 12 mixed leaves: serial and batch output equal. NER 631 ms, ONNX 630 ms
+  across 2 forwards, vault 4 ms.
+- 800 short leaves: HTTP 503 deadline at 31044 ms. NER 31034 ms, ONNX 30971 ms
+  across 24 forwards, no vault write. An earlier 1 CPU sample on a different
+  cgroup completed in 22571 ms. These are two samples, not a percentile.
+- A 139-leaf tenant offered with that 800 returned HTTP 503 overload at
+  15003 ms. ONNX did not run.
+- 800 leaves of 315 bytes: HTTP 503 deadline at 32787 ms. ONNX 32723 ms
+  across 20 forwards. Nothing written.
+- 800 mixed lengths: HTTP 503 deadline at 31131 ms. ONNX 31061 ms across
+  32 forwards.
+- Two 139-leaf tenants: both HTTP 200. One queued 4101 ms and finished at
+  8266 ms. Each used 5 ONNX forwards. Vault was 11–12 ms.
+- 64 short leaves at the 100m request (`cpu.max` 10000 100000): HTTP 200 in
+  19857 ms, ONNX 19843 ms, 2 forwards. That is the scheduling share under a
+  hard 100m cap, not the 1 CPU limit.
+
 `benchmark-redact-openloop.py` schedules arrivals on a clock instead of waiting
 for the previous response. It records one 800-leaf short request, one 800-leaf
 request of about 315 bytes, one mixed-length 800, two concurrent short

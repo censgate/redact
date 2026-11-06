@@ -32,6 +32,7 @@ pub struct Metrics {
     batch_leaves: Counter<u64>,
     batch_bytes: Counter<u64>,
     batch_tokens: Counter<u64>,
+    batch_onnx_rounds: Counter<u64>,
 }
 
 impl Metrics {
@@ -111,6 +112,11 @@ impl Metrics {
                 .u64_counter(semconv::REDACT_GATEWAY_BATCH_TOKENS)
                 .with_description("Tokens persisted by texts[] requests")
                 .with_unit("{token}")
+                .build(),
+            batch_onnx_rounds: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_ONNX_ROUNDS)
+                .with_description("ONNX forwards inside texts[] requests")
+                .with_unit("{forward}")
                 .build(),
         }
     }
@@ -271,8 +277,10 @@ impl Metrics {
         &self,
         outcome: &'static str,
         ner_secs: f64,
+        onnx_secs: f64,
         vault_secs: f64,
         tokens: u64,
+        onnx_rounds: u64,
     ) {
         let outcome_attr = KeyValue::new(semconv::REDACT_BATCH_OUTCOME, outcome);
         self.batch_result.add(1, &[outcome_attr.clone()]);
@@ -284,6 +292,13 @@ impl Metrics {
             ],
         );
         self.batch_stage_duration.record(
+            onnx_secs,
+            &[
+                outcome_attr.clone(),
+                KeyValue::new(semconv::REDACT_BATCH_STAGE, "onnx"),
+            ],
+        );
+        self.batch_stage_duration.record(
             vault_secs,
             &[
                 outcome_attr.clone(),
@@ -291,7 +306,10 @@ impl Metrics {
             ],
         );
         if tokens > 0 {
-            self.batch_tokens.add(tokens, &[outcome_attr]);
+            self.batch_tokens.add(tokens, &[outcome_attr.clone()]);
+        }
+        if onnx_rounds > 0 {
+            self.batch_onnx_rounds.add(onnx_rounds, &[outcome_attr]);
         }
     }
 }

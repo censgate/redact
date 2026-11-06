@@ -185,6 +185,9 @@ spec:
                   key: CENSGATE_TOKEN_DEK
           resources:
             requests:
+              # Public example only. AKS production is
+              # cloud-infrastructure apps/aks-censgate/platform/deployment-redact-gateway.yaml:
+              # requests 100m CPU / 512Mi, limits 1 CPU / 2Gi, no HPA and no PDB.
               # 2 CPU Guaranteed schedules on D4+ (D2 allocatable is <2).
               # 4/4 needs a D8 pool. pool × intra_threads ≈ these cores.
               cpu: "2"

@@ -8,10 +8,12 @@ use ort::session::Session;
 use ort::value::Value;
 use redact_core::{EntityType, Recognizer, RecognizerResult};
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// Pad lengths when the ONNX `input_ids` sequence dim is dynamic.
@@ -29,6 +31,31 @@ const MAX_SESSION_POOL: usize = 4;
 pub(crate) const MAX_INFER_SEQUENCES: usize = 32;
 /// Tokens in one forward. Longer buckets use fewer sequences.
 pub(crate) const MAX_INFER_TOKENS: usize = 2048;
+
+/// One ONNX forward on this worker thread. Counts and duration only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InferRoundStats {
+    pub rounds: u32,
+    pub duration: Duration,
+}
+
+thread_local! {
+    static INFER_ROUNDS: Cell<InferRoundStats> = const { Cell::new(InferRoundStats { rounds: 0, duration: Duration::ZERO }) };
+}
+
+/// Take and clear the forwards run on this thread since the last take.
+pub fn take_infer_stats() -> InferRoundStats {
+    INFER_ROUNDS.with(|cell| cell.take())
+}
+
+fn note_infer_round(duration: Duration) {
+    INFER_ROUNDS.with(|cell| {
+        let mut stats = cell.get();
+        stats.rounds = stats.rounds.saturating_add(1);
+        stats.duration += duration;
+        cell.set(stats);
+    });
+}
 
 /// Bounded ONNX session pool. `try_lock` round-robin, then block.
 struct SessionPool {
@@ -642,11 +669,14 @@ impl NerRecognizer {
             inputs.push(("token_type_ids".into(), token_type_ids_value.into()));
         }
 
+        let started = std::time::Instant::now();
         let outputs = {
             let _exec = redact_core::operations_enabled()
                 .then(|| tracing::info_span!("redact.gateway.detect.onnx.exec").entered());
-            session.run(inputs)?
+            session.run(inputs)
         };
+        note_infer_round(started.elapsed());
+        let outputs = outputs?;
         let (shape, logits_data) = outputs["logits"].try_extract_tensor::<f32>()?;
         let shape_dims: &[i64] = shape.as_ref();
         if shape_dims.len() != 3 || shape_dims[0] as usize != batch {

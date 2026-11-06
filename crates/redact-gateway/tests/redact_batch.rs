@@ -235,6 +235,8 @@ async fn c2_c3_c4_c5_order_reuse_no_bypass_and_unicode() {
     assert_eq!(response.status, StatusCode::OK, "{}", response.body);
     for name in [
         "x-censgate-redact-ner-ms",
+        "x-censgate-redact-onnx-ms",
+        "x-censgate-redact-onnx-rounds",
         "x-censgate-redact-vault-ms",
         "x-censgate-redact-tokens",
     ] {
