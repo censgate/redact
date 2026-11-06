@@ -53,6 +53,8 @@ pub const FORWARD_CLIENT_AUTH: &str = "CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZ
 pub const ENABLE_TRACING: &str = "CENSGATE_ENABLE_TRACING";
 /// Serve the pull-based metrics endpoint.
 pub const METRICS_ENDPOINT: &str = "CENSGATE_METRICS_ENDPOINT";
+/// Advertise and accept field-preserving redact batches (false restores serial clients).
+pub const REDACT_BATCH_ENABLED: &str = "CENSGATE_REDACT_BATCH_ENABLED";
 /// Connect timeout for provider requests, in seconds.
 pub const CONNECT_TIMEOUT_SECS: &str = "CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS";
 /// Overall timeout for provider requests, in seconds.
@@ -248,6 +250,9 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     }
     if let Some(value) = first(&[METRICS_ENDPOINT]) {
         config.server.metrics_endpoint = parse_bool(METRICS_ENDPOINT, &value)?;
+    }
+    if let Some(value) = first(&[REDACT_BATCH_ENABLED]) {
+        config.server.redact_batch_enabled = parse_bool(REDACT_BATCH_ENABLED, &value)?;
     }
 
     if let Some(value) = first(&[PROVIDER_NAME]) {

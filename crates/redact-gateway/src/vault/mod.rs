@@ -41,9 +41,125 @@ pub enum TokenMapError {
     #[error("token map conflict: {0}")]
     Conflict(String),
 
+    /// This request's new mappings do not fit in one document, or every
+    /// document slot is already full. Nothing was written.
+    #[error("redact session map full")]
+    SessionFull,
+
     /// Tokenization persistence is intentionally disabled.
     #[error("token map is disabled")]
     Disabled,
+}
+
+/// Mappings stored in one KV document before a second document is opened.
+///
+/// OpenBao's listener counts JSON keys and string values. A mapping is four
+/// keys and four string values, and the write envelope adds six strings, so
+/// 1249 mappings are 9998 strings. That is the largest document accepted when
+/// `max_request_json_strings` is 10000. The default matches that candidate.
+/// Set `CENSGATE_REDACT_MAP_DOC_LIMIT` no higher than the listener allows.
+pub const MAP_DOC_LIMIT_DEFAULT: usize = 1249;
+
+/// Overflow documents for one caller session. Slot 0 is the unsuffixed id.
+pub const MAP_DOC_SLOTS: usize = 8;
+
+const MAP_DOC_MARKER: &str = ":mapdoc:";
+
+/// Document limit for a new store. Invalid environment values use the default.
+pub fn map_doc_limit_from_env() -> usize {
+    std::env::var("CENSGATE_REDACT_MAP_DOC_LIMIT")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|limit| (1..=10_000).contains(limit))
+        .unwrap_or(MAP_DOC_LIMIT_DEFAULT)
+}
+
+/// Session id of document `index`. Index 0 is the caller's session id.
+///
+/// The marker is not `:kvshard:`. That suffix is the platform client's own
+/// cursor and addresses a different gateway session.
+pub(crate) fn map_doc_session(session: &str, index: usize) -> Result<String, TokenMapError> {
+    if session.contains(MAP_DOC_MARKER) || index >= MAP_DOC_SLOTS {
+        return Err(TokenMapError::Backend(
+            "session id is not a map document address".into(),
+        ));
+    }
+    if index == 0 {
+        Ok(session.to_string())
+    } else {
+        Ok(format!("{session}{MAP_DOC_MARKER}{index}"))
+    }
+}
+
+/// Where a request's new mappings are written.
+#[derive(Debug, Clone)]
+pub(crate) struct MapPlacement {
+    /// Document that receives one compare-and-set write.
+    pub index: usize,
+    /// Full contents of that document after the write.
+    pub mappings: Vec<TokenMapping>,
+}
+
+/// Choose one document for `incoming`.
+///
+/// `docs` is every existing document, in order, with no holes. The returned
+/// document is either the tail plus the new rows, or a new document holding
+/// only the new rows. A request that does not fit in an empty document fails
+/// before any write. Token labels already used for a different sealed value
+/// anywhere in the session are a conflict.
+pub(crate) fn place_mappings(
+    docs: &[Vec<TokenMapping>],
+    incoming: &[TokenMapping],
+    limit: usize,
+) -> Result<Option<MapPlacement>, TokenMapError> {
+    if incoming.is_empty() {
+        return Ok(None);
+    }
+    if !(1..=10_000).contains(&limit) {
+        return Err(TokenMapError::Backend(
+            "map document limit is not usable".into(),
+        ));
+    }
+    let mut existing = Vec::new();
+    for doc in docs {
+        existing.extend(doc.iter().cloned());
+    }
+    let _checked = merge_mappings(existing.clone(), incoming)?;
+    let known: std::collections::HashSet<&str> = existing
+        .iter()
+        .map(|mapping| mapping.token.as_str())
+        .collect();
+    let only_new: Vec<TokenMapping> = incoming
+        .iter()
+        .filter(|mapping| !known.contains(mapping.token.as_str()))
+        .cloned()
+        .collect();
+    if only_new.is_empty() {
+        return Ok(None);
+    }
+    if only_new.len() > limit {
+        return Err(TokenMapError::SessionFull);
+    }
+    if docs.is_empty() {
+        return Ok(Some(MapPlacement {
+            index: 0,
+            mappings: only_new,
+        }));
+    }
+    let tail = docs.len() - 1;
+    if docs[tail].len() + only_new.len() <= limit {
+        return Ok(Some(MapPlacement {
+            index: tail,
+            mappings: merge_mappings(docs[tail].clone(), &only_new)?,
+        }));
+    }
+    if docs.len() < MAP_DOC_SLOTS {
+        return Ok(Some(MapPlacement {
+            index: docs.len(),
+            mappings: only_new,
+        }));
+    }
+    Err(TokenMapError::SessionFull)
 }
 
 /// Maximum number of predecessor subjects stored for one credential.
@@ -687,5 +803,61 @@ mod tests {
             ),
             Err(LineageRegisterError::Cycle)
         );
+    }
+
+    fn mapping(token: &str, sealed: &str) -> TokenMapping {
+        TokenMapping {
+            token: token.into(),
+            entity_type: "EMAIL_ADDRESS".into(),
+            sealed_value: sealed.into(),
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn place_mappings_spills_the_tail_and_keeps_one_document_per_request() {
+        let first = vec![mapping("A1", "s1"), mapping("A2", "s2")];
+        let spill = place_mappings(&[first.clone()], &[mapping("A3", "s3")], 2).unwrap();
+        let spill = spill.expect("new document");
+        assert_eq!(spill.index, 1);
+        assert_eq!(spill.mappings.len(), 1);
+        assert_eq!(spill.mappings[0].token, "A3");
+
+        let again = place_mappings(
+            &[first, vec![mapping("A3", "s3")]],
+            &[mapping("A3", "s3"), mapping("A4", "s4")],
+            2,
+        )
+        .unwrap()
+        .expect("tail still has room for one");
+        assert_eq!(again.index, 1);
+        assert_eq!(again.mappings.len(), 2);
+
+        let too_big = place_mappings(&[], &[mapping("A1", "s1"), mapping("A2", "s2")], 1);
+        assert!(matches!(too_big, Err(TokenMapError::SessionFull)));
+
+        let mut docs = Vec::new();
+        for slot in 0..MAP_DOC_SLOTS {
+            docs.push(vec![mapping(&format!("T{slot}"), &format!("v{slot}"))]);
+        }
+        let full = place_mappings(&docs, &[mapping("NEW", "nv")], 1);
+        assert!(matches!(full, Err(TokenMapError::SessionFull)));
+    }
+
+    #[test]
+    fn place_mappings_rejects_a_label_reused_for_a_different_value() {
+        let docs = vec![vec![mapping("A1", "sealed-a")]];
+        let conflict = place_mappings(&docs, &[mapping("A1", "sealed-b")], 2);
+        assert!(matches!(conflict, Err(TokenMapError::Conflict(_))));
+        let same = place_mappings(&docs, &[mapping("A1", "sealed-a")], 2).unwrap();
+        assert!(same.is_none());
+    }
+
+    #[test]
+    fn map_doc_session_rejects_the_marker_and_keeps_the_caller_id() {
+        assert_eq!(map_doc_session("chat-1", 0).unwrap(), "chat-1");
+        assert_eq!(map_doc_session("chat-1", 2).unwrap(), "chat-1:mapdoc:2");
+        assert!(map_doc_session("chat-1:mapdoc:1", 0).is_err());
+        assert!(map_doc_session("chat-1:kvshard:1", 1).is_ok());
     }
 }

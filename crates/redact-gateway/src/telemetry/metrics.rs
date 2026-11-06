@@ -26,6 +26,13 @@ pub struct Metrics {
     tokenmap_operations: Counter<u64>,
     tokenmap_duration: Histogram<f64>,
     audit_dropped: Counter<u64>,
+    batch_admission: Counter<u64>,
+    batch_result: Counter<u64>,
+    batch_stage_duration: Histogram<f64>,
+    batch_leaves: Counter<u64>,
+    batch_bytes: Counter<u64>,
+    batch_tokens: Counter<u64>,
+    batch_onnx_rounds: Counter<u64>,
 }
 
 impl Metrics {
@@ -74,6 +81,42 @@ impl Metrics {
                 .u64_counter(semconv::REDACT_GATEWAY_AUDIT_RECORDS_DROPPED)
                 .with_description("Audit records dropped because the dispatch queue was full")
                 .with_unit("{record}")
+                .build(),
+            batch_admission: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_ADMISSION)
+                .with_description("texts[] admission decisions")
+                .with_unit("{request}")
+                .build(),
+            batch_result: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_RESULT)
+                .with_description("texts[] results after admission")
+                .with_unit("{request}")
+                .build(),
+            batch_stage_duration: meter
+                .f64_histogram(semconv::REDACT_GATEWAY_BATCH_STAGE_DURATION)
+                .with_description("Duration of texts[] queue, NER, and vault stages")
+                .with_unit("s")
+                .with_boundaries(semconv::BATCH_STAGE_DURATION_BOUNDS.to_vec())
+                .build(),
+            batch_leaves: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_LEAVES)
+                .with_description("Leaves offered to texts[] requests")
+                .with_unit("{leaf}")
+                .build(),
+            batch_bytes: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_BYTES)
+                .with_description("Leaf bytes offered to texts[] requests")
+                .with_unit("By")
+                .build(),
+            batch_tokens: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_TOKENS)
+                .with_description("Tokens persisted by texts[] requests")
+                .with_unit("{token}")
+                .build(),
+            batch_onnx_rounds: meter
+                .u64_counter(semconv::REDACT_GATEWAY_BATCH_ONNX_ROUNDS)
+                .with_description("ONNX forwards inside texts[] requests")
+                .with_unit("{forward}")
                 .build(),
         }
     }
@@ -204,5 +247,69 @@ impl Metrics {
     /// Increment the audit drop counter.
     pub fn record_audit_dropped(&self, count: u64) {
         self.audit_dropped.add(count, &[]);
+    }
+
+    /// Record a texts[] admission decision. `outcome` is `accepted` or `overload`.
+    /// Counts and durations are metadata only.
+    pub fn record_batch_admission(
+        &self,
+        outcome: &'static str,
+        queue_secs: f64,
+        leaves: u64,
+        bytes: u64,
+    ) {
+        let outcome_attr = KeyValue::new(semconv::REDACT_BATCH_OUTCOME, outcome);
+        self.batch_admission.add(1, &[outcome_attr.clone()]);
+        self.batch_stage_duration.record(
+            queue_secs,
+            &[
+                outcome_attr.clone(),
+                KeyValue::new(semconv::REDACT_BATCH_STAGE, "queue"),
+            ],
+        );
+        self.batch_leaves.add(leaves, &[outcome_attr.clone()]);
+        self.batch_bytes.add(bytes, &[outcome_attr]);
+    }
+
+    /// Record a texts[] result after a permit was taken.
+    /// `outcome` is `completed`, `deadline`, `session_map_full`, or `error`.
+    pub fn record_batch_result(
+        &self,
+        outcome: &'static str,
+        ner_secs: f64,
+        onnx_secs: f64,
+        vault_secs: f64,
+        tokens: u64,
+        onnx_rounds: u64,
+    ) {
+        let outcome_attr = KeyValue::new(semconv::REDACT_BATCH_OUTCOME, outcome);
+        self.batch_result.add(1, &[outcome_attr.clone()]);
+        self.batch_stage_duration.record(
+            ner_secs,
+            &[
+                outcome_attr.clone(),
+                KeyValue::new(semconv::REDACT_BATCH_STAGE, "ner"),
+            ],
+        );
+        self.batch_stage_duration.record(
+            onnx_secs,
+            &[
+                outcome_attr.clone(),
+                KeyValue::new(semconv::REDACT_BATCH_STAGE, "onnx"),
+            ],
+        );
+        self.batch_stage_duration.record(
+            vault_secs,
+            &[
+                outcome_attr.clone(),
+                KeyValue::new(semconv::REDACT_BATCH_STAGE, "vault"),
+            ],
+        );
+        if tokens > 0 {
+            self.batch_tokens.add(tokens, &[outcome_attr.clone()]);
+        }
+        if onnx_rounds > 0 {
+            self.batch_onnx_rounds.add(onnx_rounds, &[outcome_attr]);
+        }
     }
 }

@@ -18,7 +18,7 @@ use crate::config::{ConfigHandle, ResolvedConfig};
 use crate::packs::load_packs;
 use crate::proxy::ProviderClient;
 use crate::redact::token::Dek;
-use crate::routes::{create_router, AppState};
+use crate::routes::{batch_limits_from_env, create_router, AppState};
 use crate::telemetry::Telemetry;
 use crate::vault::{build_store, TokenMapStore};
 
@@ -94,6 +94,7 @@ impl GatewayServer {
             .context("could not build the provider client")?;
 
         let handle = ConfigHandle::new(config);
+        let (batch_admission, batch_queue, batch_queue_depth) = batch_limits_from_env();
         let state = AppState {
             config: handle.clone(),
             engine,
@@ -103,6 +104,10 @@ impl GatewayServer {
             auth: authenticator,
             audit,
             telemetry,
+            batch_admission,
+            batch_queue,
+            batch_queue_depth,
+            batch_waiters: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
 
         Ok(Self {

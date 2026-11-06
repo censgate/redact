@@ -80,6 +80,40 @@ impl RecognizerRegistry {
         Ok(resolved)
     }
 
+    /// Analyze each text with the same recognizer order and overlap rules as [`analyze`](Self::analyze).
+    pub fn analyze_batch(
+        &self,
+        texts: &[&str],
+        language: &str,
+    ) -> Result<Vec<Vec<RecognizerResult>>> {
+        let mut per_text = vec![Vec::new(); texts.len()];
+        for recognizer in &self.recognizers {
+            if !recognizer.supports_language(language) {
+                continue;
+            }
+            let batch = recognizer.analyze_batch(texts, language).with_context(|| {
+                format!("Failed to analyze with recognizer: {}", recognizer.name())
+            })?;
+            if batch.len() != texts.len() {
+                anyhow::bail!(
+                    "recognizer {} returned {} results for {} texts",
+                    recognizer.name(),
+                    batch.len(),
+                    texts.len()
+                );
+            }
+            for (slot, hits) in per_text.iter_mut().zip(batch) {
+                slot.extend(hits);
+            }
+        }
+        for hits in &mut per_text {
+            hits.sort();
+            let resolved = self.resolve_overlaps(std::mem::take(hits));
+            *hits = resolved;
+        }
+        Ok(per_text)
+    }
+
     /// Analyze text using only specific entity types
     pub fn analyze_with_entities(
         &self,

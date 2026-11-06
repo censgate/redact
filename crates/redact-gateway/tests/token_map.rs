@@ -61,6 +61,44 @@ async fn memory_merges_mappings_for_the_same_session() {
 }
 
 #[tokio::test]
+async fn memory_spill_grows_across_documents_and_a_conflict_does_not_write() {
+    let store = MemoryStore::with_doc_limit(std::time::Duration::from_secs(3600), 2);
+    let rows = |start: u32| -> Vec<TokenMapping> {
+        (0..2)
+            .map(|i| {
+                let n = start + i;
+                mapping(&format!("[EMAIL_ADDRESS_{n}]"), &format!("seal-{n}"))
+            })
+            .collect()
+    };
+    for doc in 0..8 {
+        store
+            .put("t", "s", &rows(1 + doc * 2))
+            .await
+            .expect("document fits");
+    }
+    let loaded = store.get("t", "s").await.unwrap();
+    assert_eq!(loaded.len(), 16);
+    let conflict = mapping("[EMAIL_ADDRESS_1]", "seal-different");
+    let err = store.put("t", "s", &[conflict]).await.unwrap_err();
+    assert!(matches!(err, TokenMapError::Conflict(_)));
+    assert_eq!(store.get("t", "s").await.unwrap().len(), 16);
+    let err = store.put("t", "s", &rows(17)).await.unwrap_err();
+    assert!(matches!(err, TokenMapError::SessionFull));
+    assert_eq!(store.get("t", "s").await.unwrap().len(), 16);
+
+    let overflow = mapping("[EMAIL_ADDRESS_1]", "seal-1");
+    let extra = mapping("[EMAIL_ADDRESS_2]", "seal-2");
+    let third = mapping("[EMAIL_ADDRESS_3]", "seal-3");
+    let err = store
+        .put("fresh", "s", &[overflow, extra, third])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, TokenMapError::SessionFull));
+    assert!(store.get("fresh", "s").await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn memory_isolates_sessions_and_tenants() {
     let store = MemoryStore::new(3600);
     let (_dek, sealed) = sealed_email("alice@example.com");

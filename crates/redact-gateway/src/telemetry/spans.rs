@@ -47,6 +47,7 @@ pub fn http_server(method: &str, route: &str, scheme: &str) -> Span {
         { semconv::HTTP_ROUTE } = route,
         { semconv::URL_SCHEME } = scheme,
         { semconv::HTTP_RESPONSE_STATUS_CODE } = tracing::field::Empty,
+        { semconv::REDACT_OPERATION_ID } = tracing::field::Empty,
         { semconv::ERROR_TYPE } = tracing::field::Empty,
         otel.status_code = tracing::field::Empty,
         otel.status_description = tracing::field::Empty,

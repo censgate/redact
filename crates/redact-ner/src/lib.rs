@@ -38,6 +38,7 @@ mod recognizer;
 mod tokenizer_wrapper;
 
 pub use identity::{IdentityNerOptions, IdentityRecognizer};
+pub use recognizer::take_infer_stats;
 pub use recognizer::{NerConfig, NerRecognizer};
 
 #[cfg(test)]
