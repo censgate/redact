@@ -65,11 +65,24 @@ simultaneously deploying both repositories.
   a document, or that arrives after all 8 documents are full, returns HTTP 409
   `session_map_full` and writes nothing. Set the document limit no higher
   than the listener accepts. Near-cap and over-cap failures are closed.
-- Detection of a texts[] request packs equal-length token rows into one ONNX
-  forward, at most 32 sequences and 2048 tokens. Each text is tokenized,
-  decoded, and minted on its own. Texts are not concatenated. Pattern and
-  contextual recognizers still run per text. One TokenSession and one mapping
-  write cover the request. `CENSGATE_REDACT_BATCH_INFLIGHT` (default 1, cap 8)
+- Detection of a texts[] request groups leaves by pad length and packs
+  equal-length token rows into one ONNX forward. The token budget is 2048
+  tokens and at most 32 sequences: a 32-token row packs 32, a 96-token row
+  packs 21, a 128-token row packs 16, a 192-token row packs 10. Pad lengths
+  are 32, 48, 64, 96, 128, 192, 256, 384, and 512. Extra pad positions are
+  attention-masked. Each text is tokenized, decoded, and minted on its own.
+  Texts are not concatenated. Pattern and contextual recognizers still run
+  per text. One TokenSession and one mapping write cover the request.
+  The session uses graph optimization Level3. In ONNX Runtime that level is
+  applied after Level2, and Level2 includes CPU attention fusion. ort
+  2.0.0-rc.12 has no separate fusion switch. `CENSGATE_NER_OPT_LEVEL=all`
+  selects every optimization for a probe; the default stays Level3.
+  The checked-in ONNX Runtime 1.24.4 CPU library does not link OpenMP, so
+  `CENSGATE_NER_INTRA_THREADS` is the thread count that takes effect. Keep it
+  equal to the cgroup CPU count. The session is sequential with one inter-op
+  thread. Intra-op spinning is off by default so an idle thread does not spend
+  a CPU-cgroup quota. `CENSGATE_NER_INTRA_SPIN=1` turns spinning back on for
+  an A/B probe. `CENSGATE_REDACT_BATCH_INFLIGHT` (default 1, cap 8)
   admits that many texts[] requests. `CENSGATE_REDACT_BATCH_QUEUE_MS` (default
   5000, cap 30000) is how long a request waits, and
   `CENSGATE_REDACT_BATCH_QUEUE_DEPTH` (default 4, cap 32) is how many may wait.
@@ -97,9 +110,15 @@ simultaneously deploying both repositories.
   serial write uncertainty and never commits a partial batch. HTTP disconnect
   detection follows the existing Axum/Hyper handler lifetime; callers should
   send their remaining deadline. A lost response is retried/fails closed.
-- Telemetry records aggregate outcome counts and the existing per-leaf detect
-  spans. Request strings are never added to logs/spans. No new global inference
-  fan-out or client-side parallel single-text calls are part of this contract.
+- Telemetry for a texts[] request is metadata only. Admission records
+  `accepted` or `overload`, queue duration, and the offered leaf and byte
+  counts. After admission, the result records `completed`, `deadline`,
+  `session_map_full`, or `error`, plus NER duration, vault duration, and the
+  number of tokens persisted. Response headers carry the same numbers:
+  queue, NER, and vault milliseconds, and leaf, byte, and token counts.
+  No request text, token string, or entity value is added to a metric, header,
+  or log. No new global inference fan-out or client-side parallel single-text
+  calls are part of this contract.
 
 ## Verification and real-stack benchmark
 
@@ -123,6 +142,7 @@ CC=gcc CXX=g++ cargo +1.93.0 build --release -p redact-gateway
 python3 scripts/benchmark-redact-batch.py --check
 python3 scripts/benchmark-redact-batch.py --samples 10 --output /workspace/plans/redaction-batching-realstack.json
 python3 scripts/benchmark-redact-red.py --samples 3 --output /workspace/plans/redaction-batching-red.json
+python3 scripts/benchmark-redact-openloop.py --output /workspace/plans/redaction-batching-openloop.json
 ```
 
 `benchmark-redact-batch.py` compares serial and batch at 139, 347 and 800,
@@ -140,7 +160,57 @@ the harness does not invent an inference-time split. It deliberately preserves
 local synthetic mapping records for review; dispose of the dedicated mount
 through the local test-stack owner afterward.
 
+`benchmark-redact-openloop.py` schedules arrivals on a clock instead of waiting
+for the previous response. It records one 800-leaf short request, one 800-leaf
+request of about 315 bytes, one mixed-length 800, two concurrent short
+tenants, and a burst that must shed load as overload. Stage headers are the
+RED split. The numbers are a candidate envelope, not an approved SLO.
+
+One-sample candidate on the 1 CPU cgroup (`cpu.max` 100000 100000), pool 1,
+intra threads 1, spinning off, Level3. Not an approved SLO:
+
+- 12 mixed leaves, serial and batch output equal. Raw addresses did not
+  survive. NER 438 ms, vault 2 ms.
+- 16 leaves of 315 bytes, serial and batch output equal. NER 1437 ms.
+- 800 short leaves: HTTP 200 in 22571 ms. NER 22553 ms, vault 9 ms, 800 tokens.
+- A 139-leaf tenant arriving with that 800 waited the 15000 ms queue and
+  returned HTTP 503 overload. NER did not run. The admitted 800 still completed.
+- 800 leaves of 315 bytes: HTTP 503 deadline at 30851 ms. Nothing was written.
+- 800 mixed short and 315-byte leaves: HTTP 503 deadline at 31257 ms.
+- Two 139-leaf tenants: both HTTP 200. One waited 3937 ms and finished at
+  7862 ms. NER about 3.9 s, vault 3–4 ms.
+- The same 315-byte 800 on 2 CPU (`intra_threads=2`) still missed the deadline
+  at 30491 ms. On 4 CPU (`intra_threads=4`) it completed in 18636 ms, NER
+  18620 ms, vault 7 ms, 800 tokens. That is under the 30 s gateway deadline
+  and over the 10 s client default. 3 CPU was not measured. Do not apply the
+  CPU change from this note.
+- Spinning on versus off, and Level3 versus all optimizations, moved a 32-leaf
+  and a 64-leaf probe by tens of milliseconds. The defaults stay spin off and
+  Level3. Quantized weights were not loaded. There is no recall comparison
+  for them.
+
 Missing models, credentials or local KV-v2 are a **BLOCKED** performance result.
 Mocked transport numbers and historical incident durations do not establish
 production gains. Merge/performance rollout review remains gated on actual
 NER+vault measurements.
+
+## Later slice: a dynamically batched NER plane
+
+This increment stays inside the gateway process. A later slice can move
+detection to a separate plane only after a design review. The contract for
+that slice, not implemented here:
+
+- One request is still one token assignment and one mapping write. The NER
+  plane returns spans and offsets only. It does not mint tokens and it does
+  not see the vault.
+- The plane may coalesce leaves from several requests into one forward when
+  they share a pad length and fit the same 2048-token budget. Coalescing must
+  not concatenate texts or share a TokenSession.
+- Admission stays at the gateway: a request that cannot be queued inside the
+  deadline is overload, and a cancelled request is dropped from the plane
+  before the next forward. An in-flight forward is not cancelled mid-kernel.
+- Quantized weights ship only with a recall and offset comparison against the
+  current fp32 model on a fixed synthetic set. A silent recall drop is a
+  failed release, not a performance win.
+- The plane does not change `texts[]`, the 30s deadline, or the map-document
+  spill. Those stay gateway contracts.

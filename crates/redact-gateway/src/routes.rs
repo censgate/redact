@@ -77,6 +77,54 @@ pub struct AppState {
 const DETECT_CHUNK: usize = 32;
 const BATCH_QUEUE_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-queue-ms");
 
+const BATCH_NER_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-ner-ms");
+const BATCH_VAULT_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-vault-ms");
+const BATCH_LEAVES_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-leaves");
+const BATCH_BYTES_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-bytes");
+const BATCH_TOKENS_HEADER: HeaderName = HeaderName::from_static("x-censgate-redact-tokens");
+
+/// Metadata for one texts[] request. Counts and durations only.
+#[derive(Clone, Copy, Default)]
+struct BatchMeter {
+    leaves: u64,
+    bytes: u64,
+    ner: Duration,
+    vault: Duration,
+    tokens: u64,
+}
+
+fn header_u64(n: u64) -> HeaderValue {
+    HeaderValue::from_str(&n.to_string()).unwrap_or(HeaderValue::from_static("0"))
+}
+
+fn stamp_batch(response: &mut Response, meter: BatchMeter) {
+    let headers = response.headers_mut();
+    headers.insert(BATCH_NER_HEADER, header_u64(meter.ner.as_millis() as u64));
+    headers.insert(
+        BATCH_VAULT_HEADER,
+        header_u64(meter.vault.as_millis() as u64),
+    );
+    headers.insert(BATCH_LEAVES_HEADER, header_u64(meter.leaves));
+    headers.insert(BATCH_BYTES_HEADER, header_u64(meter.bytes));
+    headers.insert(BATCH_TOKENS_HEADER, header_u64(meter.tokens));
+}
+
+fn observe_batch(
+    state: &AppState,
+    mut response: Response,
+    meter: BatchMeter,
+    outcome: &'static str,
+) -> Response {
+    state.telemetry.metrics().record_batch_result(
+        outcome,
+        meter.ner.as_secs_f64(),
+        meter.vault.as_secs_f64(),
+        meter.tokens,
+    );
+    stamp_batch(&mut response, meter);
+    response
+}
+
 /// Production default is one in-flight texts[] request. The cap is 8.
 ///
 /// The default queue holds up to four arrivals for five seconds. That is
@@ -1510,8 +1558,21 @@ async fn redact_endpoint(
         return err.into_response();
     }
     if request.texts.is_none() {
-        return redact_request(state, auth, request, None).await;
+        return redact_request(
+            state,
+            auth,
+            request,
+            None,
+            Arc::new(std::sync::Mutex::new(BatchMeter::default())),
+        )
+        .await;
     }
+    let offered_leaves = request.texts.as_ref().map(|texts| texts.len()).unwrap_or(0) as u64;
+    let offered_bytes = request
+        .texts
+        .as_ref()
+        .map(|texts| texts.iter().map(|text| text.len()).sum())
+        .unwrap_or(0) as u64;
     if !state.config().server.redact_batch_enabled {
         return GatewayError::InvalidRequest("redact batching is disabled".into()).into_response();
     }
@@ -1545,12 +1606,32 @@ async fn redact_endpoint(
     };
     let queue_ms = waited.elapsed().as_millis();
     let Some(_permit) = permit else {
+        state.telemetry.metrics().record_batch_admission(
+            "overload",
+            waited.elapsed().as_secs_f64(),
+            offered_leaves,
+            offered_bytes,
+        );
         let mut response = GatewayError::Overloaded.into_response();
         if let Ok(value) = HeaderValue::from_str(&queue_ms.to_string()) {
             response.headers_mut().insert(BATCH_QUEUE_HEADER, value);
         }
+        stamp_batch(
+            &mut response,
+            BatchMeter {
+                leaves: offered_leaves,
+                bytes: offered_bytes,
+                ..BatchMeter::default()
+            },
+        );
         return response;
     };
+    state.telemetry.metrics().record_batch_admission(
+        "accepted",
+        waited.elapsed().as_secs_f64(),
+        offered_leaves,
+        offered_bytes,
+    );
     let timeout = match headers.get("x-censgate-redact-timeout-ms") {
         None => BATCH_TIMEOUT,
         Some(value) => match value.to_str().ok().and_then(|s| s.parse::<u64>().ok()) {
@@ -1564,15 +1645,32 @@ async fn redact_endpoint(
     // No detached task: dropping this future cancels reads, retries and writes.
     // An already accepted KV CAS can still finish, atomically for the whole batch.
     let deadline = tokio::time::Instant::now() + timeout;
+    let stage = Arc::new(std::sync::Mutex::new(BatchMeter {
+        leaves: offered_leaves,
+        bytes: offered_bytes,
+        ..BatchMeter::default()
+    }));
     let mut response = match tokio::time::timeout_at(
         deadline,
-        redact_request(state, auth, request, Some(deadline)),
+        redact_request(state.clone(), auth, request, Some(deadline), stage.clone()),
     )
     .await
     {
         Ok(response) => response,
-        Err(_) => GatewayError::DependencyUnavailable("redact batch deadline exceeded".into())
-            .into_response(),
+        Err(_) => {
+            let meter = stage.lock().expect("batch stage").clone();
+            state.telemetry.metrics().record_batch_result(
+                "deadline",
+                meter.ner.as_secs_f64(),
+                meter.vault.as_secs_f64(),
+                0,
+            );
+            let mut response =
+                GatewayError::DependencyUnavailable("redact batch deadline exceeded".into())
+                    .into_response();
+            stamp_batch(&mut response, meter);
+            response
+        }
     };
     if let Ok(value) = HeaderValue::from_str(&queue_ms.to_string()) {
         response.headers_mut().insert(BATCH_QUEUE_HEADER, value);
@@ -1585,6 +1683,7 @@ async fn redact_request(
     auth: AuthContext,
     request: RedactRequest,
     deadline: Option<tokio::time::Instant>,
+    stage: Arc<std::sync::Mutex<BatchMeter>>,
 ) -> Response {
     let batch = request.texts.is_some();
     let inputs = match (&request.text, &request.texts) {
@@ -1592,22 +1691,54 @@ async fn redact_request(
         (None, Some(texts)) => texts.as_slice(),
         _ => unreachable!("validated shape"),
     };
+    if batch {
+        let mut meter = stage.lock().expect("batch stage");
+        meter.leaves = inputs.len() as u64;
+        meter.bytes = inputs.iter().map(|text| text.len() as u64).sum();
+    }
     let config = state.config();
     let profile = match resolve_profile(&config, &auth, request.profile.as_deref()) {
         Ok(profile) => profile,
-        Err(err) => return err.into_response(),
+        Err(err) => {
+            let response = err.into_response();
+            return if batch {
+                observe_batch(
+                    &state,
+                    response,
+                    stage.lock().expect("batch stage").clone(),
+                    "error",
+                )
+            } else {
+                response
+            };
+        }
     };
 
     if batch && profile.uses_tokenization() && state.tokens.backend_name() == "off" {
-        return GatewayError::DependencyUnavailable(
-            "batch tokenization requires a token map".into(),
-        )
-        .into_response();
+        return observe_batch(
+            &state,
+            GatewayError::DependencyUnavailable("batch tokenization requires a token map".into())
+                .into_response(),
+            stage.lock().expect("batch stage").clone(),
+            "error",
+        );
     }
 
     let session_id = match caller_session_id(request.session_id, request.vault.as_ref(), true) {
         Ok(id) => id,
-        Err(err) => return err.into_response(),
+        Err(err) => {
+            let response = err.into_response();
+            return if batch {
+                observe_batch(
+                    &state,
+                    response,
+                    stage.lock().expect("batch stage").clone(),
+                    "error",
+                )
+            } else {
+                response
+            };
+        }
     };
     let token_map_session = match auth.subject.as_deref() {
         Some(subject) => subject_bound_session_key(&session_id, subject),
@@ -1651,12 +1782,22 @@ async fn redact_request(
                     if let Some(span) = &get_span {
                         spans::finish_tokenmap(span, 0, Some("token_map_error"));
                     }
-                    return GatewayError::DependencyUnavailable(if batch {
+                    let response = GatewayError::DependencyUnavailable(if batch {
                         "token map read failed".into()
                     } else {
                         format!("token map read failed: {err}")
                     })
                     .into_response();
+                    return if batch {
+                        observe_batch(
+                            &state,
+                            response,
+                            stage.lock().expect("batch stage").clone(),
+                            "error",
+                        )
+                    } else {
+                        response
+                    };
                 }
                 Err(err) => {
                     if let Some(span) = &get_span {
@@ -1680,10 +1821,15 @@ async fn redact_request(
             while offset < inputs.len() {
                 tokio::task::yield_now().await;
                 if deadline.is_some_and(|end| tokio::time::Instant::now() >= end) {
-                    return GatewayError::DependencyUnavailable(
-                        "redact batch deadline exceeded".into(),
-                    )
-                    .into_response();
+                    return observe_batch(
+                        &state,
+                        GatewayError::DependencyUnavailable(
+                            "redact batch deadline exceeded".into(),
+                        )
+                        .into_response(),
+                        stage.lock().expect("batch stage").clone(),
+                        "deadline",
+                    );
                 }
                 let end = (offset + DETECT_CHUNK).min(inputs.len());
                 let slice = &inputs[offset..end];
@@ -1699,21 +1845,34 @@ async fn redact_request(
                 let detected = if pending.is_empty() {
                     Vec::new()
                 } else {
+                    let started = Instant::now();
                     match ctx.detect_many(&pending) {
-                        Ok(rows) => rows,
+                        Ok(rows) => {
+                            stage.lock().expect("batch stage").ner += started.elapsed();
+                            rows
+                        }
                         Err(_) => {
-                            return GatewayError::Redaction(
-                                "batch detection or tokenization failed".into(),
-                            )
-                            .into_response()
+                            stage.lock().expect("batch stage").ner += started.elapsed();
+                            return observe_batch(
+                                &state,
+                                GatewayError::Redaction(
+                                    "batch detection or tokenization failed".into(),
+                                )
+                                .into_response(),
+                                stage.lock().expect("batch stage").clone(),
+                                "error",
+                            );
                         }
                     }
                 };
                 if detected.len() != pending.len() {
-                    return GatewayError::Redaction(
-                        "batch detection or tokenization failed".into(),
-                    )
-                    .into_response();
+                    return observe_batch(
+                        &state,
+                        GatewayError::Redaction("batch detection or tokenization failed".into())
+                            .into_response(),
+                        stage.lock().expect("batch stage").clone(),
+                        "error",
+                    );
                 }
                 let mut by_index = vec![None; slice.len()];
                 for (index, entities) in pending_at.into_iter().zip(detected) {
@@ -1725,10 +1884,15 @@ async fn redact_request(
                         Some(entities) => match ctx.apply_detected(text, entities) {
                             Ok(redacted) => redacted,
                             Err(_) => {
-                                return GatewayError::Redaction(
-                                    "batch detection or tokenization failed".into(),
-                                )
-                                .into_response()
+                                return observe_batch(
+                                    &state,
+                                    GatewayError::Redaction(
+                                        "batch detection or tokenization failed".into(),
+                                    )
+                                    .into_response(),
+                                    stage.lock().expect("batch stage").clone(),
+                                    "error",
+                                );
                             }
                         },
                     };
@@ -1749,10 +1913,13 @@ async fn redact_request(
         if batch {
             tokio::task::yield_now().await;
             if deadline.is_some_and(|end| tokio::time::Instant::now() >= end) {
-                return GatewayError::DependencyUnavailable(
-                    "redact batch deadline exceeded".into(),
-                )
-                .into_response();
+                return observe_batch(
+                    &state,
+                    GatewayError::DependencyUnavailable("redact batch deadline exceeded".into())
+                        .into_response(),
+                    stage.lock().expect("batch stage").clone(),
+                    "deadline",
+                );
             }
         }
 
@@ -1766,18 +1933,30 @@ async fn redact_request(
                 None,
             );
             let put_fut = state.tokens.put(&auth.tenant, &token_map_session, &minted);
+            let put_started = Instant::now();
             let put_result = if let Some(span) = put_span.clone() {
                 put_fut.instrument(span).await
             } else {
                 put_fut.await
             };
+            stage.lock().expect("batch stage").vault += put_started.elapsed();
             if let Err(err) = put_result {
                 if let Some(span) = &put_span {
                     spans::finish_tokenmap(span, 0, Some("token_map_error"));
                 }
                 use crate::vault::TokenMapError;
                 if matches!(err, TokenMapError::SessionFull) {
-                    return GatewayError::SessionMapFull.into_response();
+                    let response = GatewayError::SessionMapFull.into_response();
+                    return if batch {
+                        observe_batch(
+                            &state,
+                            response,
+                            stage.lock().expect("batch stage").clone(),
+                            "session_map_full",
+                        )
+                    } else {
+                        response
+                    };
                 }
                 // The losing request's labels were never persisted, so nothing is
                 // overwritten. Re-resume from the winner's mappings and redact
@@ -1802,17 +1981,30 @@ async fn redact_request(
                 // Conflicts are integrity failures even when fail_closed is off:
                 // returning a colliding token that was not persisted is unsafe.
                 if matches!(err, TokenMapError::Conflict(_)) || batch || profile.fail_closed {
-                    return GatewayError::DependencyUnavailable(if batch {
+                    let response = GatewayError::DependencyUnavailable(if batch {
                         "token map write failed".into()
                     } else {
                         format!("token map write failed: {err}")
                     })
                     .into_response();
+                    return if batch {
+                        observe_batch(
+                            &state,
+                            response,
+                            stage.lock().expect("batch stage").clone(),
+                            "error",
+                        )
+                    } else {
+                        response
+                    };
                 }
                 warn!(error = %err, "token map write failed");
             } else if let Some(span) = &put_span {
                 spans::finish_tokenmap(span, minted.len(), None);
             }
+        }
+        if batch {
+            stage.lock().expect("batch stage").tokens = minted.len() as u64;
         }
         break (texts, outcome);
     };
@@ -1823,14 +2015,19 @@ async fn redact_request(
         .record_redaction_outcome(&outcome, &profile.name);
 
     if batch {
-        return Json(BatchRedactResponse {
-            texts,
-            profile: profile.name.clone(),
-            session_id,
-            blocked: outcome.is_blocked(),
-            outcome,
-        })
-        .into_response();
+        return observe_batch(
+            &state,
+            Json(BatchRedactResponse {
+                texts,
+                profile: profile.name.clone(),
+                session_id,
+                blocked: outcome.is_blocked(),
+                outcome,
+            })
+            .into_response(),
+            stage.lock().expect("batch stage").clone(),
+            "completed",
+        );
     }
     let text = texts.remove(0);
     Json(RedactResponse {

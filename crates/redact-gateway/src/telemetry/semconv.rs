@@ -138,6 +138,27 @@ pub const REDACT_GATEWAY_TOKENMAP_OPERATION_DURATION: &str =
     "redact.gateway.tokenmap.operation.duration";
 /// Counter of audit records dropped because the queue was full. Unit: `{record}`.
 pub const REDACT_GATEWAY_AUDIT_RECORDS_DROPPED: &str = "redact.gateway.audit.records_dropped";
+/// Counter of texts[] admission decisions. Unit: `{request}`.
+pub const REDACT_GATEWAY_BATCH_ADMISSION: &str = "redact.gateway.batch.admission";
+/// Counter of texts[] results after a permit was taken. Unit: `{request}`.
+pub const REDACT_GATEWAY_BATCH_RESULT: &str = "redact.gateway.batch.result";
+/// Histogram of queue, NER, and vault stage durations. Unit: `s`.
+pub const REDACT_GATEWAY_BATCH_STAGE_DURATION: &str = "redact.gateway.batch.stage.duration";
+/// Counter of leaves offered to a texts[] request. Unit: `{leaf}`.
+pub const REDACT_GATEWAY_BATCH_LEAVES: &str = "redact.gateway.batch.leaves";
+/// Counter of leaf bytes offered to a texts[] request. Unit: `By`.
+pub const REDACT_GATEWAY_BATCH_BYTES: &str = "redact.gateway.batch.bytes";
+/// Counter of tokens persisted by a texts[] request. Unit: `{token}`.
+pub const REDACT_GATEWAY_BATCH_TOKENS: &str = "redact.gateway.batch.tokens";
+/// Admission or result outcome. Closed set, no caller text.
+pub const REDACT_BATCH_OUTCOME: &str = "redact.batch.outcome";
+/// Stage name for a batch duration (`queue`, `ner`, `vault`).
+pub const REDACT_BATCH_STAGE: &str = "redact.batch.stage";
+
+/// Bucket bounds for batch stage durations, including the 30s deadline.
+pub const BATCH_STAGE_DURATION_BOUNDS: &[f64] = &[
+    0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0, 60.0,
+];
 
 /// Spec-advised explicit bucket boundaries for HTTP request duration histograms.
 pub const HTTP_DURATION_BOUNDS: &[f64] = &[

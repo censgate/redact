@@ -14,9 +14,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use tracing::{debug, info, warn};
 
-/// Pad buckets used when the ONNX `input_ids` sequence dim is dynamic.
+/// Pad lengths when the ONNX `input_ids` sequence dim is dynamic.
 /// Fixed-length exports keep `max_seq_length` (default 512).
-const PAD_BUCKETS: &[usize] = &[32, 64, 128, 256, 512];
+/// The steps between 64 and 512 keep a ~315-byte leaf from padding up to the
+/// next power-of-two bucket. Extra pad positions are attention-masked, so a
+/// tighter bucket does not change logits on real tokens.
+const PAD_BUCKETS: &[usize] = &[32, 48, 64, 96, 128, 192, 256, 384, 512];
 const DEFAULT_SESSION_POOL: usize = 2;
 const MAX_SESSION_POOL: usize = 4;
 /// Sequences packed into one ONNX forward.
@@ -82,6 +85,33 @@ pub(crate) fn clamp_session_pool_size(raw: Option<&str>) -> usize {
 
 fn session_pool_size() -> usize {
     clamp_session_pool_size(std::env::var("CENSGATE_NER_SESSION_POOL").ok().as_deref())
+}
+
+/// Intra-op spinning is on in ONNX Runtime by default. Inside a CPU cgroup a
+/// spinning thread spends the quota while it waits, so the default here is off.
+/// `CENSGATE_NER_INTRA_SPIN=1` restores the runtime default for an A/B probe.
+pub(crate) fn intra_op_spinning() -> bool {
+    matches!(
+        std::env::var("CENSGATE_NER_INTRA_SPIN")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("1" | "true" | "on")
+    )
+}
+
+/// `CENSGATE_NER_OPT_LEVEL=all` selects `GraphOptimizationLevel::All`.
+/// Level3 (`ORT_ENABLE_LAYOUT`) already includes Level2, and Level2 includes
+/// CPU attention fusion. There is no separate fusion switch in ort 2.0.0-rc.12.
+pub(crate) fn graph_optimization_level() -> GraphOptimizationLevel {
+    match std::env::var("CENSGATE_NER_OPT_LEVEL")
+        .ok()
+        .as_deref()
+        .map(str::trim)
+    {
+        Some("all" | "ALL") => GraphOptimizationLevel::All,
+        _ => GraphOptimizationLevel::Level3,
+    }
 }
 
 /// Target pad length: bucketed when the model seq dim is dynamic, else `max_seq`.
@@ -494,10 +524,23 @@ impl NerRecognizer {
     }
 
     fn load_one_session(model_path: &str) -> Result<Session> {
+        let spin = intra_op_spinning();
+        // Sequential execution and one inter-op thread: this graph is a single
+        // transformer stack, so parallel graph branches do not exist to schedule.
+        // The 1.24.4 CPU build does not link OpenMP, so intra threads are the
+        // knob that actually counts. Keep that count at the cgroup CPU count.
         Session::builder()?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .with_optimization_level(graph_optimization_level())
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .with_intra_threads(intra_threads())
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_inter_threads(1)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_parallel_execution(false)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_intra_op_spinning(spin)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .with_inter_op_spinning(spin)
             .map_err(|e| anyhow::anyhow!("{e}"))?
             .commit_from_file(model_path)
             .map_err(|e| anyhow::anyhow!("{e}"))
@@ -1094,8 +1137,13 @@ mod tests {
     #[test]
     fn test_infer_chunk_limit_shrinks_for_long_sequences() {
         assert_eq!(infer_chunk_limit(32), 32);
+        assert_eq!(infer_chunk_limit(48), 32);
         assert_eq!(infer_chunk_limit(64), 32);
+        assert_eq!(infer_chunk_limit(96), 21);
         assert_eq!(infer_chunk_limit(128), 16);
+        assert_eq!(infer_chunk_limit(192), 10);
+        assert_eq!(infer_chunk_limit(256), 8);
+        assert_eq!(infer_chunk_limit(384), 5);
         assert_eq!(infer_chunk_limit(512), 4);
         assert_eq!(infer_chunk_limit(4096), 1);
     }
@@ -1104,15 +1152,18 @@ mod tests {
     fn test_pad_length_dynamic_buckets() {
         assert_eq!(pad_length(1, 512, true), 32);
         assert_eq!(pad_length(32, 512, true), 32);
-        assert_eq!(pad_length(33, 512, true), 64);
-        assert_eq!(pad_length(64, 512, true), 64);
-        assert_eq!(pad_length(65, 512, true), 128);
+        assert_eq!(pad_length(33, 512, true), 48);
+        assert_eq!(pad_length(49, 512, true), 64);
+        assert_eq!(pad_length(65, 512, true), 96);
+        assert_eq!(pad_length(97, 512, true), 128);
+        assert_eq!(pad_length(160, 512, true), 192);
         assert_eq!(pad_length(200, 512, true), 256);
-        assert_eq!(pad_length(257, 512, true), 512);
+        assert_eq!(pad_length(300, 512, true), 384);
+        assert_eq!(pad_length(400, 512, true), 512);
         assert_eq!(pad_length(512, 512, true), 512);
         assert_eq!(pad_length(600, 512, true), 512);
         assert_eq!(pad_length(10, 64, true), 32);
-        assert_eq!(pad_length(40, 64, true), 64);
+        assert_eq!(pad_length(40, 64, true), 48);
         assert_eq!(pad_length(80, 64, true), 64);
     }
 

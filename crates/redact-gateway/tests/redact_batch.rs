@@ -233,6 +233,28 @@ async fn c2_c3_c4_c5_order_reuse_no_bypass_and_unicode() {
     )
     .await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.body);
+    for name in [
+        "x-censgate-redact-ner-ms",
+        "x-censgate-redact-vault-ms",
+        "x-censgate-redact-tokens",
+    ] {
+        let value = response
+            .headers
+            .get(name)
+            .unwrap_or_else(|| panic!("missing {name}"))
+            .to_str()
+            .unwrap();
+        assert!(value.parse::<u64>().is_ok(), "{name}={value}");
+    }
+    assert_eq!(
+        response
+            .headers
+            .get("x-censgate-redact-leaves")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "6"
+    );
     assert_eq!(
         response.json()["texts"],
         json!([
