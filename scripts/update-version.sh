@@ -277,6 +277,7 @@ main() {
     update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-core" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-ner" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-gateway/Cargo.toml" "redact-core" "$new_version" "$dry_run"
+    update_crate_dependency "crates/redact-gateway/Cargo.toml" "redact-token-store" "$new_version" "$dry_run"
     update_crate_dependency "crates/redact-scan/Cargo.toml" "redact-core" "$new_version" "$dry_run"
     update_doc_versions "$new_version" "$dry_run"
     update_changelog "$new_version" "$dry_run"
