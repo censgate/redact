@@ -8,6 +8,7 @@ members = [
     "crates/redact-gateway",
     "crates/redact-scan",
     "crates/redact-verify",
+    "crates/redact-token-store",
 ]
 # Resolver 3 keeps resolver 2's feature unification and changes the default
 # of `resolver.incompatible-rust-versions` from `allow` to `fallback`.
