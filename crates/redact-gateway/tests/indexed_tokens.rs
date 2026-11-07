@@ -9,6 +9,7 @@ use std::{sync::Arc, time::Duration};
 use support::*;
 
 async fn exercise(target: Arc<dyn TokenStore>) {
+    erasure_contract(target.clone()).await;
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let mut config = config_for(&upstream);
     config.vault.backend = redact_gateway::config::VaultBackend::Memory;
@@ -179,6 +180,325 @@ async fn exercise(target: Arc<dyn TokenStore>) {
     assert_eq!(rebound.json()["error"]["type"], "token_store_retired");
 }
 
+#[derive(Debug)]
+struct InterruptErasure {
+    inner: Arc<redact_gateway::vault::Kv2Store>,
+    stage: std::sync::atomic::AtomicU8,
+}
+#[async_trait::async_trait]
+impl redact_gateway::vault::TokenMapStore for InterruptErasure {
+    fn backend_name(&self) -> &'static str {
+        "vault_kv2"
+    }
+    async fn put(
+        &self,
+        t: &str,
+        c: &str,
+        m: &[redact_gateway::redact::token::TokenMapping],
+    ) -> Result<(), redact_gateway::vault::TokenMapError> {
+        self.inner.put(t, c, m).await
+    }
+    async fn get(
+        &self,
+        t: &str,
+        c: &str,
+    ) -> Result<
+        Vec<redact_gateway::redact::token::TokenMapping>,
+        redact_gateway::vault::TokenMapError,
+    > {
+        self.inner.get(t, c).await
+    }
+    async fn delete(&self, t: &str, c: &str) -> Result<(), redact_gateway::vault::TokenMapError> {
+        self.inner.delete(t, c).await
+    }
+    async fn exists(&self, t: &str, c: &str) -> Result<bool, redact_gateway::vault::TokenMapError> {
+        self.inner.exists(t, c).await
+    }
+    async fn get_lineage(
+        &self,
+        t: &str,
+        c: &str,
+    ) -> Result<redact_gateway::vault::CredentialLineage, redact_gateway::vault::TokenMapError>
+    {
+        self.inner.get_lineage(t, c).await
+    }
+    async fn put_lineage(
+        &self,
+        t: &str,
+        c: &str,
+        lineage: &redact_gateway::vault::CredentialLineage,
+    ) -> Result<(), redact_gateway::vault::TokenMapError> {
+        self.inner.put_lineage(t, c, lineage).await
+    }
+    async fn health(&self) -> Result<(), redact_gateway::vault::TokenMapError> {
+        self.inner.health().await
+    }
+    async fn freeze(
+        &self,
+        t: &str,
+        c: &str,
+    ) -> Result<redact_gateway::vault::FrozenSnapshot, redact_gateway::vault::TokenMapError> {
+        self.inner.freeze(t, c).await
+    }
+    async fn fence_for_erasure(
+        &self,
+        t: &str,
+        c: &str,
+    ) -> Result<(), redact_gateway::vault::TokenMapError> {
+        let stage = self.stage.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if stage == 1 {
+            return Err(redact_token_store::Error::Unavailable.into());
+        }
+        self.inner.fence_for_erasure(t, c).await?;
+        if stage == 2 {
+            return Err(redact_token_store::Error::Unavailable.into());
+        }
+        Ok(())
+    }
+    async fn clear_frozen(
+        &self,
+        t: &str,
+        c: &str,
+    ) -> Result<(), redact_gateway::vault::TokenMapError> {
+        self.inner.clear_frozen(t, c).await
+    }
+}
+
+async fn erasure_contract(target: Arc<dyn TokenStore>) {
+    use redact_gateway::{
+        redact::token::{subject_bound_session_key, TokenMapping},
+        vault::{session_path, Kv2Store, TokenMapStore},
+    };
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let mut config = config_for(&upstream);
+    config.auth.mode = AuthMode::ApiKey;
+    config.auth.api_keys = vec!["synthetic-owner-a".into()];
+    config.policy = Arc::new(policy_with(tokenize_profile(false)));
+    let mut state = state_for(config).await;
+    let mut auth_headers = axum::http::HeaderMap::new();
+    auth_headers.insert("authorization", "Bearer synthetic-owner-a".parse().unwrap());
+    let auth = state.auth.authenticate(&auth_headers).await.unwrap();
+    let headers = [("authorization", "Bearer synthetic-owner-a")];
+    let credential =
+        std::fs::read_to_string(std::env::var("TOKEN_STORE_BAO_TOKEN_FILE").unwrap()).unwrap();
+    let settings = redact_gateway::config::VaultSettings {
+        backend: redact_gateway::config::VaultBackend::VaultKv2,
+        address: Some(std::env::var("TOKEN_STORE_BAO_ADDR").unwrap()),
+        token: Some(credential.trim().into()),
+        path_prefix: format!("erase-{}", uuid::Uuid::new_v4()),
+        ..Default::default()
+    };
+    let source = Arc::new(Kv2Store::from_settings(&settings).unwrap());
+    state.tokens = Arc::new(
+        IndexedStore::new(
+            target.clone(),
+            source.clone(),
+            state.dek.clone(),
+            Duration::from_secs(3600),
+        )
+        .unwrap(),
+    );
+    let router = create_router(state.clone());
+    let empty = uuid::Uuid::new_v4().to_string();
+    let empty_key = subject_bound_session_key(&empty, auth.subject.as_deref().unwrap());
+    let absent = post_json_with_headers(
+        router.clone(),
+        "/v1/vault/context/verify",
+        json!({"vault":{"context_id":empty}}),
+        &headers,
+    )
+    .await;
+    assert_eq!(absent.status, StatusCode::OK);
+    assert_eq!(absent.json()["state"], "absent");
+    assert!(
+        !source.exists(&auth.tenant, &empty_key).await.unwrap(),
+        "verification must not create a source fence"
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    for (case, stage) in [
+        ("pruned", 0),
+        ("rebound", 1),
+        ("destroyed", 2),
+        ("deleted_latest", 0),
+        ("malformed", 2),
+    ] {
+        let context = uuid::Uuid::new_v4().to_string();
+        let key = subject_bound_session_key(&context, auth.subject.as_deref().unwrap());
+        let path = session_path(&settings.path_prefix, &auth.tenant, &key);
+        let url = |operation: &str| {
+            format!(
+                "{}/v1/secret/{operation}/{path}",
+                settings.address.as_ref().unwrap()
+            )
+        };
+        if case == "pruned" {
+            client
+                .post(url("metadata"))
+                .header("X-Vault-Token", credential.trim())
+                .json(&json!({"max_versions":1}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        let mapping = TokenMapping {
+            token: "[PERSON_1]".into(),
+            entity_type: "PERSON".into(),
+            sealed_value: state.dek.seal("Synthetic original").unwrap(),
+            created_at: chrono::Utc::now(),
+        };
+        for n in 1..=3 {
+            let mut row = mapping.clone();
+            if case == "rebound" && n == 3 {
+                row.sealed_value = state.dek.seal("Synthetic rebound").unwrap();
+            }
+            client.post(url("data")).header("X-Vault-Token",credential.trim()).json(&json!({"data":{"mappings":[row],"expires_at":chrono::Utc::now()+chrono::Duration::hours(1)}})).send().await.unwrap().error_for_status().unwrap();
+        }
+        match case {
+            "destroyed" => {
+                client
+                    .post(url("destroy"))
+                    .header("X-Vault-Token", credential.trim())
+                    .json(&json!({"versions":[1]}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap();
+            }
+            "deleted_latest" => {
+                client
+                    .delete(url("data"))
+                    .header("X-Vault-Token", credential.trim())
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap();
+            }
+            "malformed" => {
+                client
+                    .post(url("data"))
+                    .header("X-Vault-Token", credential.trim())
+                    .json(&json!({"data":{"unexpected":true}}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap();
+            }
+            _ => {}
+        }
+        assert!(
+            source.freeze(&auth.tenant, &key).await.is_err(),
+            "{case} must remain ineligible for identity import"
+        );
+        let present = post_json_with_headers(
+            router.clone(),
+            "/v1/vault/context/verify",
+            json!({"vault":{"context_id":context}}),
+            &headers,
+        )
+        .await;
+        assert_eq!(present.status, StatusCode::OK);
+        assert_eq!(present.json()["state"], "present");
+        let mut interrupted = state.clone();
+        interrupted.tokens = Arc::new(
+            IndexedStore::new(
+                target.clone(),
+                Arc::new(InterruptErasure {
+                    inner: source.clone(),
+                    stage: std::sync::atomic::AtomicU8::new(stage),
+                }),
+                state.dek.clone(),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
+        );
+        let erased = delete_json_with_headers(
+            create_router(interrupted),
+            "/v1/vault/context",
+            json!({"vault":{"context_id":context}}),
+            &headers,
+        )
+        .await;
+        assert_eq!(
+            erased.status,
+            if stage == 0 {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            },
+            "{case}"
+        );
+        // Restarted verification must finish a source fence/cleanup even when
+        // the earlier DELETE committed target retirement but lost its reply.
+        let peer = Arc::new(Kv2Store::from_settings(&settings).unwrap());
+        let mut recovered = state.clone();
+        recovered.tokens = Arc::new(
+            IndexedStore::new(
+                target.clone(),
+                peer.clone(),
+                state.dek.clone(),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
+        );
+        let verified = post_json_with_headers(
+            create_router(recovered),
+            "/v1/vault/context/verify",
+            json!({"vault":{"context_id":context}}),
+            &headers,
+        )
+        .await;
+        assert_eq!(verified.status, StatusCode::OK, "{case}: {}", verified.body);
+        assert_eq!(verified.json()["state"], "absent");
+        assert!(
+            peer.put(&auth.tenant, &key, &[mapping]).await.is_err(),
+            "erasure fence lost"
+        );
+        let latest: serde_json::Value = client
+            .get(url("data"))
+            .header("X-Vault-Token", credential.trim())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let data = &latest["data"]["data"];
+        assert_eq!(data["frozen"], true);
+        assert_eq!(data["mappings"], json!([]));
+        let through = data["cleanup_through"].as_u64().unwrap();
+        assert_eq!(data["destroyed_through"].as_u64(), Some(through));
+        let metadata: serde_json::Value = client
+            .get(url("metadata"))
+            .header("X-Vault-Token", credential.trim())
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        for (version, details) in metadata["data"]["versions"].as_object().unwrap() {
+            if version.parse::<u64>().unwrap() <= through {
+                assert_eq!(
+                    details["destroyed"], true,
+                    "{case} retained ciphertext history"
+                );
+            }
+        }
+    }
+}
+
 // Optional cross-repository check uses Platform's real Go client against both
 // real HTTP surfaces. Ordinary CI still exercises every backend/migration test;
 // the private Platform checkout is supplied explicitly by the caller.
@@ -247,6 +567,107 @@ async fn openbao_gateway_migration() {
     )
     .unwrap();
     exercise(Arc::new(store)).await;
+}
+
+#[tokio::test]
+#[ignore = "requires isolated OpenBao source"]
+async fn erasure_resumes_beyond_migration_history_limit() {
+    use redact_gateway::vault::{session_path, Kv2Store, TokenMapError, TokenMapStore};
+    let credential =
+        std::fs::read_to_string(std::env::var("TOKEN_STORE_BAO_TOKEN_FILE").unwrap()).unwrap();
+    let settings = redact_gateway::config::VaultSettings {
+        backend: redact_gateway::config::VaultBackend::VaultKv2,
+        address: Some(std::env::var("TOKEN_STORE_BAO_ADDR").unwrap()),
+        token: Some(credential.trim().into()),
+        path_prefix: format!("long-erasure-{}", uuid::Uuid::new_v4()),
+        ..Default::default()
+    };
+    let tenant = "synthetic-tenant";
+    let context = "synthetic-context";
+    let path = session_path(&settings.path_prefix, tenant, context);
+    let url = |operation: &str| {
+        format!(
+            "{}/v1/secret/{operation}/{path}",
+            settings.address.as_ref().unwrap()
+        )
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    client
+        .post(url("metadata"))
+        .header("X-Vault-Token", credential.trim())
+        .json(&json!({"max_versions":2500}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    // Larger than both strict migration's 2,048 versions and one cleanup call.
+    for _ in 0..2090 {
+        client.post(url("data")).header("X-Vault-Token",credential.trim())
+            .json(&json!({"data":{"mappings":[],"expires_at":chrono::Utc::now()+chrono::Duration::hours(1),"legacy_ciphertext":"synthetic-encrypted-placeholder"}}))
+            .send().await.unwrap().error_for_status().unwrap();
+    }
+    let source = Kv2Store::from_settings(&settings).unwrap();
+    assert!(source.freeze(tenant, context).await.is_err());
+    source.fence_for_erasure(tenant, context).await.unwrap();
+    assert!(matches!(
+        source.clear_frozen(tenant, context).await,
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
+    ));
+    let checkpoint: serde_json::Value = client
+        .get(url("data"))
+        .header("X-Vault-Token", credential.trim())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let data = &checkpoint["data"]["data"];
+    assert_eq!(data["cleanup_through"], 2090);
+    assert_eq!(data["destroyed_through"], 2048);
+    let peer = Kv2Store::from_settings(&settings).unwrap();
+    peer.fence_for_erasure(tenant, context).await.unwrap();
+    let resumed: serde_json::Value = client
+        .get(url("data"))
+        .header("X-Vault-Token", credential.trim())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        checkpoint["data"], resumed["data"],
+        "restart reset the cleanup checkpoint"
+    );
+    peer.clear_frozen(tenant, context).await.unwrap();
+    let metadata: serde_json::Value = client
+        .get(url("metadata"))
+        .header("X-Vault-Token", credential.trim())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    for (version, details) in metadata["data"]["versions"].as_object().unwrap() {
+        if version.parse::<u64>().unwrap() <= 2090 {
+            assert_eq!(
+                details["destroyed"], true,
+                "legacy version survived erasure"
+            );
+        }
+    }
 }
 
 #[tokio::test]

@@ -234,6 +234,14 @@ pub trait TokenMapStore: Send + Sync + std::fmt::Debug {
         ))
     }
 
+    /// Permanently fence a source for erasure without importing or validating
+    /// historical identities. Preserve any existing destruction checkpoint.
+    async fn fence_for_erasure(&self, _tenant: &str, _session: &str) -> Result<(), TokenMapError> {
+        Err(TokenMapError::Backend(
+            "backend cannot fence source erasure".into(),
+        ))
+    }
+
     /// Destroy frozen source ciphertext/history while retaining its write fence.
     async fn clear_frozen(&self, _tenant: &str, _session: &str) -> Result<(), TokenMapError> {
         Err(TokenMapError::Backend(

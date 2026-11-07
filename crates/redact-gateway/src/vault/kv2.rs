@@ -376,6 +376,61 @@ impl Kv2Store {
 
 #[async_trait::async_trait]
 impl TokenMapStore for Kv2Store {
+    async fn fence_for_erasure(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let path = self.path(tenant, session);
+        for attempt in 1..=PUT_CAS_ATTEMPTS {
+            self.ensure_fresh_token().await?;
+            let inner = self.inner.read().await;
+            // Metadata supplies the CAS revision even when the latest data is
+            // deleted, malformed or unreadable. Erasure does not import it.
+            let version = match kv2::read_metadata(&inner.client, &self.mount, &path).await {
+                Ok(metadata) => metadata.current_version,
+                Err(ClientError::APIError { code: 404, .. }) => 0,
+                Err(err) => return Err(map_client_error(err)),
+            };
+            let cas = version_to_cas(version)?;
+            if version > 0 {
+                // A retry must retain progress, not reset it after every bounded
+                // cleanup call. All versions after this cutoff are empty fences.
+                if let Ok(entry) =
+                    kv2::read_version::<StoredSession>(&inner.client, &self.mount, &path, version)
+                        .await
+                {
+                    if entry.frozen
+                        && entry.mappings.is_empty()
+                        && entry.destroyed_through <= entry.cleanup_through
+                        && entry.cleanup_through <= version
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            let fence = StoredSession {
+                frozen: true,
+                cleanup_through: version,
+                destroyed_through: 0,
+                mappings: Vec::new(),
+                expires_at: Utc::now(),
+            };
+            match kv2::set_with_options(
+                &inner.client,
+                &self.mount,
+                &path,
+                &fence,
+                SetSecretRequestOptions { cas },
+            )
+            .await
+            {
+                Ok(_) => return Ok(()),
+                Err(err) if is_cas_conflict(&err) => {}
+                Err(err) => return Err(map_client_error(err)),
+            }
+            drop(inner);
+            tokio::time::sleep(cas_backoff(attempt)).await;
+        }
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
+    }
+
     async fn freeze(
         &self,
         tenant: &str,

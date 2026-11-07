@@ -114,6 +114,18 @@ Erase verification retries cleanup and never reports physical completion merely
 because the context is fenced. OpenBao destruction records a durable version cursor;
 repeated calls make progress without restarting from version one.
 
+Erasure uses a separate CAS source fence, not the strict identity-import freeze.
+Pruned, destroyed, malformed, rebound or over-limit legacy histories can therefore
+be erased without proving safe import. Target retirement commits first; the source
+then receives an empty permanent fence using its metadata revision, and all earlier
+versions are destroyed in bounded batches. Retries preserve the destruction cursor,
+including after restart or a lost fence acknowledgement. Verification of a retired
+context finishes source fencing/cleanup before reporting absence. Verification of
+an absent target only reads legacy existence and never creates a source record.
+Source metadata, write and destruction privileges are still required; failures
+remain errors until cleanup can be verified. Tests cover interrupted HTTP erasure,
+both target backends and a 2,090-version source requiring multiple cleanup calls.
+
 `Vault::purge_expired` and `IndexedStore::purge_expired` clear expired ciphertext in
 bounded batches while retaining fingerprint/token reservations. PostgreSQL uses a
 partial expiry index; OpenBao rewrites the bounded document and destroys prior

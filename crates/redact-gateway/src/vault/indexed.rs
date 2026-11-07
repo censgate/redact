@@ -294,7 +294,7 @@ impl TokenMapStore for IndexedStore {
             .await
             .map_err(failure)?;
         self.source
-            .freeze(tenant, context)
+            .fence_for_erasure(tenant, context)
             .await
             .map_err(source_failure)?;
         self.source
@@ -303,24 +303,33 @@ impl TokenMapStore for IndexedStore {
             .map_err(source_failure)
     }
     async fn exists(&self, tenant: &str, context: &str) -> Result<bool, TokenMapError> {
-        let retired = matches!(
-            self.vault
-                .context_state(&self.scope(tenant, context)?)
+        let state = self
+            .vault
+            .context_state(&self.scope(tenant, context)?)
+            .await
+            .map_err(failure)?;
+        if state == ContextState::Absent {
+            return self
+                .source
+                .exists(tenant, context)
                 .await
-                .map_err(failure)?,
-            ContextState::Retired
-        );
-        if retired {
+                .map_err(source_failure);
+        }
+        if state == ContextState::Retired {
             self.vault
                 .retire(&self.scope(tenant, context)?)
                 .await
                 .map_err(failure)?;
             self.source
+                .fence_for_erasure(tenant, context)
+                .await
+                .map_err(source_failure)?;
+            self.source
                 .clear_frozen(tenant, context)
                 .await
                 .map_err(source_failure)?;
         }
-        Ok(!retired)
+        Ok(state != ContextState::Retired)
     }
     async fn get_lineage(
         &self,

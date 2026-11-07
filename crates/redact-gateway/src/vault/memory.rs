@@ -99,6 +99,19 @@ impl MemoryStore {
 
 #[async_trait::async_trait]
 impl TokenMapStore for MemoryStore {
+    async fn fence_for_erasure(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let mut guard = self.entries.write().await;
+        let entry = guard
+            .entry(Self::key(tenant, session))
+            .or_insert_with(|| SessionEntry {
+                frozen: true,
+                mappings: Vec::new(),
+                expires_at: Utc::now(),
+            });
+        entry.frozen = true;
+        entry.mappings.clear();
+        Ok(())
+    }
     async fn freeze(
         &self,
         tenant: &str,
