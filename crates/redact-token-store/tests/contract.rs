@@ -1,7 +1,7 @@
 use redact_token_store::{Entry, Error, Scope, TokenStore, Vault, MAX_BATCH};
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -66,6 +66,53 @@ async fn contract(store: Arc<dyn TokenStore>) {
         tampered.resolve(&scope, &tokens).await,
         Err(Error::Integrity)
     );
+    let large = vec![("PERSON".into(), "Synthetic value ".repeat(1024))];
+    let large_tokens = vault
+        .intern(&scope, &large, Duration::from_secs(60))
+        .await
+        .unwrap();
+    let counting = Arc::new(CountingResolve {
+        inner: store.clone(),
+        requested: AtomicUsize::new(0),
+    });
+    let bounded = facade(counting.clone());
+    assert_eq!(
+        bounded
+            .resolve(&scope, &vec![large_tokens[0].clone(); MAX_BATCH])
+            .await,
+        Err(Error::Capacity)
+    );
+    assert_eq!(
+        counting.requested.load(Ordering::SeqCst),
+        1,
+        "duplicates reached the backend"
+    );
+    let ordered = bounded
+        .resolve(
+            &scope,
+            &[
+                large_tokens[0].clone(),
+                tokens[0].clone(),
+                large_tokens[0].clone(),
+            ],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        ordered,
+        vec![
+            Some(large[0].1.clone()),
+            Some(values[0].1.clone()),
+            Some(large[0].1.clone())
+        ]
+    );
+    assert_eq!(counting.requested.load(Ordering::SeqCst), 2);
+    assert!(matches!(
+        store
+            .resolve(&scope, &vec![large_tokens[0].clone(); MAX_BATCH])
+            .await,
+        Err(Error::Capacity)
+    ));
     assert_eq!(
         vault
             .intern(
@@ -223,6 +270,27 @@ async fn contract(store: Arc<dyn TokenStore>) {
 struct TamperedExpiry {
     inner: Arc<dyn TokenStore>,
 }
+
+struct CountingResolve {
+    inner: Arc<dyn TokenStore>,
+    requested: AtomicUsize,
+}
+#[async_trait::async_trait]
+impl TokenStore for CountingResolve {
+    fn backend(&self) -> &'static str {
+        "counting"
+    }
+    async fn intern(&self, s: &Scope, e: &[Entry]) -> Result<Vec<Entry>, Error> {
+        self.inner.intern(s, e).await
+    }
+    async fn resolve(&self, s: &Scope, t: &[String]) -> Result<Vec<Option<Entry>>, Error> {
+        self.requested.store(t.len(), Ordering::SeqCst);
+        self.inner.resolve(s, t).await
+    }
+    async fn retire(&self, s: &Scope) -> Result<(), Error> {
+        self.inner.retire(s).await
+    }
+}
 #[async_trait::async_trait]
 impl TokenStore for TamperedExpiry {
     fn backend(&self) -> &'static str {
@@ -281,6 +349,37 @@ async fn admission_and_deadline_fail_closed() {
         Err(Error::Busy)
     );
     assert_eq!(first.await.unwrap(), Err(Error::Unavailable));
+    assert_eq!(
+        vault.resolve(&scope, &["[PERSON_1]".into()]).await,
+        Err(Error::Unavailable)
+    );
+}
+
+#[tokio::test]
+async fn elapsed_deadline_cannot_return_a_ready_backend_result() {
+    struct SlowReady;
+    #[async_trait::async_trait]
+    impl TokenStore for SlowReady {
+        fn backend(&self) -> &'static str {
+            "deadline_fixture"
+        }
+        async fn intern(&self, _: &Scope, _: &[Entry]) -> Result<Vec<Entry>, Error> {
+            unreachable!()
+        }
+        async fn resolve(&self, _: &Scope, t: &[String]) -> Result<Vec<Option<Entry>>, Error> {
+            // Simulate synchronous work in a ready future. timeout() alone
+            // cannot preempt this; the facade must check its total deadline.
+            std::thread::sleep(Duration::from_millis(10));
+            Ok(vec![None; t.len()])
+        }
+        async fn retire(&self, _: &Scope) -> Result<(), Error> {
+            unreachable!()
+        }
+    }
+    let vault = Vault::new(Arc::new(SlowReady), [7; 32], 1, Duration::from_millis(1)).unwrap();
+    let scope = vault
+        .scope("synthetic-tenant", "synthetic-owner", "context")
+        .unwrap();
     assert_eq!(
         vault.resolve(&scope, &["[PERSON_1]".into()]).await,
         Err(Error::Unavailable)

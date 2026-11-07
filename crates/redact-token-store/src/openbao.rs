@@ -1,7 +1,7 @@
 //! OpenBao KV v2 reference adapter. CAS provides atomicity across replicas.
 //! This adapter deliberately exposes its whole-document cost and capacity limit;
 //! use the indexed PostgreSQL adapter for growing contexts.
-use crate::{validate, validate_refs, Entry, Error, Scope, TokenStore};
+use crate::{response_budget, validate, validate_refs, Entry, Error, Scope, TokenStore};
 use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -197,16 +197,29 @@ impl TokenStore for OpenBao {
             }
             let now = chrono::Utc::now().timestamp_millis();
             let mut result = Vec::with_capacity(candidates.len());
+            let mut response_bytes = 0usize;
             let mut changed = false;
             for candidate in candidates {
                 if let Some(existing) = doc.entries.get(&candidate.fingerprint) {
                     if existing.expires_ms <= now {
                         return Err(Error::Retired);
                     }
+                    response_bytes = response_bytes
+                        .checked_add(existing.sealed.len())
+                        .ok_or(Error::Capacity)?;
+                    if response_bytes > crate::MAX_BATCH_BYTES {
+                        return Err(Error::Capacity);
+                    }
                     result.push(existing.clone());
                 } else {
                     if candidate.expires_ms <= now {
                         return Err(Error::Retired);
+                    }
+                    response_bytes = response_bytes
+                        .checked_add(candidate.sealed.len())
+                        .ok_or(Error::Capacity)?;
+                    if response_bytes > crate::MAX_BATCH_BYTES {
+                        return Err(Error::Capacity);
                     }
                     if doc.entries.values().any(|e| e.token == candidate.token) {
                         return Err(Error::Integrity);
@@ -239,6 +252,11 @@ impl TokenStore for OpenBao {
             .filter(|e| !doc.retired && e.expires_ms > now)
             .map(|e| (e.token.as_str(), e))
             .collect();
+        response_budget(
+            tokens
+                .iter()
+                .filter_map(|token| by_token.get(token.as_str()).copied()),
+        )?;
         Ok(tokens
             .iter()
             .map(|token| by_token.get(token.as_str()).map(|e| (*e).clone()))

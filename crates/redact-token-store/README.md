@@ -30,6 +30,14 @@ install a subscriber or exporter. Admission is a bounded semaphore without an
 unbounded queue, and each operation has a deadline. An uncertain commit returns an
 error; retry the same values. Overload returns `Busy`.
 
+Resolve deduplicates references before backend fetch and decryption, then restores
+request order. Sealed bytes available for crypto and expanded plaintext responses
+are independently bounded to 1 MiB. Oversized results fail as a whole before
+duplicate expansion. PostgreSQL checks the aggregate sealed-byte budget inside the
+query so an oversized batch is not transferred into the service. The request
+deadline covers backend I/O, decryption and response construction; synchronous
+crypto is bounded by bytes and checked between items and before returning.
+
 ## PostgreSQL
 
 Apply `src/schema.sql` with an operator migration role to a dedicated database.
@@ -48,6 +56,9 @@ test checks visited mapping rows for resolve and reuse at 10,000 stored mappings
 including the fresh-partition case before ANALYZE. Intern and retire serialize on
 one context row across replicas; independent contexts do not share that lock.
 Retirement deletes all entries in the scope and therefore scales with scope size.
+An explicit scope-expression index keeps that deletion from scanning unrelated
+tenants or contexts in the partition. A regression checks the delete plan with
+512 unrelated contexts alongside the selective resolve/reuse plan tests.
 
 `ShardedPostgres` routes 256 stable virtual buckets to independent database pools.
 All replicas must share the same immutable ownership map and root key. Adding a
@@ -115,6 +126,9 @@ python3 scripts/token-store/test-local.py
 For the comparison, build `cargo build --release -p redact-token-store --example compare`
 and add `TOKEN_STORE_RUN_BENCH=1`, `TOKEN_STORE_BENCH_OUTPUT=/tmp/token-store-results`
 and, to reproduce the documented tuned run, `TOKEN_STORE_BAO_JSON_STRINGS=100000`.
-The latter changes only the disposable server's additional listener. Default-port
-bindings are loopback and must be free. Do not run this harness on a shared host
+The latter changes only the disposable server's additional listener. Bindings use
+temporary loopback ports. Before setup writes the harness checks its PostgreSQL
+child process, postmaster PID and reported temporary data directory; an unrelated
+listener cannot satisfy readiness. `python3 scripts/token-store/test_harness.py`
+exercises failure cases. Do not run this harness on a shared host
 with untrusted local users (the disposable PostgreSQL cluster uses trust auth).

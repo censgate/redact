@@ -16,6 +16,10 @@ DO $$ BEGIN
         EXECUTE format('CREATE TABLE IF NOT EXISTS redact_tokens_v1.entries_p%s PARTITION OF redact_tokens_v1.entries FOR VALUES WITH (MODULUS 16, REMAINDER %s)', i, i);
     END LOOP;
 END $$;
+-- An explicit scope expression keeps retirement indexed without offering a
+-- misleading prefix-only access path to fresh-partition point-lookup plans.
+CREATE INDEX IF NOT EXISTS entries_scope_idx ON redact_tokens_v1.entries
+    ((tenant || ':' || context), tenant, context);
 ALTER TABLE redact_tokens_v1.contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE redact_tokens_v1.contexts FORCE ROW LEVEL SECURITY;
 ALTER TABLE redact_tokens_v1.entries ENABLE ROW LEVEL SECURITY;

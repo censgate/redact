@@ -1,16 +1,20 @@
 //! Indexed PostgreSQL backend. Every key includes the tenant and context.
 //! A short per-context row lock orders intern against retirement across replicas.
 //! Resolution uses a bounded indexed query and does not lock unrelated contexts.
-use crate::{validate, validate_refs, Entry, Error, Scope, TokenStore};
+use crate::{
+    response_budget, unique_refs, validate, validate_refs, Entry, Error, Scope, TokenStore,
+};
 use sqlx::{PgPool, Postgres as Pg, Row, Transaction};
 use std::{collections::BTreeMap, sync::Arc};
 
 // Keep point lookups parameterized per requested key. OFFSET 0 prevents the
 // planner from flattening the lateral subquery into a context-wide join under
 // RLS. The execution-plan regression counts visited rows, not just output rows.
-const RESOLVE_QUERY: &str = "SELECT e.fingerprint,e.token,e.sealed,e.expires_ms FROM unnest($3::text[]) requested(token) CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND token=requested.token OFFSET 0) e WHERE e.expires_ms > (extract(epoch FROM clock_timestamp()) * 1000)::bigint AND EXISTS (SELECT 1 FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2 AND NOT retired)";
+const RESOLVE_QUERY: &str = "SELECT e.fingerprint,e.token,CASE WHEN sum(octet_length(e.sealed)) OVER () <= 1048576 THEN e.sealed END AS sealed,e.expires_ms FROM (SELECT DISTINCT unnest($3::text[]) AS token) requested CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND token=requested.token OFFSET 0) e WHERE e.expires_ms > (extract(epoch FROM clock_timestamp()) * 1000)::bigint AND EXISTS (SELECT 1 FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2 AND NOT retired)";
 
-const INTERN_LOOKUP_QUERY: &str = "SELECT e.fingerprint,e.token,e.sealed,e.expires_ms FROM unnest($3::text[]) requested(fingerprint) CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND fingerprint=requested.fingerprint OFFSET 0) e";
+const RETIRE_DELETE_QUERY: &str = "DELETE FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND (tenant || ':' || context)=($1 || ':' || $2)";
+
+const INTERN_LOOKUP_QUERY: &str = "SELECT e.fingerprint,e.token,CASE WHEN sum(octet_length(e.sealed)) OVER () <= 1048576 THEN e.sealed END AS sealed,e.expires_ms FROM (SELECT DISTINCT unnest($3::text[]) AS fingerprint) requested CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND fingerprint=requested.fingerprint OFFSET 0) e";
 
 /// Operator-applied schema. Runtime startup never changes schema or privileges.
 pub const SCHEMA: &str = include_str!("schema.sql");
@@ -54,7 +58,10 @@ fn entry(row: sqlx::postgres::PgRow) -> Result<Entry, Error> {
     Ok(Entry {
         fingerprint: row.try_get("fingerprint").map_err(|_| Error::Integrity)?,
         token: row.try_get("token").map_err(|_| Error::Integrity)?,
-        sealed: row.try_get("sealed").map_err(|_| Error::Integrity)?,
+        sealed: row
+            .try_get::<Option<String>, _>("sealed")
+            .map_err(|_| Error::Integrity)?
+            .ok_or(Error::Capacity)?,
         expires_ms: row.try_get("expires_ms").map_err(|_| Error::Integrity)?,
     })
 }
@@ -117,6 +124,7 @@ impl TokenStore for Postgres {
                 .execute(&mut *tx).await.map_err(|e| if e.as_database_error().is_some_and(|e| e.is_unique_violation()) { Error::Integrity } else { Error::Unavailable })?;
             found.extend(inserts);
         }
+        response_budget(candidates.iter().filter_map(|e| found.get(&e.fingerprint)))?;
         let result = candidates
             .iter()
             .map(|e| found.get(&e.fingerprint).cloned().ok_or(Error::Integrity))
@@ -135,7 +143,7 @@ impl TokenStore for Postgres {
         let rows = sqlx::query(RESOLVE_QUERY)
             .bind(&scope.tenant)
             .bind(&scope.context)
-            .bind(tokens)
+            .bind(unique_refs(tokens))
             .fetch_all(&mut *tx)
             .await
             .map_err(|_| Error::Unavailable)?;
@@ -145,6 +153,7 @@ impl TokenStore for Postgres {
             found.insert(e.token.clone(), e);
         }
         tx.commit().await.map_err(|_| Error::Unavailable)?;
+        response_budget(tokens.iter().filter_map(|token| found.get(token)))?;
         Ok(tokens
             .iter()
             .map(|token| found.get(token).cloned())
@@ -163,7 +172,7 @@ impl TokenStore for Postgres {
         .execute(&mut *tx)
         .await
         .map_err(|_| Error::Unavailable)?;
-        sqlx::query("DELETE FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2")
+        sqlx::query(RETIRE_DELETE_QUERY)
             .bind(&scope.tenant)
             .bind(&scope.context)
             .execute(&mut *tx)
@@ -281,5 +290,41 @@ mod tests {
         }
         tx.rollback().await.unwrap();
         store.retire(&scope).await.unwrap();
+        // Fill every partition with unrelated scopes, then inspect retirement
+        // under the restricted role before ANALYZE can mask a missing index.
+        let entries: Vec<_> = (0..8)
+            .map(|n| Entry {
+                fingerprint: format!("{n:064x}"),
+                token: format!("[PERSON_{n}]"),
+                sealed: "synthetic ciphertext".into(),
+                expires_ms: chrono::Utc::now().timestamp_millis() + 60000,
+            })
+            .collect();
+        for n in 0..512 {
+            let foreign = Scope {
+                tenant: format!("synthetic_tenant_{n}"),
+                context: format!("synthetic_context_{n}"),
+            };
+            store.intern(&foreign, &entries).await.unwrap();
+        }
+        let target = Scope {
+            tenant: "synthetic_retirement_tenant".into(),
+            context: "synthetic_retirement_context".into(),
+        };
+        store.intern(&target, &entries).await.unwrap();
+        let mut tx = store.begin(&target).await.unwrap();
+        let query = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {RETIRE_DELETE_QUERY}");
+        let plan: serde_json::Value = sqlx::query_scalar(&query)
+            .bind(&target.tenant)
+            .bind(&target.context)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+        let mut visited = 0;
+        work(&plan[0]["Plan"], &mut visited);
+        println!("Scoped retirement: mapping_rows_visited={visited}");
+        assert_eq!(visited, 8, "retirement scanned unrelated contexts");
+        tx.rollback().await.unwrap();
+        store.retire(&target).await.unwrap();
     }
 }

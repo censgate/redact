@@ -16,12 +16,40 @@ use aes_gcm::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 
 /// Maximum references or values in one atomic storage operation.
 pub const MAX_BATCH: usize = 256;
 /// Maximum aggregate sealed bytes in an intern operation.
 pub const MAX_BATCH_BYTES: usize = 1024 * 1024;
+/// Maximum restored plaintext bytes, including duplicate expansion.
+pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
+pub(crate) fn unique_refs(tokens: &[String]) -> Vec<String> {
+    tokens
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+pub(crate) fn response_budget<'a>(entries: impl Iterator<Item = &'a Entry>) -> Result<(), Error> {
+    let mut bytes = 0usize;
+    for entry in entries {
+        bytes = bytes
+            .checked_add(entry.sealed.len())
+            .ok_or(Error::Capacity)?;
+        if bytes > MAX_BATCH_BYTES {
+            return Err(Error::Capacity);
+        }
+    }
+    Ok(())
+}
 
 /// Content-free failures. Backend diagnostics never escape this boundary.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -250,6 +278,7 @@ impl Vault {
         let results = tokio::time::timeout(self.timeout, self.store.intern(scope, &candidates))
             .await
             .map_err(|_| Error::Unavailable)??;
+        validate(&results).map_err(|_| Error::Integrity)?;
         if results.len() != candidates.len()
             || results
                 .iter()
@@ -272,23 +301,53 @@ impl Vault {
         scope: &Scope,
         tokens: &[String],
     ) -> Result<Vec<Option<String>>, Error> {
+        let deadline = tokio::time::Instant::now() + self.timeout;
         let _permit = self.admission.try_acquire().map_err(|_| Error::Busy)?;
         validate_refs(tokens)?;
-        let entries = tokio::time::timeout(self.timeout, self.store.resolve(scope, tokens))
+        let unique = unique_refs(tokens);
+        let entries = tokio::time::timeout_at(deadline, self.store.resolve(scope, &unique))
             .await
             .map_err(|_| Error::Unavailable)??;
-        if entries.len() != tokens.len() {
+        if entries.len() != unique.len() {
             return Err(Error::Integrity);
         }
-        entries
+        response_budget(entries.iter().flatten())?;
+        let mut found = BTreeMap::new();
+        for (entry, token) in entries.iter().zip(&unique) {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(Error::Unavailable);
+            }
+            match entry {
+                Some(e) if &e.token == token => {
+                    found.insert(token.as_str(), self.open(scope, e)?);
+                }
+                Some(_) => return Err(Error::Integrity),
+                None => {}
+            }
+            // Include crypto work in the deadline; no detached worker can
+            // complete later and release a response after cancellation.
+            tokio::task::yield_now().await;
+        }
+        let mut bytes = 0usize;
+        for token in tokens {
+            bytes = bytes
+                .checked_add(found.get(token.as_str()).map_or(0, String::len))
+                .ok_or(Error::Capacity)?;
+            if bytes > MAX_RESPONSE_BYTES {
+                return Err(Error::Capacity);
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Error::Unavailable);
+        }
+        let result = tokens
             .iter()
-            .zip(tokens)
-            .map(|(entry, token)| match entry {
-                Some(e) if &e.token == token => self.open(scope, e).map(Some),
-                Some(_) => Err(Error::Integrity),
-                None => Ok(None),
-            })
-            .collect()
+            .map(|token| found.get(token.as_str()).cloned())
+            .collect();
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Error::Unavailable);
+        }
+        Ok(result)
     }
 
     /// Permanently retire an authorized context, with bounded admission/deadline.
