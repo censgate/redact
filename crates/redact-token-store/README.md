@@ -142,6 +142,21 @@ Never use harness dev-server credentials outside disposable tests.
 
 ## Evidence and release gates
 
+Gateway errors preserve typed storage outcomes: invalid requests return 400,
+integrity failures 409, retired identities 410, capacity limits 413, contention or
+admission exhaustion 429, and unavailable dependencies 503. Bodies expose only
+static error categories. The 256-reference/mapping limit is a terminal response;
+the gateway does not partially release a request or retry it as an outage. Platform
+tests ensure terminal statuses do not retry or advance legacy shards. OpenBao's
+non-CAS HTTP 400 rejection is terminal; HTTP 413 and 429 retain capacity/busy semantics.
+
+Platform must be upgraded with #445 before indexed writes. Native UUID-u128 numeric
+labels are not machine-sized counters. For a retained legacy shard N, Platform
+stores the routing envelope `N * 2^128 + native_label`, then strips it before restore.
+Small legacy labels keep their existing `N * 10000 + label` encoding. Mixed native,
+legacy and enveloped labels must restore through the matching context after restart.
+This changes routing, never the target's token identity or principal-wide scope.
+
 Contract tests cover concurrency, lost acknowledgements, principal/tenant isolation,
 legacy alias preservation, expiry reservations, ciphertext integrity, response/crypto
 budgets and deadlines. Real gateway tests migrate an OpenBao source into both targets,
@@ -163,7 +178,9 @@ No package was published and no live resource or feature flag was changed.
 `cargo fmt --all -- --check`,
 `cargo clippy -p redact-token-store -p redact-gateway --all-targets -- -D warnings`,
 and `cargo test -p redact-token-store` run dependency-free checks. Real-backend tests
-are ignored by default. The following harness creates disposable local PostgreSQL
+are ignored by default in ordinary Cargo runs, but `.github/workflows/token-store.yml`
+runs them on every pull request against actual PostgreSQL and checksum-pinned OpenBao.
+The following harness creates disposable local PostgreSQL
 and OpenBao instances, two databases, restricted roles and synthetic data:
 
 ```sh
@@ -172,6 +189,13 @@ TOKEN_STORE_PG_SHARE=/path/to/postgresql/share \
 TOKEN_STORE_BAO_BIN=/path/to/bao \
 python3 scripts/token-store/test-local.py
 ```
+
+For the cross-repository mixed-shard migration contract, also set
+`TOKEN_STORE_PLATFORM_TEST_DIR` to the companion Platform #445 checkout and put
+Go 1.26 on `PATH`. The gateway integration tests start disposable legacy/indexed
+loopback HTTP routers and run Platform's actual Go client against both backends.
+This optional private-checkout check passed locally; public Redact CI runs the
+backend and HTTP migration contracts without requiring private repository access.
 
 For benchmarks build `cargo build --release -p redact-token-store --example compare`
 and add `TOKEN_STORE_RUN_BENCH=1`, `TOKEN_STORE_BENCH_OUTPUT=/tmp/token-store-results`

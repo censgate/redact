@@ -123,6 +123,33 @@ async fn exercise(target: Arc<dyn TokenStore>) {
         .last_request()
         .to_string()
         .contains("fixture@example.invalid"));
+    let too_many = (1..=257)
+        .map(|n| format!("[EMAIL_ADDRESS_{n}]"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let capacity = post_json_with_headers(
+        router.clone(),
+        "/v1/restore",
+        json!({"text":too_many,"session_id":context}),
+        &headers,
+    )
+    .await;
+    assert_eq!(capacity.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(capacity.json()["error"]["type"], "token_store_capacity");
+    let too_many_values = (1..=600)
+        .map(|n| format!("fixture{n}@example.invalid"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let capacity = post_json_with_headers(
+        router.clone(),
+        "/v1/redact",
+        json!({"text":too_many_values,"session_id":context}),
+        &headers,
+    )
+    .await;
+    assert_eq!(capacity.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(!capacity.body.contains("@example.invalid"));
+    platform_client_contract(original, router.clone()).await;
     let erased = delete_json_with_headers(
         router.clone(),
         "/v1/vault/context",
@@ -148,7 +175,51 @@ async fn exercise(target: Arc<dyn TokenStore>) {
         &headers,
     )
     .await;
-    assert_eq!(rebound.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(rebound.status, StatusCode::GONE);
+    assert_eq!(rebound.json()["error"]["type"], "token_store_retired");
+}
+
+// Optional cross-repository check uses Platform's real Go client against both
+// real HTTP surfaces. Ordinary CI still exercises every backend/migration test;
+// the private Platform checkout is supplied explicitly by the caller.
+async fn platform_client_contract(legacy: axum::Router, indexed: axum::Router) {
+    let Ok(directory) = std::env::var("TOKEN_STORE_PLATFORM_TEST_DIR") else {
+        return;
+    };
+    let legacy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let indexed_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let legacy_url = format!("http://{}", legacy_listener.local_addr().unwrap());
+    let indexed_url = format!("http://{}", indexed_listener.local_addr().unwrap());
+    let legacy_server = tokio::spawn(async { axum::serve(legacy_listener, legacy).await.unwrap() });
+    let indexed_server =
+        tokio::spawn(async { axum::serve(indexed_listener, indexed).await.unwrap() });
+    let mut command = tokio::process::Command::new("go");
+    command
+        .args([
+            "test",
+            "./internal/privacy",
+            "-run",
+            "^TestLiveIndexedShardMigration$",
+            "-count=1",
+            "-v",
+        ])
+        .current_dir(directory)
+        .env("PLATFORM_TEST_LEGACY_GATEWAY_URL", legacy_url)
+        .env("PLATFORM_TEST_INDEXED_GATEWAY_URL", indexed_url)
+        .kill_on_drop(true);
+    let result = tokio::time::timeout(Duration::from_secs(120), command.output()).await;
+    legacy_server.abort();
+    indexed_server.abort();
+    let output = result
+        .expect("Platform client contract deadline")
+        .expect("run Platform Go client");
+    assert!(
+        output.status.success(),
+        "Platform client contract failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    println!("Platform live mixed-shard client contract passed");
 }
 
 #[tokio::test]

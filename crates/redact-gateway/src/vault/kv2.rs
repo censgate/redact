@@ -344,8 +344,8 @@ impl Kv2Store {
                     if verify_missing {
                         match kv2::read_metadata(&inner.client, &self.mount, path).await {
                             Ok(_) => {
-                                return Err(TokenMapError::Backend(
-                                    "legacy source requires recovery".into(),
+                                return Err(TokenMapError::Indexed(
+                                    redact_token_store::Error::Integrity,
                                 ))
                             }
                             Err(ClientError::APIError { code: 404, .. }) => {}
@@ -402,9 +402,7 @@ impl TokenMapStore for Kv2Store {
                     || metadata.oldest_version > 1
                     || metadata.versions.len() != cas as usize
                 {
-                    return Err(TokenMapError::Backend(
-                        "legacy history needs offline identity recovery".into(),
-                    ));
+                    return Err(TokenMapError::Indexed(redact_token_store::Error::Integrity));
                 }
                 let current: std::collections::HashMap<_, _> =
                     entry.mappings.iter().map(|m| (&m.token, m)).collect();
@@ -419,9 +417,7 @@ impl TokenMapStore for Kv2Store {
                                 || new.sealed_value != old.sealed_value
                         })
                     }) {
-                        return Err(TokenMapError::Backend(
-                            "legacy identity history changed; offline recovery required".into(),
-                        ));
+                        return Err(TokenMapError::Indexed(redact_token_store::Error::Integrity));
                     }
                 }
             }
@@ -449,7 +445,7 @@ impl TokenMapStore for Kv2Store {
                 Err(err) => return Err(map_client_error(err)),
             }
         }
-        Err(TokenMapError::Unavailable("legacy freeze busy".into()))
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
     }
 
     async fn clear_frozen(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
@@ -457,7 +453,7 @@ impl TokenMapStore for Kv2Store {
         for attempt in 1..=PUT_CAS_ATTEMPTS {
             let (mut entry, cas) = self.read_snapshot(&path, true).await?;
             if !entry.frozen {
-                return Err(TokenMapError::Conflict("source is not frozen".into()));
+                return Err(TokenMapError::Indexed(redact_token_store::Error::Integrity));
             }
             if entry.cleanup_through == 0 {
                 entry.cleanup_through = u64::from(cas);
@@ -496,9 +492,7 @@ impl TokenMapStore for Kv2Store {
             drop(inner);
             tokio::time::sleep(cas_backoff(attempt)).await;
         }
-        Err(TokenMapError::Unavailable(
-            "legacy cleanup pending; retry".into(),
-        ))
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
     }
     fn backend_name(&self) -> &'static str {
         "vault_kv2"

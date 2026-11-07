@@ -405,19 +405,13 @@ impl RequestScope {
             let replacements = indexed
                 .commit(&self.tenant, &self.token_map_session, &minted)
                 .await
-                .map_err(|_| {
-                    GatewayError::DependencyUnavailable("token store commit failed closed".into())
-                })?;
+                .map_err(GatewayError::from)?;
             crate::vault::indexed::replace_payload(payload, &replacements);
             if self.profile.restore_responses {
                 self.indexed_lookup = indexed
                     .lookup(&self.tenant, &self.token_map_session, &payload.to_string())
                     .await
-                    .map_err(|_| {
-                        GatewayError::DependencyUnavailable(
-                            "token store resolve failed closed".into(),
-                        )
-                    })?;
+                    .map_err(GatewayError::from)?;
             }
             return Ok(());
         }
@@ -1502,12 +1496,7 @@ async fn redact_endpoint(
                 .await
             {
                 Ok(replacements) => replacements,
-                Err(_) => {
-                    return GatewayError::DependencyUnavailable(
-                        "token store commit failed closed".into(),
-                    )
-                    .into_response()
-                }
+                Err(err) => return GatewayError::from(err).into_response(),
             };
             break (
                 crate::redact::token::restore_text(&text, &replacements).0,
@@ -1634,21 +1623,14 @@ async fn restore_endpoint(
             .await
         {
             Ok(lookup) => lookup,
-            Err(_) => {
-                return GatewayError::DependencyUnavailable(
-                    "token store resolve failed closed".into(),
-                )
-                .into_response()
-            }
+            Err(err) => return GatewayError::from(err).into_response(),
         };
         let (text, outcome) = crate::redact::token::restore_text(&request.text, &lookup);
+        let response = Json(json!({"text":text,"session_id":session_id,"restored":outcome.restored,"missing":outcome.missing})).into_response();
         if started.elapsed() >= std::time::Duration::from_secs(10) {
-            return GatewayError::DependencyUnavailable(
-                "token store request deadline exceeded".into(),
-            )
-            .into_response();
+            return GatewayError::from(redact_token_store::Error::Unavailable).into_response();
         }
-        return Json(json!({"text":text,"session_id":session_id,"restored":outcome.restored,"missing":outcome.missing})).into_response();
+        return response;
     }
 
     // Missing and foreign-subject sessions both yield an empty mapping list so
@@ -1768,7 +1750,7 @@ fn require_authenticated_subject(auth: &AuthContext) -> Result<&str, GatewayErro
 }
 
 fn token_map_unavailable(err: TokenMapError) -> GatewayError {
-    GatewayError::DependencyUnavailable(format!("token map backend is unavailable: {err}"))
+    GatewayError::from(err)
 }
 
 fn require_token_map(state: &AppState) -> Result<(), GatewayError> {

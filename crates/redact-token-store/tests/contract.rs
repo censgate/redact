@@ -568,7 +568,31 @@ async fn openbao_contract() {
         Duration::from_secs(5),
     )
     .unwrap();
-    contract(Arc::new(store)).await;
+    let store = Arc::new(store);
+    contract(store.clone()).await;
+    if std::env::var("TOKEN_STORE_BAO_JSON_STRINGS").is_err() {
+        // Default OpenBao rejects this request at its JSON string limit before
+        // CAS. It must be terminal, not a retryable outage or a partial commit.
+        let vault = facade(store);
+        let scope = vault
+            .scope(
+                "synthetic-tenant",
+                "synthetic-owner",
+                &uuid::Uuid::new_v4().to_string(),
+            )
+            .unwrap();
+        let values: Vec<_> = (0..128)
+            .map(|n| ("PERSON".into(), format!("Synthetic Person {n}")))
+            .collect();
+        assert_eq!(
+            vault.intern(&scope, &values, Duration::from_secs(60)).await,
+            Err(Error::Invalid)
+        );
+        assert_eq!(
+            vault.context_state(&scope).await.unwrap(),
+            ContextState::Absent
+        );
+    }
 }
 
 #[tokio::test]

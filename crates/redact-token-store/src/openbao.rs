@@ -132,6 +132,12 @@ impl OpenBao {
         if response.status().is_success() {
             return Ok(true);
         }
+        if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            return Err(Error::Capacity);
+        }
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(Error::Busy);
+        }
         if response.status() == StatusCode::BAD_REQUEST {
             let body = bounded_json(response).await?;
             if body
@@ -146,6 +152,9 @@ impl OpenBao {
             {
                 return Ok(false);
             }
+            // A deterministic backend request rejection is terminal. Only a
+            // recognized CAS conflict retries this document automatically.
+            return Err(Error::Invalid);
         }
         Err(Error::Unavailable)
     }

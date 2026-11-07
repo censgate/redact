@@ -2,7 +2,7 @@
 use super::{CredentialLineage, LineagePersistError, TokenMapError, TokenMapStore};
 use crate::redact::token::{Dek, TokenMapping};
 use redact_token_store::{
-    ContextState, LegacyValue, Scope, TokenStore, Vault, MAX_BATCH, MAX_RESPONSE_BYTES,
+    ContextState, Error, LegacyValue, Scope, TokenStore, Vault, MAX_BATCH, MAX_RESPONSE_BYTES,
 };
 use std::{
     collections::HashMap,
@@ -21,18 +21,18 @@ pub async fn build(
     dek: Arc<Dek>,
     ttl_secs: u64,
 ) -> Result<IndexedStore, TokenMapError> {
-    let routing =
-        serde_json::to_vec(&(&settings.shard_ids, &settings.ownership)).map_err(failure)?;
+    let routing = serde_json::to_vec(&(&settings.shard_ids, &settings.ownership))
+        .map_err(|_| failure(Error::Invalid))?;
     let commitment = Vault::configuration_commitment(&dek.token_store_key(), &routing);
     let mut shards = Vec::new();
     for (id, env_name) in settings.shard_ids.iter().zip(&settings.connection_env) {
-        let url = std::env::var(env_name).map_err(failure)?;
+        let url = std::env::var(env_name).map_err(unavailable)?;
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(16)
             .acquire_timeout(Duration::from_secs(2))
             .connect(&url)
             .await
-            .map_err(failure)?;
+            .map_err(unavailable)?;
         let shard = redact_token_store::postgres::Postgres::new(pool)
             .await
             .map_err(failure)?;
@@ -46,7 +46,7 @@ pub async fn build(
         .ownership
         .clone()
         .try_into()
-        .map_err(|_| failure("routing length"))?;
+        .map_err(|_| failure(Error::Invalid))?;
     let target =
         redact_token_store::postgres::ShardedPostgres::new(shards, ownership).map_err(failure)?;
     IndexedStore::new(Arc::new(target), source, dek, Duration::from_secs(ttl_secs))
@@ -69,8 +69,21 @@ impl std::fmt::Debug for IndexedStore {
             .finish_non_exhaustive()
     }
 }
-fn failure(_: impl std::fmt::Display) -> TokenMapError {
-    TokenMapError::Unavailable("indexed token operation failed closed".into())
+fn failure(error: Error) -> TokenMapError {
+    TokenMapError::Indexed(error)
+}
+fn unavailable(_: impl std::fmt::Display) -> TokenMapError {
+    failure(Error::Unavailable)
+}
+fn source_failure(error: TokenMapError) -> TokenMapError {
+    match error {
+        TokenMapError::Indexed(error) => failure(error),
+        TokenMapError::Conflict(_) => failure(Error::Integrity),
+        TokenMapError::Disabled => failure(Error::Invalid),
+        // Legacy transport diagnostics may include backend paths. Keep the
+        // indexed boundary content-free while retaining typed outcomes.
+        _ => failure(Error::Unavailable),
+    }
 }
 impl IndexedStore {
     /// Maintenance worker entry point for an authorized subject-bound context.
@@ -95,7 +108,7 @@ impl IndexedStore {
         retention: Duration,
     ) -> Result<Self, TokenMapError> {
         if retention.is_zero() || source.backend_name() == "off" || source.indexed().is_some() {
-            return Err(failure("invalid source"));
+            return Err(failure(Error::Invalid));
         }
         let backend = target.backend();
         Ok(Self {
@@ -123,9 +136,13 @@ impl IndexedStore {
                 source,
                 legacy_clean: false,
             } => source,
-            ContextState::Active => return Err(failure("unverified native namespace")),
+            ContextState::Active => return Err(failure(Error::Integrity)),
             ContextState::Absent => {
-                let frozen = self.source.freeze(tenant, context).await?;
+                let frozen = self
+                    .source
+                    .freeze(tenant, context)
+                    .await
+                    .map_err(source_failure)?;
                 if frozen.mappings.len() > redact_token_store::MAX_IMPORT_ENTRIES
                     || frozen
                         .mappings
@@ -134,7 +151,7 @@ impl IndexedStore {
                         .sum::<usize>()
                         > redact_token_store::MAX_IMPORT_BYTES
                 {
-                    return Err(failure("import capacity"));
+                    return Err(failure(Error::Capacity));
                 }
                 let values: Vec<_> = frozen
                     .mappings
@@ -143,7 +160,10 @@ impl IndexedStore {
                         Ok(LegacyValue {
                             token: m.token.clone(),
                             kind: m.entity_type.clone(),
-                            original: self.dek.open(&m.sealed_value).map_err(failure)?,
+                            original: self
+                                .dek
+                                .open(&m.sealed_value)
+                                .map_err(|_| failure(Error::Integrity))?,
                             expires_ms: frozen.expires_ms,
                         })
                     })
@@ -154,7 +174,10 @@ impl IndexedStore {
                     .map_err(failure)?
             }
         };
-        self.source.clear_frozen(tenant, context).await?;
+        self.source
+            .clear_frozen(tenant, context)
+            .await
+            .map_err(source_failure)?;
         self.vault
             .complete_legacy_cleanup(&scope, &source)
             .await
@@ -170,7 +193,7 @@ impl IndexedStore {
     ) -> Result<HashMap<String, String>, TokenMapError> {
         tokio::time::timeout(Duration::from_secs(10), async {
             if mappings.len() > MAX_BATCH {
-                return Err(failure("batch capacity"));
+                return Err(failure(Error::Capacity));
             }
             let scope = self.prepare(tenant, context).await?;
             let values: Vec<_> = mappings
@@ -178,7 +201,9 @@ impl IndexedStore {
                 .map(|m| {
                     Ok((
                         m.entity_type.clone(),
-                        self.dek.open(&m.sealed_value).map_err(failure)?,
+                        self.dek
+                            .open(&m.sealed_value)
+                            .map_err(|_| failure(Error::Integrity))?,
                     ))
                 })
                 .collect::<Result<_, TokenMapError>>()?;
@@ -194,7 +219,7 @@ impl IndexedStore {
                 .collect())
         })
         .await
-        .map_err(failure)?
+        .map_err(unavailable)?
     }
     /// Fetch/decrypt distinct references only. Bounds input and expanded output.
     pub async fn lookup(
@@ -206,14 +231,14 @@ impl IndexedStore {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         tokio::time::timeout_at(deadline, async {
             if text.len() > MAX_RESPONSE_BYTES {
-                return Err(failure("input capacity"));
+                return Err(failure(Error::Capacity));
             }
             let mut refs = std::collections::BTreeMap::<String, usize>::new();
             for m in REFERENCES.find_iter(text) {
                 *refs.entry(m.as_str().into()).or_default() += 1;
             }
             if refs.len() > MAX_BATCH {
-                return Err(failure("reference capacity"));
+                return Err(failure(Error::Capacity));
             }
             let scope = self.prepare(tenant, context).await?;
             let tokens: Vec<_> = refs.keys().cloned().collect();
@@ -228,22 +253,22 @@ impl IndexedStore {
                                 .len()
                                 .saturating_sub(token.len())
                                 .checked_mul(refs[&token])
-                                .ok_or_else(|| failure("response capacity"))?,
+                                .ok_or_else(|| failure(Error::Capacity))?,
                         )
-                        .ok_or_else(|| failure("response capacity"))?;
+                        .ok_or_else(|| failure(Error::Capacity))?;
                     if size > MAX_RESPONSE_BYTES {
-                        return Err(failure("response capacity"));
+                        return Err(failure(Error::Capacity));
                     }
                     lookup.insert(token, original);
                 }
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(failure("deadline"));
+                return Err(failure(Error::Unavailable));
             }
             Ok(lookup)
         })
         .await
-        .map_err(failure)?
+        .map_err(unavailable)?
     }
 }
 #[async_trait::async_trait]
@@ -255,10 +280,10 @@ impl TokenMapStore for IndexedStore {
         Some(self)
     }
     async fn put(&self, _: &str, _: &str, _: &[TokenMapping]) -> Result<(), TokenMapError> {
-        Err(failure("whole-map operation disabled"))
+        Err(failure(Error::Invalid))
     }
     async fn get(&self, _: &str, _: &str) -> Result<Vec<TokenMapping>, TokenMapError> {
-        Err(failure("whole-map operation disabled"))
+        Err(failure(Error::Invalid))
     }
     async fn delete(&self, tenant: &str, context: &str) -> Result<(), TokenMapError> {
         self.purge(tenant, context).await
@@ -268,8 +293,14 @@ impl TokenMapStore for IndexedStore {
             .retire(&self.scope(tenant, context)?)
             .await
             .map_err(failure)?;
-        self.source.freeze(tenant, context).await?;
-        self.source.clear_frozen(tenant, context).await
+        self.source
+            .freeze(tenant, context)
+            .await
+            .map_err(source_failure)?;
+        self.source
+            .clear_frozen(tenant, context)
+            .await
+            .map_err(source_failure)
     }
     async fn exists(&self, tenant: &str, context: &str) -> Result<bool, TokenMapError> {
         let retired = matches!(
@@ -284,7 +315,10 @@ impl TokenMapStore for IndexedStore {
                 .retire(&self.scope(tenant, context)?)
                 .await
                 .map_err(failure)?;
-            self.source.clear_frozen(tenant, context).await?;
+            self.source
+                .clear_frozen(tenant, context)
+                .await
+                .map_err(source_failure)?;
         }
         Ok(!retired)
     }
@@ -318,7 +352,7 @@ impl TokenMapStore for IndexedStore {
             .context_state(&self.scope("health-probe", "read-only")?)
             .await
             .map_err(failure)?;
-        self.source.health().await
+        self.source.health().await.map_err(source_failure)
     }
 }
 

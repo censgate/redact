@@ -89,7 +89,10 @@ Any proposed performance targets should be reviewed separately from these result
 The same storage-only two-process workload was rerun with migration aliases,
 configuration metadata, expiry indexes and checkpointed retirement implemented.
 [Source SHA-256 manifest](token-store-20261107-v2-source.json) pins the measured
-storage files independently of commit metadata. The successful-request latency
+storage files at commit `197e60d669e2b938fd7fe91bc2d404a100f55950` independently of
+commit metadata. Later HTTP error-classification fixes are not part of that measured
+snapshot; the recorded numbers have not been relabeled as measurements of those fixes.
+The successful-request latency
 and environment limitations above still apply. Cleanup now retries bounded retirement
 outside the measured request scenarios. This run does not measure migration latency.
 

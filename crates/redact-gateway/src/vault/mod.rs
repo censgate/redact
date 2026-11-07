@@ -30,6 +30,9 @@ pub use kv2::Kv2Store;
 /// Failures from a [`TokenMapStore`] backend.
 #[derive(Debug, thiserror::Error)]
 pub enum TokenMapError {
+    /// Content-free typed failures from purpose-built storage.
+    #[error(transparent)]
+    Indexed(#[from] redact_token_store::Error),
     /// The configured backend cannot be reached or constructed.
     #[error("token map backend is unavailable: {0}")]
     Unavailable(String),
