@@ -2,7 +2,7 @@
 
 This is a local storage-only experiment for the new `redact-token-store` crate,
 not a production gateway or NER benchmark. There are no approved latency SLOs in
-this report. The crate is not enabled in the gateway.
+this report. Gateway integration is opt-in and was not enabled on any deployed service.
 
 ## Setup and workload
 
@@ -29,7 +29,9 @@ this report. The crate is not enabled in the gateway.
   Zero samples means no successful latency measurement, not zero latency. Error
   categories are not separated in the CSV. Setup-capacity rows are not requests.
 
-## Measured results
+## Initial measured results
+
+Initial source: `377b4891cd803ad2ca8f04d297258f80361743f0`.
 
 One-reference resolve, one concurrent task, 32 successful requests per worker:
 
@@ -81,3 +83,36 @@ many tenant/principal distributions and skew, same-context multi-process races,
 multiple database shards, cold/warm repetition, resource/bytes/SQL-operation metrics,
 error categorization, backend outage/restart/failover, cancellation and key rotation.
 Any proposed performance targets should be reviewed separately from these results.
+
+## Follow-up measurement after migration and cleanup implementation
+
+The same storage-only two-process workload was rerun with migration aliases,
+configuration metadata, expiry indexes and checkpointed retirement implemented.
+[Source SHA-256 manifest](token-store-20261107-v2-source.json) pins the measured
+storage files independently of commit metadata. The successful-request latency
+and environment limitations above still apply. Cleanup now retries bounded retirement
+outside the measured request scenarios. This run does not measure migration latency.
+
+| Backend | Initial mappings | Worker 0 p50 / p99 (ms) | Worker 1 p50 / p99 (ms) |
+|---|---:|---:|---:|
+| PostgreSQL | 10 | 0.402 / 2.667 | 0.420 / 2.917 |
+| PostgreSQL | 1000 | 0.547 / 0.937 | 0.476 / 0.744 |
+| PostgreSQL | 10000 | 0.440 / 0.627 | 0.481 / 1.783 |
+| OpenBao KV v2 | 10 | 0.896 / 3.060 | 0.612 / 2.525 |
+| OpenBao KV v2 | 1000 | 5.468 / 8.271 | 5.893 / 10.723 |
+| OpenBao KV v2 | 10000 | setup capacity exceeded | setup capacity exceeded |
+
+PostgreSQL: **10,368 successful requests, zero errors**. OpenBao: **6,005 successful,
+907 failed requests**, plus two setup-capacity events after 1,536 mappings each.
+Raw [worker 0](token-store-20261107-v2-worker-0.csv) and
+[worker 1](token-store-20261107-v2-worker-1.csv) retain all scenarios and error counts.
+Errors remain aggregate counts; no latency percentile includes failed requests.
+
+Additional functional evidence, separate from the throughput experiment: two
+independent database shards preserve routing across replica objects, deny reads in
+the other shard, reject wrong generation/shard IDs, and keep the healthy shard
+usable after closing the other pool. Real HTTP tests migrate an OpenBao legacy
+source into PostgreSQL or OpenBao and preserve labels, principal isolation,
+concurrent reuse, tokenized provider requests and permanent erasure. These tests
+establish behavior; they do not establish production multi-shard throughput or
+network-outage/failover characteristics.

@@ -459,6 +459,9 @@ pub struct NerSettings {
 /// Token map backend settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultSettings {
+    /// Optional indexed target; legacy backend remains the migration/lineage source.
+    #[serde(default)]
+    pub indexed: Option<IndexedTokenSettings>,
     /// Selected backend.
     pub backend: VaultBackend,
     /// Base address of the KV v2 server.
@@ -490,6 +493,7 @@ pub struct VaultSettings {
 impl Default for VaultSettings {
     fn default() -> Self {
         Self {
+            indexed: None,
             backend: VaultBackend::Off,
             address: None,
             token: None,
@@ -504,6 +508,21 @@ impl Default for VaultSettings {
             data_encryption_key: None,
         }
     }
+}
+
+/// Explicit startup-only indexed-token migration configuration. Connection
+/// secrets live in named environment variables and are never serialized here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexedTokenSettings {
+    /// Stable logical shard names, in the same order as connection_env.
+    pub shard_ids: Vec<String>,
+    /// Environment variable names holding PostgreSQL runtime URLs.
+    pub connection_env: Vec<String>,
+    /// Immutable ownership of all 256 routing buckets; each value is a shard index.
+    pub ownership: Vec<usize>,
+    /// Explicit acknowledgement that old binaries and in-flight mutations were drained.
+    pub legacy_writers_drained: bool,
 }
 
 /// OIDC resource-server settings.
@@ -708,6 +727,29 @@ impl ResolvedConfig {
                     .to_string(),
             ));
         }
+        if let Some(indexed) = &self.vault.indexed {
+            if self.auth.mode == AuthMode::None
+                || self.vault.backend != VaultBackend::VaultKv2
+                || self.vault.data_encryption_key.is_none()
+                || !indexed.legacy_writers_drained
+                || indexed.shard_ids.is_empty()
+                || indexed.shard_ids.len() != indexed.connection_env.len()
+                || indexed.ownership.len() != 256
+                || indexed
+                    .ownership
+                    .iter()
+                    .any(|n| *n >= indexed.shard_ids.len())
+                || indexed.shard_ids.iter().any(|s| s.is_empty())
+                || indexed
+                    .shard_ids
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    != indexed.shard_ids.len()
+            {
+                return Err(ConfigError::Invalid("indexed storage requires authentication, a durable key, a KV v2 migration source, drained legacy writers and a complete immutable shard map".into()));
+            }
+        }
         if self.vault.backend == VaultBackend::VaultKv2 && self.vault.address.is_none() {
             return Err(ConfigError::Invalid(
                 "token map backend is vault_kv2 but no address is configured".to_string(),
@@ -851,6 +893,9 @@ impl ResolvedConfig {
     /// and would therefore only take effect after a restart.
     pub fn restart_required_changes(&self, next: &ResolvedConfig) -> Vec<&'static str> {
         let mut changed = Vec::new();
+        if self.vault.indexed != next.vault.indexed {
+            changed.push("vault.indexed");
+        }
 
         if self.server.host != next.server.host {
             changed.push("server.host");

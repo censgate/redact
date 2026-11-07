@@ -64,6 +64,15 @@ impl GatewayServer {
         let tokens = build_store(&config.vault)
             .await
             .context("could not initialize the token map backend")?;
+        let tokens: Arc<dyn TokenMapStore> = if let Some(settings) = &config.vault.indexed {
+            Arc::new(
+                crate::vault::indexed::build(settings, tokens, dek.clone(), config.vault.ttl_secs)
+                    .await
+                    .context("could not validate indexed token-store generation")?,
+            )
+        } else {
+            tokens
+        };
         if tokens.backend_name() != "off" {
             if let Err(err) = tokens.health().await {
                 // Startup continues so a transient outage does not prevent the

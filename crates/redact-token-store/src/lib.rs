@@ -6,8 +6,12 @@
 //! idempotent, including after an uncertain commit. Retired contexts cannot be
 //! reopened. Expired identities remain reserved and cannot be rebound.
 
+mod migration;
 pub mod openbao;
 pub mod postgres;
+pub use migration::{
+    ContextState, LegacyImport, LegacyValue, MAX_IMPORT_BYTES, MAX_IMPORT_ENTRIES,
+};
 
 use aes_gcm::{
     aead::{Aead, Payload},
@@ -109,6 +113,37 @@ pub trait TokenStore: Send + Sync {
     /// Permanently retire the context and destroy its ciphertext. Retryable.
     /// A successful result must fence concurrent and future interns.
     async fn retire(&self, scope: &Scope) -> Result<(), Error>;
+
+    /// Clear expired ciphertext in bounded batches, preserving token/equality
+    /// reservations. Return the number cleared; callers retry until zero.
+    async fn purge_expired(&self, _scope: &Scope, _limit: usize) -> Result<usize, Error> {
+        Err(Error::Invalid)
+    }
+
+    /// Atomic reuse with ordered legacy equality aliases. Aliases are keyed
+    /// hashes, never plaintext. Backends without migration support use intern.
+    async fn intern_with_aliases(
+        &self,
+        scope: &Scope,
+        candidates: &[Entry],
+        _aliases: &[Vec<String>],
+    ) -> Result<Vec<Entry>, Error> {
+        self.intern(scope, candidates).await
+    }
+    /// Read migration/retirement state without enumerating token mappings.
+    async fn context_state(&self, _scope: &Scope) -> Result<ContextState, Error> {
+        Err(Error::Invalid)
+    }
+    /// Atomically import a frozen legacy snapshot, preserving every label and
+    /// equality alias. A repeated source digest is idempotent; other sources
+    /// and already-active contexts are rejected. Retirement always wins.
+    async fn import_legacy(&self, _scope: &Scope, _snapshot: &LegacyImport) -> Result<(), Error> {
+        Err(Error::Invalid)
+    }
+    /// Record that the frozen source's ciphertext and history were destroyed.
+    async fn complete_legacy_cleanup(&self, _scope: &Scope, _source: &str) -> Result<(), Error> {
+        Err(Error::Invalid)
+    }
 }
 
 pub(crate) fn validate(entries: &[Entry]) -> Result<(), Error> {
@@ -155,6 +190,14 @@ pub struct Vault {
 }
 
 impl Vault {
+    /// Stable commitment to key and routing configuration, stored by an operator
+    /// in each backend before startup. Runtime credentials must not modify it.
+    pub fn configuration_commitment(key: &[u8; 32], routing: &[u8]) -> String {
+        let config_key = blake3::derive_key("censgate.token-store.v1.configuration", key);
+        blake3::keyed_hash(&config_key, routing)
+            .to_hex()
+            .to_string()
+    }
     /// Construct a bounded service facade. Reject zero capacity/time budgets.
     pub fn new(
         store: Arc<dyn TokenStore>,
@@ -205,6 +248,7 @@ impl Vault {
         values: &[(String, String)],
         retention: Duration,
     ) -> Result<Vec<String>, Error> {
+        let deadline = tokio::time::Instant::now() + self.timeout;
         let _permit = self.admission.try_acquire().map_err(|_| Error::Busy)?;
         if values.len() > MAX_BATCH
             || retention.is_zero()
@@ -216,11 +260,13 @@ impl Vault {
             .timestamp_millis()
             .checked_add(i64::try_from(retention.as_millis()).map_err(|_| Error::Invalid)?)
             .ok_or(Error::Invalid)?;
-        let cipher =
-            Aes256Gcm::new_from_slice(&self.encryption_key).map_err(|_| Error::Integrity)?;
         let mut candidates = Vec::with_capacity(values.len());
+        let mut aliases = Vec::with_capacity(values.len());
         let mut dedupe: BTreeMap<String, Entry> = BTreeMap::new();
         for (kind, original) in values {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(Error::Unavailable);
+            }
             if kind.is_empty()
                 || kind.len() > 64
                 || !kind
@@ -240,56 +286,42 @@ impl Vault {
             )
             .to_hex()
             .to_string();
+            aliases.push(self.legacy_lookup_keys(scope, kind, original));
             if let Some(existing) = dedupe.get(&fingerprint) {
                 candidates.push(existing.clone());
                 continue;
             }
             let token = format!("[{}_{}]", kind, uuid::Uuid::new_v4().as_u128());
-            let aad = framed(&[
-                &scope.tenant,
-                &scope.context,
-                &fingerprint,
-                &token,
-                &expires_ms.to_string(),
-            ]);
-            let mut nonce = [0u8; 12];
-            rand::rng().fill_bytes(&mut nonce);
-            let ciphertext = cipher
-                .encrypt(
-                    &Nonce::from(nonce),
-                    Payload {
-                        msg: original.as_bytes(),
-                        aad: &aad,
-                    },
-                )
-                .map_err(|_| Error::Integrity)?;
-            let mut sealed = nonce.to_vec();
-            sealed.extend(ciphertext);
-            let entry = Entry {
-                fingerprint: fingerprint.clone(),
-                token,
-                sealed: STANDARD.encode(sealed),
-                expires_ms,
-            };
+            let entry = self.seal_value(scope, fingerprint.clone(), token, original, expires_ms)?;
             dedupe.insert(fingerprint, entry.clone());
             candidates.push(entry);
         }
         validate(&candidates)?;
-        let results = tokio::time::timeout(self.timeout, self.store.intern(scope, &candidates))
-            .await
-            .map_err(|_| Error::Unavailable)??;
+        let results = tokio::time::timeout_at(
+            deadline,
+            self.store.intern_with_aliases(scope, &candidates, &aliases),
+        )
+        .await
+        .map_err(|_| Error::Unavailable)??;
         validate(&results).map_err(|_| Error::Integrity)?;
-        if results.len() != candidates.len()
-            || results
-                .iter()
-                .zip(&candidates)
-                .any(|(a, b)| a.fingerprint != b.fingerprint)
-        {
+        if results.len() != candidates.len() {
             return Err(Error::Integrity);
         }
         // Authenticate even reused records before returning a reference.
-        for entry in &results {
-            self.open(scope, entry)?;
+        for ((entry, candidate), lookup) in results.iter().zip(&candidates).zip(&aliases) {
+            if tokio::time::Instant::now() >= deadline {
+                return Err(Error::Unavailable);
+            }
+            let original = self.open(scope, entry)?;
+            if entry.fingerprint != candidate.fingerprint
+                && !self.authentic_legacy_match(scope, entry, &original, lookup)
+            {
+                return Err(Error::Integrity);
+            }
+            tokio::task::yield_now().await;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Error::Unavailable);
         }
         Ok(results.into_iter().map(|e| e.token).collect())
     }
@@ -359,6 +391,56 @@ impl Vault {
             .map_err(|_| Error::Unavailable)?
     }
 
+    /// Bounded physical expiry cleanup; identity reservations remain permanent.
+    #[tracing::instrument(skip_all,fields(backend=self.store.backend(),limit))]
+    pub async fn purge_expired(&self, scope: &Scope, limit: usize) -> Result<usize, Error> {
+        if limit == 0 || limit > MAX_BATCH {
+            return Err(Error::Invalid);
+        }
+        let _permit = self.admission.try_acquire().map_err(|_| Error::Busy)?;
+        tokio::time::timeout(self.timeout, self.store.purge_expired(scope, limit))
+            .await
+            .map_err(|_| Error::Unavailable)?
+    }
+
+    fn seal_value(
+        &self,
+        scope: &Scope,
+        fingerprint: String,
+        token: String,
+        original: &str,
+        expires_ms: i64,
+    ) -> Result<Entry, Error> {
+        let cipher =
+            Aes256Gcm::new_from_slice(&self.encryption_key).map_err(|_| Error::Integrity)?;
+        let aad = framed(&[
+            &scope.tenant,
+            &scope.context,
+            &fingerprint,
+            &token,
+            &expires_ms.to_string(),
+        ]);
+        let mut nonce = [0u8; 12];
+        rand::rng().fill_bytes(&mut nonce);
+        let ciphertext = cipher
+            .encrypt(
+                &Nonce::from(nonce),
+                Payload {
+                    msg: original.as_bytes(),
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| Error::Integrity)?;
+        let mut sealed = nonce.to_vec();
+        sealed.extend(ciphertext);
+        Ok(Entry {
+            fingerprint,
+            token,
+            sealed: STANDARD.encode(sealed),
+            expires_ms,
+        })
+    }
+
     fn open(&self, scope: &Scope, entry: &Entry) -> Result<String, Error> {
         let bytes = STANDARD
             .decode(&entry.sealed)
@@ -393,7 +475,11 @@ fn person_key(value: &str) -> String {
     let value = value.trim();
     let value = ["'s", "’s", "'S", "’S"]
         .iter()
-        .find_map(|suffix| value.strip_suffix(suffix))
+        .find_map(|suffix| {
+            (value.len() > suffix.len())
+                .then(|| value.strip_suffix(suffix))
+                .flatten()
+        })
         .unwrap_or(value);
     value.to_ascii_lowercase()
 }

@@ -52,6 +52,9 @@ impl std::fmt::Debug for Dek {
 }
 
 impl Dek {
+    pub(crate) fn token_store_key(&self) -> [u8; 32] {
+        self.key
+    }
     /// Build a key from raw bytes.
     pub fn from_bytes(key: [u8; 32]) -> Self {
         Self { key }
@@ -117,6 +120,7 @@ pub struct TokenMapping {
 /// output quality compared with minting a fresh token per occurrence.
 #[derive(Debug)]
 pub struct TokenSession {
+    pending: bool,
     id: String,
     tenant: String,
     dek: Arc<Dek>,
@@ -129,6 +133,7 @@ impl TokenSession {
     /// Start a session with no previously issued tokens.
     pub fn new(id: impl Into<String>, tenant: impl Into<String>, dek: Arc<Dek>) -> Self {
         Self {
+            pending: false,
             id: id.into(),
             tenant: tenant.into(),
             dek,
@@ -136,6 +141,13 @@ impl TokenSession {
             by_value: HashMap::new(),
             mappings: Vec::new(),
         }
+    }
+
+    /// Request-local labels replaced by durable atomic identities before release.
+    pub fn pending(id: impl Into<String>, tenant: impl Into<String>, dek: Arc<Dek>) -> Self {
+        let mut session = Self::new(id, tenant, dek);
+        session.pending = true;
+        session
     }
 
     /// Resume a session from mappings previously loaded from a token map.
@@ -188,7 +200,11 @@ impl TokenSession {
         let label = entity_type.as_str().to_string();
         let counter = self.counters.entry(label.clone()).or_insert(0);
         *counter += 1;
-        let token = format!("[{label}_{counter}]");
+        let token = if self.pending {
+            format!("[{label}_{}]", uuid::Uuid::new_v4().as_u128())
+        } else {
+            format!("[{label}_{counter}]")
+        };
 
         let sealed = self.dek.seal(plaintext)?;
         self.remember_value(&label, plaintext.to_string(), token.clone());

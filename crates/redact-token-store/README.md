@@ -1,120 +1,170 @@
-# Token-store contract (draft, not wired into the gateway)
+# Purpose-built token storage (draft)
 
-This crate separates atomic token allocation, selective resolution and permanent
-context retirement from whole-session serialization. It is a storage foundation;
-adding it to the workspace does not change the running gateway or migrate data.
+Atomic token allocation, selective resolution, permanent retirement and bounded
+expiry cleanup are implemented with PostgreSQL and an OpenBao KV v2 reference
+adapter. The gateway has an opt-in PostgreSQL integration. No existing settings
+select it automatically; this draft must not be deployed before its migration
+and release gates are reviewed.
 
 ## Contract and Platform access patterns
 
-`Vault::intern` accepts up to 256 `(entity type, original value)` pairs. The entire
-batch commits atomically; concurrent replicas reuse the winning identity. A retry
-after a lost response finds that identity without a process-local counter or map.
-`resolve` accepts only requested references and preserves input order and duplicates.
-Foreign, missing and expired references are absent. No raw-data fallback exists.
-`retire` permanently fences a scope and removes its stored ciphertext. Keep the
-tombstone: deleting it would permit a stale writer to resurrect the namespace.
+`Vault::intern` accepts up to 256 `(entity type, original value)` pairs and commits
+atomically. Concurrent replicas reuse the winning identity; retrying after a lost
+response preserves it. `resolve` fetches/decrypts distinct requested references,
+then preserves input order and duplicates. Foreign, missing and expired references
+are absent. No raw-data fallback exists. Crypto input and expanded response bytes
+are bounded independently to 1 MiB. Deadlines include crypto and result construction;
+content-free tracing spans use the gateway's existing OTel subscriber. Admission
+uses a bounded semaphore and returns `Busy` without an unbounded queue.
 
-The service must derive scope from authenticated tenant and principal, never from
-token possession or unverified request fields. Use one stable principal-wide
-context across that principal's conversations, memory, owner display and tools.
-Changing a chat must not change this context. Page selection, branch ancestry and
-memory relevance are Platform responsibilities before requesting token resolution.
-Do not restore model/tool/MCP/A2A output; owner display remains a separate boundary.
+Scope derives from authenticated tenant, principal and caller context. Gateway
+integration preserves the existing subject-bound context derivation, including
+Platform's principal-wide context shared across chats. Tokens do not authorize
+reads. Platform selects complete owner-message pages, validated branches and useful
+recall candidates before restoration; model/tool/MCP/A2A data stays tokenized.
 
-The backend sees keyed BLAKE3 equality indexes and AES-256-GCM ciphertext. Separate
-index and encryption keys are derived from a durable root key. AAD binds scope,
-fingerprint, token and expiry. Traces contain operation, backend and item count,
-never scope, values, tokens, credentials or ciphertext. The `tracing` spans can use
-the gateway's existing OTel subscriber when integration lands; this crate does not
-install a subscriber or exporter. Admission is a bounded semaphore without an
-unbounded queue, and each operation has a deadline. An uncertain commit returns an
-error; retry the same values. Overload returns `Busy`.
+The gateway builds request-local random placeholders, atomically interns only new
+values, and replaces placeholders before provider or owner release. Proxy restoration
+loads references from the outbound request; standalone restore loads references
+from its input. Neither path enumerates a migrated context. Storage failures always
+fail closed, even for a profile with `fail_closed: false`. Unknown references stay
+unchanged. Legacy aliases preserve existing cross-kind and PERSON-normalization
+reuse. Native values use entity-type-scoped equality and UUID-based numeric labels.
 
-Resolve deduplicates references before backend fetch and decryption, then restores
-request order. Sealed bytes available for crypto and expanded plaintext responses
-are independently bounded to 1 MiB. Oversized results fail as a whole before
-duplicate expansion. PostgreSQL checks the aggregate sealed-byte budget inside the
-query so an oversized batch is not transferred into the service. The request
-deadline covers backend I/O, decryption and response construction; synchronous
-crypto is bounded by bytes and checked between items and before returning.
+Backends receive keyed BLAKE3 equality indexes and AES-256-GCM ciphertext only.
+Separate keys derive from a durable root; AAD binds scope, fingerprint, token and
+expiry. Traces contain operation/backend/count, never identifiers, values, tokens,
+credentials or ciphertext. Retention is absolute: reuse does not extend it.
 
-## PostgreSQL
+## PostgreSQL partitioning and horizontal operation
 
-Apply `src/schema.sql` with an operator migration role to a dedicated database.
-Use a separate NOSUPERUSER NOBYPASSRLS runtime role which owns no tables, with
-schema USAGE and SELECT/INSERT/UPDATE/DELETE on the two parent tables only. Do not
-grant child-partition access, schema CREATE or migration privileges. Startup
-rejects superuser, BYPASSRLS and table-owner roles. Configure a finite pool size
-and acquisition timeout. All queries bind scope; transactions also SET LOCAL the
-tenant for forced row-level security. RLS is defense in depth against missing
-tenant predicates, not authorization against a compromised trusted service role.
+Apply `src/schema.sql` with a migration role to a dedicated database. Runtime uses
+NOSUPERUSER NOBYPASSRLS, owns no tables, receives schema USAGE and
+SELECT/INSERT/UPDATE/DELETE on `contexts`, `entries`, `aliases` only, plus SELECT
+on `configuration`. Do not grant child-partition access, schema CREATE or migration
+rights. Startup rejects privileged/owner roles. Every operation binds scope and
+sets the tenant transaction-locally for forced RLS. This defends missing predicates;
+it does not authorize a compromised trusted service role.
 
-Sixteen hash partitions use `(tenant, context)`, so a large tenant's principals can
-spread across partitions. Lookup indexes lead with fingerprint/token, followed by
-scope; lateral point queries prevent context-wide joins. The real-database plan
-test checks visited mapping rows for resolve and reuse at 10,000 stored mappings,
-including the fresh-partition case before ANALYZE. Intern and retire serialize on
-one context row across replicas; independent contexts do not share that lock.
-Retirement deletes all entries in the scope and therefore scales with scope size.
-An explicit scope-expression index keeps that deletion from scanning unrelated
-tenants or contexts in the partition. A regression checks the delete plan with
-512 unrelated contexts alongside the selective resolve/reuse plan tests.
+Sixteen hash partitions use tenant/context. Fingerprint/token-leading indexes and
+parameterized lateral queries keep point reads independent of context size.
+Retirement's scope-leading expression index avoids unrelated tenants in a partition.
+Real plans visit one mapping for resolve/reuse in 10,000 entries and eight rows for
+a small retirement scope among 512 unrelated contexts.
 
-`ShardedPostgres` routes 256 stable virtual buckets to independent database pools.
-All replicas must share the same immutable ownership map and root key. Adding a
-replica requires no storage rewrite. Adding a database is supported by explicitly
-assigning buckets, but changing existing ownership requires an offline, fenced
-migration. Online rebalancing, routing-generation validation, failover and replica
-reads are not implemented. No multi-database throughput claim is made here.
+`ShardedPostgres` routes 256 immutable virtual buckets to independent bounded pools.
+Service replicas share the root key and explicit map; adding replicas requires no
+storage rewrite. Startup validates an operator-installed key/routing commitment
+and logical shard ID on each database. Wrong keys/maps/IDs or absent configuration
+fail closed. A two-database test verifies replica routing, cross-shard absence and
+that one unavailable pool does not reroute requests into another namespace.
+This is functional isolation evidence, not a linear-throughput claim. Online
+rebalance, automatic database failover and replica reads are not implemented.
 
-## OpenBao KV v2 reference adapter
+## Migration protocol
 
-KV v2 CAS makes intern/reuse and retirement atomic across replicas. The adapter
-still reads and rewrites a whole context document. It is a comparative reference,
-not a claim that KV v2 provides selective indexed lookup. Documents are bounded to
-512 KiB; the server can impose lower JSON complexity or request limits. CAS has an
-eight-attempt jittered retry budget. Erasure writes a permanent tombstone, then
-destroys older versions in bounded requests. Retrying erasure completes version
-destruction. Operator policies must permit those destroy requests and preserve
-tombstones. Long version histories can exceed the operation deadline and require
-repeated calls; a checkpointed maintenance job is still needed for that case.
+Configuration is startup-only under `vault.indexed`:
 
-Production integration must use HTTPS, a narrowly scoped mount credential and
-renewable authentication. This initial adapter accepts a supplied credential and
-does not implement renewal. Never use the test harness's dev-server authentication
-outside the isolated local harness. Backups and replicas require separate retention
-and erasure policies for both backends.
+- `shard_ids`: ordered stable logical names.
+- `connection_env`: matching environment-variable names holding runtime URLs.
+- `ownership`: exactly 256 shard indices, immutable across replicas.
+- `legacy_writers_drained`: explicit operator acknowledgement of the barrier below.
 
-## Migration and remaining release gates
+Authentication, a durable existing DEK and a `vault_kv2` source are required.
+The source keeps renewable Kubernetes authentication and credential lineage.
+The indexed backend does not replace the predecessor graph; erasure still walks it.
 
-Do not switch existing gateway traffic to this crate. Existing sequential token
-identities and sealed whole-map data are not imported. New UUID-based numeric
-references preserve the bracketed syntax, but value canonicalization is explicitly
-entity-type-scoped and does not match all legacy `by_value` behavior. A safe rollout
-needs an importer that preserves every existing token identity, validates collisions
-and scope, fences legacy writers, verifies restore parity, and records retirement
-and expiry reservations. A documented explicit new namespace is another option
-only if old history remains resolvable through an authorized legacy reader. Neither
-mechanism is implemented here. Do not silently mint replacements for old mappings.
+1. Review both draft PRs. Upgrade legacy writers to the freeze-aware code, then drain
+   all old binaries and in-flight legacy mutations before enabling indexed traffic.
+   Old binaries ignore the new field; a CAS fence cannot protect against them.
+   Restrict old credentials as necessary. Never run legacy erase/write routes after
+   migration begins. No mixed old/new writer deployment is supported.
+2. Apply schema and privileges on every dedicated shard. Compute the configuration
+   commitment using `cargo run -p redact-token-store --example configuration` with
+   `TOKEN_STORE_ROOT_KEY_FILE` and stdin JSON `[shard_ids, ownership]`. It prints
+   only the non-secret commitment. With the migration role, insert one configuration
+   row per shard containing `singleton=true`, that commitment and its logical ID.
+   Runtime must never insert/update this row. Back up keys and maps securely.
+3. On first authorized access, freeze the source with CAS. Validate all available
+   historical labels against the current cumulative map, preserving every label,
+   exact alias, PERSON alias and original expiry. Import atomically into the target.
+   A stable keyed source digest makes retries idempotent despite new encryption nonces.
+4. Destroy source ciphertext and older versions, preserving a permanent empty
+   frozen record. Persist cleanup progress after bounded version batches. Mark target
+   cleanup complete only after destruction succeeds. Timeout/restart retries resume
+   the durable checkpoint; normal accesses after completion read no source mappings.
+5. Verify authorized restore parity, foreign-scope denial, concurrent reuse, expiry,
+   erasure and provider tokenization before considering rollout complete.
 
-Root-key rotation, routing changes and context changes must never happen implicitly.
-There is no key-ring or migration tool in this draft. Logical expiry prevents reads
-and rebinding but retains ciphertext until retirement; expiry-time physical cleanup
-with durable reservations is outstanding. Missing-key and configuration-generation
-startup checks, gateway HTTP/auth integration, token syntax compatibility tests,
-field batching, OTel exporter validation and production fault/recovery tests remain
-release gates. The facade itself is not a caller authenticator.
+Automatic import intentionally rejects pruned/deleted/unreadable history, more than
+2,048 source versions, historical label drops/rebinding, conflicting imports and
+oversized snapshots (16,384 entries/16 MiB). These require offline identity recovery
+from authoritative history/backups. If history was destroyed, the importer cannot
+prove identities; do not invent replacements or silently start a fresh namespace.
+The task did not inspect production history, so compatibility of actual existing
+contexts remains a deployment gate. A new empty context imports an empty frozen
+source and still receives the same permanent lifecycle protection.
+
+## Cleanup and recovery
+
+`retire` commits the context write fence before physical PostgreSQL cleanup, then
+commits batches of at most 256 entries (eight batches per call). Alias deletion uses
+an indexed FK cascade. `Busy` means retry: the fence already prevents reuse/restore.
+Erase verification retries cleanup and never reports physical completion merely
+because the context is fenced. OpenBao destruction records a durable version cursor;
+repeated calls make progress without restarting from version one.
+
+`Vault::purge_expired` and `IndexedStore::purge_expired` clear expired ciphertext in
+bounded batches while retaining fingerprint/token reservations. PostgreSQL uses a
+partial expiry index; OpenBao rewrites the bounded document and destroys prior
+versions. Retry until zero. An authorized maintenance worker must supply subject-bound
+contexts from its inventory; no global tenant-enumerating API or automatic scheduler
+is installed here. Backups, WAL, replicas and storage-level remnants require their
+own retention/erasure procedures; row updates are not physical-media zeroization.
+
+On uncertain commit, retry the same operation. On interrupted migration, retain both
+fences and retry cleanup; never fall back to legacy writes. On lost root key, stop:
+restoration requires the backed-up key. Key rotation and bucket moves require an
+explicit offline, fenced migration with restore parity; no automatic key ring or
+online mover is provided. Database restore must restore mappings, reservations,
+aliases, tombstones and configuration together. Restoring an older snapshot without
+replaying subsequent retirement fences can resurrect data and is prohibited.
+
+## OpenBao reference adapter
+
+OpenBao implements the same atomic contract with KV v2 CAS, eight jittered retries
+and a 512-KiB document limit. Its whole-document cost is measured, not hidden by the
+contract. Gateway integration tests exercise it through the adapter constructor;
+production configuration selects PostgreSQL. The reference adapter accepts a supplied
+credential and does not renew it; production use would need renewable authentication
+and HTTPS. The legacy migration/lineage client already supports Kubernetes renewal.
+Never use harness dev-server credentials outside disposable tests.
+
+## Evidence and release gates
+
+Contract tests cover concurrency, lost acknowledgements, principal/tenant isolation,
+legacy alias preservation, expiry reservations, ciphertext integrity, response/crypto
+budgets and deadlines. Real gateway tests migrate an OpenBao source into both targets,
+restore through a second replica, race eight requests, protect a foreign principal,
+verify provider tokenization and reject rebinding after erasure. See the measured
+[storage comparison](../../docs/benchmarks/token-store-20261107.md); proposed production
+SLOs, actual traffic traces and availability claims are not measurements.
+
+Remaining operational gates: production history recovery where automatic import
+refuses evidence gaps; scheduled expiry maintenance and backup retention; online
+rebalance/key rotation/failover; end-to-end production-shaped load/OTel exporter
+validation. The crate remains `publish=false`: updating the release workflow to
+publish it before the gateway was blocked by automatic approval review. That edit
+needs authorization before a crates.io gateway release can depend on this crate.
+No package was published and no live resource or feature flag was changed.
 
 ## Reproduce
 
-Run `cargo fmt --all -- --check`,
-`cargo clippy -p redact-token-store --all-targets -- -D warnings`, and
-`cargo test -p redact-token-store` for checks without dependencies.
-
-The real-backend tests are explicitly ignored unless selected. The local harness
-creates throwaway PostgreSQL and OpenBao dev instances, applies the schema using an
-owner, grants a restricted runtime role, and runs all contract/plan tests. Supply
-paths to installed binaries; no deployed service is contacted:
+`cargo fmt --all -- --check`,
+`cargo clippy -p redact-token-store -p redact-gateway --all-targets -- -D warnings`,
+and `cargo test -p redact-token-store` run dependency-free checks. Real-backend tests
+are ignored by default. The following harness creates disposable local PostgreSQL
+and OpenBao instances, two databases, restricted roles and synthetic data:
 
 ```sh
 TOKEN_STORE_PG_BIN=/path/to/postgresql/bin \
@@ -123,12 +173,10 @@ TOKEN_STORE_BAO_BIN=/path/to/bao \
 python3 scripts/token-store/test-local.py
 ```
 
-For the comparison, build `cargo build --release -p redact-token-store --example compare`
+For benchmarks build `cargo build --release -p redact-token-store --example compare`
 and add `TOKEN_STORE_RUN_BENCH=1`, `TOKEN_STORE_BENCH_OUTPUT=/tmp/token-store-results`
-and, to reproduce the documented tuned run, `TOKEN_STORE_BAO_JSON_STRINGS=100000`.
-The latter changes only the disposable server's additional listener. Bindings use
-temporary loopback ports. Before setup writes the harness checks its PostgreSQL
-child process, postmaster PID and reported temporary data directory; an unrelated
-listener cannot satisfy readiness. `python3 scripts/token-store/test_harness.py`
-exercises failure cases. Do not run this harness on a shared host
-with untrusted local users (the disposable PostgreSQL cluster uses trust auth).
+and `TOKEN_STORE_BAO_JSON_STRINGS=100000` for the documented tuned listener.
+The harness uses ephemeral loopback ports and checks child liveness, postmaster PID
+and the temporary data directory before setup mutations. `test_harness.py` covers
+readiness/identity failures. Do not run the trust-auth disposable cluster on a host
+with untrusted local users. No deployed service is contacted.

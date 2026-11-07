@@ -1,4 +1,6 @@
-use redact_token_store::{Entry, Error, Scope, TokenStore, Vault, MAX_BATCH};
+use redact_token_store::{
+    ContextState, Entry, Error, LegacyImport, LegacyValue, Scope, TokenStore, Vault, MAX_BATCH,
+};
 use std::{
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -12,6 +14,7 @@ fn facade(store: Arc<dyn TokenStore>) -> Vault {
 }
 
 async fn contract(store: Arc<dyn TokenStore>) {
+    import_contract(store.clone()).await;
     let vault = Arc::new(facade(store.clone()));
     let peer = Arc::new(facade(store.clone()));
     let context = uuid::Uuid::new_v4().to_string();
@@ -409,6 +412,147 @@ impl TokenStore for LostResponse {
     async fn retire(&self, scope: &Scope) -> Result<(), Error> {
         self.inner.retire(scope).await
     }
+    async fn import_legacy(&self, scope: &Scope, snapshot: &LegacyImport) -> Result<(), Error> {
+        self.inner.import_legacy(scope, snapshot).await?;
+        if self.lose.swap(false, Ordering::SeqCst) {
+            Err(Error::Unavailable)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+async fn import_contract(store: Arc<dyn TokenStore>) {
+    let vault = facade(store.clone());
+    let scope = vault
+        .scope(
+            "migration-tenant",
+            "migration-owner",
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .unwrap();
+    let foreign = vault
+        .scope("migration-tenant", "foreign-owner", "other")
+        .unwrap();
+    let expiry = chrono::Utc::now().timestamp_millis() + 60000;
+    let mut values: Vec<_> = [
+        ("[ORG_1]", "ORG", "nimbus", expiry),
+        ("[PERSON_2]", "PERSON", "Nimbus", expiry),
+        ("[PERSON_3]", "PERSON", "NIMBUS", expiry),
+        ("[PERSON_4]", "PERSON", "Nimbus's", expiry),
+        (
+            "[EMAIL_ADDRESS_5]",
+            "EMAIL_ADDRESS",
+            "fixture@example.invalid",
+            expiry,
+        ),
+        ("[PERSON_9]", "PERSON", "Expired Fixture", 1),
+    ]
+    .into_iter()
+    .map(|(token, kind, original, expires_ms)| LegacyValue {
+        token: token.into(),
+        kind: kind.into(),
+        original: original.into(),
+        expires_ms,
+    })
+    .collect();
+    assert_eq!(
+        vault.context_state(&scope).await.unwrap(),
+        ContextState::Absent
+    );
+    let flaky = facade(Arc::new(LostResponse {
+        inner: store.clone(),
+        lose: AtomicBool::new(true),
+    }));
+    assert_eq!(
+        flaky.import_legacy(&scope, &values).await,
+        Err(Error::Unavailable)
+    );
+    let source = vault.import_legacy(&scope, &values).await.unwrap();
+    assert_eq!(
+        vault.context_state(&scope).await.unwrap(),
+        ContextState::Imported {
+            source: source.clone(),
+            legacy_clean: false
+        }
+    );
+    let tokens: Vec<_> = values.iter().map(|v| v.token.clone()).collect();
+    let expected: Vec<_> = values
+        .iter()
+        .map(|v| {
+            if v.expires_ms > 1 {
+                Some(v.original.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(vault.resolve(&scope, &tokens).await.unwrap(), expected);
+    assert_eq!(
+        vault.resolve(&foreign, &tokens).await.unwrap(),
+        vec![None; tokens.len()]
+    );
+    let requests = vec![
+        ("PERSON".into(), "Nimbus's".into()),
+        ("EMAIL_ADDRESS".into(), "Nimbus".into()),
+        ("ORG".into(), "NIMBUS".into()),
+        ("ORG".into(), "fixture@example.invalid".into()),
+    ];
+    assert_eq!(
+        vault
+            .intern(&scope, &requests, Duration::from_secs(60))
+            .await
+            .unwrap(),
+        vec!["[ORG_1]", "[PERSON_2]", "[PERSON_3]", "[EMAIL_ADDRESS_5]"]
+    );
+    assert_eq!(
+        vault
+            .intern(
+                &scope,
+                &[("PERSON".into(), "Expired Fixture".into())],
+                Duration::from_secs(60)
+            )
+            .await,
+        Err(Error::Retired)
+    );
+    assert_eq!(vault.purge_expired(&scope, 1).await.unwrap(), 1);
+    assert_eq!(vault.purge_expired(&scope, 1).await.unwrap(), 0);
+    assert_eq!(
+        vault
+            .intern(
+                &scope,
+                &[("PERSON".into(), "Expired Fixture".into())],
+                Duration::from_secs(60)
+            )
+            .await,
+        Err(Error::Retired)
+    );
+    values[0].expires_ms += 1;
+    assert_eq!(
+        vault.import_legacy(&scope, &values).await,
+        Err(Error::Integrity)
+    );
+    values[0].expires_ms -= 1;
+    vault
+        .complete_legacy_cleanup(&scope, &source)
+        .await
+        .unwrap();
+    assert_eq!(
+        vault.context_state(&scope).await.unwrap(),
+        ContextState::Imported {
+            source,
+            legacy_clean: true
+        }
+    );
+    vault.retire(&scope).await.unwrap();
+    assert_eq!(
+        vault.import_legacy(&scope, &values).await,
+        Err(Error::Retired)
+    );
+    assert_eq!(
+        vault.resolve(&scope, &tokens).await.unwrap(),
+        vec![None; tokens.len()]
+    );
 }
 
 #[tokio::test]

@@ -7,6 +7,7 @@
 //! Mappings stored here already contain AES-256-GCM ciphertext only. Backends
 //! never see plaintext original values.
 
+pub mod indexed;
 pub mod memory;
 
 #[cfg(feature = "vault")]
@@ -218,6 +219,24 @@ pub fn compose_predecessor_lineage(
 /// Persistence for sealed token mappings, keyed by tenant and session.
 #[async_trait::async_trait]
 pub trait TokenMapStore: Send + Sync + std::fmt::Debug {
+    /// Purpose-built storage capability; callers must use selective operations.
+    fn indexed(&self) -> Option<&indexed::IndexedStore> {
+        None
+    }
+
+    /// Fence legacy writers and return the immutable snapshot, including expiry.
+    async fn freeze(&self, _tenant: &str, _session: &str) -> Result<FrozenSnapshot, TokenMapError> {
+        Err(TokenMapError::Backend(
+            "backend cannot fence legacy writers".into(),
+        ))
+    }
+
+    /// Destroy frozen source ciphertext/history while retaining its write fence.
+    async fn clear_frozen(&self, _tenant: &str, _session: &str) -> Result<(), TokenMapError> {
+        Err(TokenMapError::Backend(
+            "backend cannot clean frozen snapshots".into(),
+        ))
+    }
     /// Stable backend name for telemetry attributes: `"off"`, `"memory"`, `"vault_kv2"`.
     fn backend_name(&self) -> &'static str;
 
@@ -294,6 +313,14 @@ pub trait TokenMapStore: Send + Sync + std::fmt::Debug {
 
     /// Cheap reachability probe used by the readiness endpoint.
     async fn health(&self) -> Result<(), TokenMapError>;
+}
+
+/// Legacy snapshot held only inside the privacy service during bounded import.
+pub struct FrozenSnapshot {
+    /// Encrypted original mappings, including expired identity reservations.
+    pub mappings: Vec<TokenMapping>,
+    /// Absolute legacy document expiry; migration must not extend retention.
+    pub expires_ms: i64,
 }
 
 /// No-op backend used when tokenization persistence is turned off.
@@ -662,7 +689,7 @@ mod tests {
             subject_closure(&saturated, "caller-a").unwrap().len(),
             MAX_PREDECESSOR_SUBJECTS
         );
-        assert!(saturated.subjects.get("caller-0").is_none());
+        assert!(!saturated.subjects.contains_key("caller-0"));
 
         assert_eq!(
             compose_predecessor_lineage(

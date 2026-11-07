@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
                     "{backend},{worker},{size},{},0,0,setup_capacity,0,0,0,0,0,1",
                     tokens.len()
                 );
-                vault.retire(&scope).await?;
+                retire_to_completion(&vault, &scope).await?;
                 continue;
             }
             let mut current_records = size;
@@ -126,8 +126,22 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
-            vault.retire(&scope).await?;
+            retire_to_completion(&vault, &scope).await?;
         }
     }
     Ok(())
+}
+
+async fn retire_to_completion(
+    vault: &redact_token_store::Vault,
+    scope: &redact_token_store::Scope,
+) -> anyhow::Result<()> {
+    for _ in 0..64 {
+        match vault.retire(scope).await {
+            Ok(()) => return Ok(()),
+            Err(redact_token_store::Error::Busy) => tokio::task::yield_now().await,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    anyhow::bail!("bounded retirement did not complete")
 }

@@ -51,7 +51,15 @@ def main():
             verify_postgres(processes[0], psql, work/'pg')
             run(psql + ['-f', str(root/'crates/redact-token-store/src/schema.sql')], stdout=subprocess.DEVNULL)
             verify_postgres(processes[0], psql, work/'pg')
-            run(psql + ['-c', 'CREATE ROLE token_runtime LOGIN NOSUPERUSER NOBYPASSRLS; GRANT USAGE ON SCHEMA redact_tokens_v1 TO token_runtime; GRANT SELECT,INSERT,UPDATE,DELETE ON redact_tokens_v1.contexts,redact_tokens_v1.entries TO token_runtime;'], stdout=subprocess.DEVNULL)
+            run(psql + ['-c', 'CREATE ROLE token_runtime LOGIN NOSUPERUSER NOBYPASSRLS; GRANT USAGE ON SCHEMA redact_tokens_v1 TO token_runtime; GRANT SELECT,INSERT,UPDATE,DELETE ON redact_tokens_v1.contexts,redact_tokens_v1.entries,redact_tokens_v1.aliases TO token_runtime;'], stdout=subprocess.DEVNULL)
+            verify_postgres(processes[0], psql, work/'pg')
+            run(psql + ['-c', 'CREATE DATABASE token_shard_fixture'], stdout=subprocess.DEVNULL)
+            shard_psql = psql + ['-d', 'token_shard_fixture']
+            verify_postgres(processes[0], shard_psql, work/'pg')
+            run(shard_psql + ['-f', str(root/'crates/redact-token-store/src/schema.sql')], stdout=subprocess.DEVNULL)
+            for connection in [psql, shard_psql]:
+                verify_postgres(processes[0], connection, work/'pg')
+                run(connection + ['-c', "GRANT USAGE ON SCHEMA redact_tokens_v1 TO token_runtime; GRANT SELECT,INSERT,UPDATE,DELETE ON redact_tokens_v1.contexts,redact_tokens_v1.entries,redact_tokens_v1.aliases TO token_runtime; GRANT SELECT ON redact_tokens_v1.configuration TO token_runtime; INSERT INTO redact_tokens_v1.configuration VALUES(true, repeat('a',64), 'synthetic-shard');"], stdout=subprocess.DEVNULL)
             baolog = open(work/'openbao.log', 'w')
             baoport = unused_port()
             baoargs = [baobin, 'server', '-dev', f'-dev-listen-address=127.0.0.1:{baoport}']
@@ -70,8 +78,9 @@ def main():
             tokenfile = work/'token'
             tokenfile.write_text(token.group(1))
             tokenfile.chmod(0o600)
-            env = dict(os.environ, TOKEN_STORE_PG_URL=f'postgres://token_runtime@127.0.0.1:{pgport}/postgres', TOKEN_STORE_BAO_ADDR=f'http://127.0.0.1:{baoport}', TOKEN_STORE_BAO_TOKEN_FILE=str(tokenfile))
+            env = dict(os.environ, OTEL_SDK_DISABLED='true', TOKEN_STORE_PG_URL=f'postgres://token_runtime@127.0.0.1:{pgport}/postgres', TOKEN_STORE_PG_URL_2=f'postgres://token_runtime@127.0.0.1:{pgport}/token_shard_fixture', TOKEN_STORE_BAO_ADDR=f'http://127.0.0.1:{baoport}', TOKEN_STORE_BAO_TOKEN_FILE=str(tokenfile))
             run(['cargo', 'test', '-p', 'redact-token-store', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
+            run(['cargo', 'test', '-p', 'redact-gateway', '--test', 'indexed_tokens', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
             if os.environ.get('TOKEN_STORE_RUN_BENCH') == '1':
                 outdir = pathlib.Path(os.environ['TOKEN_STORE_BENCH_OUTPUT'])
                 outdir.mkdir(parents=True, exist_ok=True)

@@ -2,7 +2,8 @@
 //! A short per-context row lock orders intern against retirement across replicas.
 //! Resolution uses a bounded indexed query and does not lock unrelated contexts.
 use crate::{
-    response_budget, unique_refs, validate, validate_refs, Entry, Error, Scope, TokenStore,
+    response_budget, unique_refs, validate, validate_refs, ContextState, Entry, Error,
+    LegacyImport, Scope, TokenStore,
 };
 use sqlx::{PgPool, Postgres as Pg, Row, Transaction};
 use std::{collections::BTreeMap, sync::Arc};
@@ -12,9 +13,10 @@ use std::{collections::BTreeMap, sync::Arc};
 // RLS. The execution-plan regression counts visited rows, not just output rows.
 const RESOLVE_QUERY: &str = "SELECT e.fingerprint,e.token,CASE WHEN sum(octet_length(e.sealed)) OVER () <= 1048576 THEN e.sealed END AS sealed,e.expires_ms FROM (SELECT DISTINCT unnest($3::text[]) AS token) requested CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND token=requested.token OFFSET 0) e WHERE e.expires_ms > (extract(epoch FROM clock_timestamp()) * 1000)::bigint AND EXISTS (SELECT 1 FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2 AND NOT retired)";
 
-const RETIRE_DELETE_QUERY: &str = "DELETE FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND (tenant || ':' || context)=($1 || ':' || $2)";
+const RETIRE_SELECT_QUERY: &str = "SELECT fingerprint FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND (tenant||':'||context)=($1||':'||$2) LIMIT 256 FOR UPDATE SKIP LOCKED";
 
 const INTERN_LOOKUP_QUERY: &str = "SELECT e.fingerprint,e.token,CASE WHEN sum(octet_length(e.sealed)) OVER () <= 1048576 THEN e.sealed END AS sealed,e.expires_ms FROM (SELECT DISTINCT unnest($3::text[]) AS fingerprint) requested CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND fingerprint=requested.fingerprint OFFSET 0) e";
+const ALIAS_LOOKUP_QUERY:&str="SELECT a.alias,e.fingerprint,e.token,CASE WHEN sum(octet_length(e.sealed)) OVER () <= 1048576 THEN e.sealed END AS sealed,e.expires_ms FROM (SELECT DISTINCT unnest($3::text[]) AS alias) requested CROSS JOIN LATERAL (SELECT alias,token FROM redact_tokens_v1.aliases WHERE tenant=$1 AND context=$2 AND alias=requested.alias OFFSET 0) a CROSS JOIN LATERAL (SELECT fingerprint,token,sealed,expires_ms FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND token=a.token OFFSET 0) e";
 
 /// Operator-applied schema. Runtime startup never changes schema or privileges.
 pub const SCHEMA: &str = include_str!("schema.sql");
@@ -25,6 +27,28 @@ pub struct Postgres {
 }
 
 impl Postgres {
+    /// Verify operator-installed key/routing commitment and logical shard ID.
+    /// An absent row, changed key or moved bucket fails closed before traffic.
+    pub async fn verify_configuration(
+        &self,
+        commitment: &str,
+        shard_id: &str,
+    ) -> Result<(), Error> {
+        let row: Option<(String, String)> = sqlx::query_as(
+            "SELECT commitment,shard_id FROM redact_tokens_v1.configuration WHERE singleton",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|_| Error::Unavailable)?;
+        if row
+            .as_ref()
+            .is_some_and(|(c, s)| c == commitment && s == shard_id)
+        {
+            Ok(())
+        } else {
+            Err(Error::Integrity)
+        }
+    }
     /// Reject superuser, BYPASSRLS and table-owner runtime connections.
     /// Set a finite pool acquire_timeout and max_connections at construction.
     pub async fn new(pool: PgPool) -> Result<Self, Error> {
@@ -46,10 +70,10 @@ impl Postgres {
         Ok(tx)
     }
 
-    async fn lock(tx: &mut Transaction<'_, Pg>, scope: &Scope) -> Result<bool, Error> {
+    async fn lock(tx: &mut Transaction<'_, Pg>, scope: &Scope) -> Result<(bool, bool), Error> {
         sqlx::query("INSERT INTO redact_tokens_v1.contexts (tenant, context) VALUES ($1,$2) ON CONFLICT DO NOTHING")
             .bind(&scope.tenant).bind(&scope.context).execute(&mut **tx).await.map_err(|_| Error::Unavailable)?;
-        sqlx::query_scalar("SELECT retired FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2 FOR UPDATE")
+        sqlx::query_as("SELECT retired,has_aliases FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2 FOR UPDATE")
             .bind(&scope.tenant).bind(&scope.context).fetch_one(&mut **tx).await.map_err(|_| Error::Unavailable)
     }
 }
@@ -74,12 +98,23 @@ impl TokenStore for Postgres {
 
     #[tracing::instrument(skip_all, fields(backend = "postgres", items = candidates.len()))]
     async fn intern(&self, scope: &Scope, candidates: &[Entry]) -> Result<Vec<Entry>, Error> {
+        self.intern_with_aliases(scope, candidates, &[]).await
+    }
+
+    async fn intern_with_aliases(
+        &self,
+        scope: &Scope,
+        candidates: &[Entry],
+        aliases: &[Vec<String>],
+    ) -> Result<Vec<Entry>, Error> {
         validate(candidates)?;
+        crate::migration::validate_aliases(candidates, aliases)?;
         if candidates.is_empty() {
             return Ok(vec![]);
         }
         let mut tx = self.begin(scope).await?;
-        if Self::lock(&mut tx, scope).await? {
+        let (retired, has_aliases) = Self::lock(&mut tx, scope).await?;
+        if retired {
             return Err(Error::Retired);
         }
         let now: i64 =
@@ -103,8 +138,35 @@ impl TokenStore for Postgres {
             }
             found.insert(e.fingerprint.clone(), e);
         }
+        let mut legacy = BTreeMap::new();
+        if has_aliases && !aliases.is_empty() {
+            let keys: Vec<_> = aliases.iter().flatten().collect();
+            let rows = sqlx::query(ALIAS_LOOKUP_QUERY)
+                .bind(&scope.tenant)
+                .bind(&scope.context)
+                .bind(keys)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|_| Error::Unavailable)?;
+            for row in rows {
+                let alias: String = row.try_get("alias").map_err(|_| Error::Integrity)?;
+                let e = entry(row)?;
+                legacy.insert(alias, e);
+            }
+        }
+        let legacy_for = |i: usize| {
+            aliases
+                .get(i)
+                .and_then(|keys| keys.iter().find_map(|k| legacy.get(k)))
+        };
         let mut inserts = BTreeMap::new();
-        for e in candidates {
+        for (i, e) in candidates.iter().enumerate() {
+            if let Some(legacy) = legacy_for(i) {
+                if legacy.expires_ms <= now {
+                    return Err(Error::Retired);
+                }
+                continue;
+            }
             if !found.contains_key(&e.fingerprint) {
                 if e.expires_ms <= now {
                     return Err(Error::Retired);
@@ -124,10 +186,21 @@ impl TokenStore for Postgres {
                 .execute(&mut *tx).await.map_err(|e| if e.as_database_error().is_some_and(|e| e.is_unique_violation()) { Error::Integrity } else { Error::Unavailable })?;
             found.extend(inserts);
         }
-        response_budget(candidates.iter().filter_map(|e| found.get(&e.fingerprint)))?;
+        response_budget(
+            candidates
+                .iter()
+                .enumerate()
+                .filter_map(|(i, e)| legacy_for(i).or_else(|| found.get(&e.fingerprint))),
+        )?;
         let result = candidates
             .iter()
-            .map(|e| found.get(&e.fingerprint).cloned().ok_or(Error::Integrity))
+            .enumerate()
+            .map(|(i, e)| {
+                legacy_for(i)
+                    .or_else(|| found.get(&e.fingerprint))
+                    .cloned()
+                    .ok_or(Error::Integrity)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         tx.commit().await.map_err(|_| Error::Unavailable)?;
         Ok(result)
@@ -172,12 +245,110 @@ impl TokenStore for Postgres {
         .execute(&mut *tx)
         .await
         .map_err(|_| Error::Unavailable)?;
-        sqlx::query(RETIRE_DELETE_QUERY)
-            .bind(&scope.tenant)
-            .bind(&scope.context)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| Error::Unavailable)?;
+        // Commit the write fence first. Each subsequent batch commits physical
+        // cleanup progress, so a deadline cannot repeatedly roll back all work.
+        tx.commit().await.map_err(|_| Error::Unavailable)?;
+        for _ in 0..8 {
+            let mut tx = self.begin(scope).await?;
+            let keys: Vec<String> = sqlx::query_scalar(RETIRE_SELECT_QUERY)
+                .bind(&scope.tenant)
+                .bind(&scope.context)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|_| Error::Unavailable)?;
+            if keys.is_empty() {
+                // Another cleanup worker may own a remaining row. Never claim
+                // physical completion based only on SKIP LOCKED's empty result.
+                let remains:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND (tenant||':'||context)=($1||':'||$2))")
+                    .bind(&scope.tenant).bind(&scope.context).fetch_one(&mut *tx).await.map_err(|_|Error::Unavailable)?;
+                return if remains { Err(Error::Busy) } else { Ok(()) };
+            }
+            for key in keys {
+                // Point deletion also cascades through the token-leading alias
+                // index; it cannot scan unrelated contexts in this partition.
+                sqlx::query("DELETE FROM redact_tokens_v1.entries WHERE fingerprint=$3 AND tenant=$1 AND context=$2")
+                    .bind(&scope.tenant).bind(&scope.context).bind(key).execute(&mut *tx).await.map_err(|_|Error::Unavailable)?;
+            }
+            tx.commit().await.map_err(|_| Error::Unavailable)?;
+        }
+        Err(Error::Busy)
+    }
+
+    async fn purge_expired(&self, scope: &Scope, limit: usize) -> Result<usize, Error> {
+        if limit == 0 || limit > crate::MAX_BATCH {
+            return Err(Error::Invalid);
+        }
+        let mut tx = self.begin(scope).await?;
+        Self::lock(&mut tx, scope).await?;
+        let changed=sqlx::query("WITH expired AS (SELECT fingerprint FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND (tenant||':'||context)=($1||':'||$2) AND sealed <> '' AND expires_ms <= (extract(epoch FROM clock_timestamp())*1000)::bigint ORDER BY expires_ms,fingerprint LIMIT $3 FOR UPDATE) UPDATE redact_tokens_v1.entries e SET sealed='' FROM expired x WHERE e.tenant=$1 AND e.context=$2 AND e.fingerprint=x.fingerprint")
+            .bind(&scope.tenant).bind(&scope.context).bind(limit as i64).execute(&mut *tx).await.map_err(|_|Error::Unavailable)?.rows_affected();
+        tx.commit().await.map_err(|_| Error::Unavailable)?;
+        Ok(changed as usize)
+    }
+
+    async fn context_state(&self, scope: &Scope) -> Result<ContextState, Error> {
+        let mut tx = self.begin(scope).await?;
+        let row:Option<(bool,Option<String>,bool)>=sqlx::query_as("SELECT retired,import_source,legacy_clean FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2").bind(&scope.tenant).bind(&scope.context).fetch_optional(&mut *tx).await.map_err(|_|Error::Unavailable)?;
+        tx.commit().await.map_err(|_| Error::Unavailable)?;
+        Ok(match row {
+            None => ContextState::Absent,
+            Some((true, _, _)) => ContextState::Retired,
+            Some((false, Some(source), legacy_clean)) => ContextState::Imported {
+                source,
+                legacy_clean,
+            },
+            Some(_) => ContextState::Active,
+        })
+    }
+
+    async fn import_legacy(&self, scope: &Scope, snapshot: &LegacyImport) -> Result<(), Error> {
+        snapshot.validate()?;
+        let mut tx = self.begin(scope).await?;
+        if Self::lock(&mut tx, scope).await?.0 {
+            return Err(Error::Retired);
+        }
+        let source: Option<String> = sqlx::query_scalar(
+            "SELECT import_source FROM redact_tokens_v1.contexts WHERE tenant=$1 AND context=$2",
+        )
+        .bind(&scope.tenant)
+        .bind(&scope.context)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| Error::Unavailable)?;
+        if let Some(source) = source {
+            return if source == snapshot.source {
+                Ok(())
+            } else {
+                Err(Error::Integrity)
+            };
+        }
+        let populated:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM redact_tokens_v1.entries WHERE tenant=$1 AND context=$2 AND (tenant||':'||context)=($1||':'||$2))").bind(&scope.tenant).bind(&scope.context).fetch_one(&mut *tx).await.map_err(|_|Error::Unavailable)?;
+        if populated {
+            return Err(Error::Integrity);
+        }
+        for batch in snapshot.entries.chunks(crate::MAX_BATCH) {
+            let keys: Vec<_> = batch.iter().map(|e| &e.fingerprint).collect();
+            let tokens: Vec<_> = batch.iter().map(|e| &e.token).collect();
+            let sealed: Vec<_> = batch.iter().map(|e| &e.sealed).collect();
+            let expiry: Vec<_> = batch.iter().map(|e| e.expires_ms).collect();
+            sqlx::query("INSERT INTO redact_tokens_v1.entries (tenant,context,fingerprint,token,sealed,expires_ms) SELECT $1,$2,* FROM unnest($3::text[],$4::text[],$5::text[],$6::bigint[])").bind(&scope.tenant).bind(&scope.context).bind(keys).bind(tokens).bind(sealed).bind(expiry).execute(&mut *tx).await.map_err(|_|Error::Integrity)?;
+        }
+        let pairs: Vec<_> = snapshot.aliases.iter().collect();
+        for batch in pairs.chunks(crate::MAX_BATCH) {
+            let keys: Vec<_> = batch.iter().map(|(key, _)| *key).collect();
+            let tokens: Vec<_> = batch.iter().map(|(_, token)| *token).collect();
+            sqlx::query("INSERT INTO redact_tokens_v1.aliases (tenant,context,alias,token) SELECT $1,$2,* FROM unnest($3::text[],$4::text[])").bind(&scope.tenant).bind(&scope.context).bind(keys).bind(tokens).execute(&mut *tx).await.map_err(|_|Error::Integrity)?;
+        }
+        sqlx::query("UPDATE redact_tokens_v1.contexts SET import_source=$3,legacy_clean=false,has_aliases=$4 WHERE tenant=$1 AND context=$2").bind(&scope.tenant).bind(&scope.context).bind(&snapshot.source).bind(!snapshot.aliases.is_empty()).execute(&mut *tx).await.map_err(|_|Error::Unavailable)?;
+        tx.commit().await.map_err(|_| Error::Unavailable)
+    }
+
+    async fn complete_legacy_cleanup(&self, scope: &Scope, source: &str) -> Result<(), Error> {
+        let mut tx = self.begin(scope).await?;
+        let changed=sqlx::query("UPDATE redact_tokens_v1.contexts SET legacy_clean=true WHERE tenant=$1 AND context=$2 AND import_source=$3 AND NOT retired").bind(&scope.tenant).bind(&scope.context).bind(source).execute(&mut *tx).await.map_err(|_|Error::Unavailable)?.rows_affected();
+        if changed != 1 {
+            return Err(Error::Integrity);
+        }
         tx.commit().await.map_err(|_| Error::Unavailable)
     }
 }
@@ -209,6 +380,9 @@ impl ShardedPostgres {
 
 #[async_trait::async_trait]
 impl TokenStore for ShardedPostgres {
+    async fn purge_expired(&self, scope: &Scope, limit: usize) -> Result<usize, Error> {
+        self.shard(scope)?.purge_expired(scope, limit).await
+    }
     fn backend(&self) -> &'static str {
         "postgres_sharded"
     }
@@ -221,11 +395,119 @@ impl TokenStore for ShardedPostgres {
     async fn retire(&self, scope: &Scope) -> Result<(), Error> {
         self.shard(scope)?.retire(scope).await
     }
+    async fn intern_with_aliases(
+        &self,
+        scope: &Scope,
+        candidates: &[Entry],
+        aliases: &[Vec<String>],
+    ) -> Result<Vec<Entry>, Error> {
+        self.shard(scope)?
+            .intern_with_aliases(scope, candidates, aliases)
+            .await
+    }
+    async fn context_state(&self, scope: &Scope) -> Result<ContextState, Error> {
+        self.shard(scope)?.context_state(scope).await
+    }
+    async fn import_legacy(&self, scope: &Scope, snapshot: &LegacyImport) -> Result<(), Error> {
+        self.shard(scope)?.import_legacy(scope, snapshot).await
+    }
+    async fn complete_legacy_cleanup(&self, scope: &Scope, source: &str) -> Result<(), Error> {
+        self.shard(scope)?
+            .complete_legacy_cleanup(scope, source)
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[ignore = "requires two isolated databases"]
+    async fn independent_shards_preserve_routing_and_fail_closed() {
+        let mut stores = Vec::new();
+        let mut pools = Vec::new();
+        for name in ["TOKEN_STORE_PG_URL", "TOKEN_STORE_PG_URL_2"] {
+            let pool = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&std::env::var(name).unwrap())
+                .await
+                .unwrap();
+            let store = Arc::new(Postgres::new(pool.clone()).await.unwrap());
+            store
+                .verify_configuration(&"a".repeat(64), "synthetic-shard")
+                .await
+                .unwrap();
+            assert_eq!(
+                store
+                    .verify_configuration(&"b".repeat(64), "synthetic-shard")
+                    .await,
+                Err(Error::Integrity)
+            );
+            assert_eq!(
+                store
+                    .verify_configuration(&"a".repeat(64), "wrong-shard")
+                    .await,
+                Err(Error::Integrity)
+            );
+            assert!(
+                sqlx::query("UPDATE redact_tokens_v1.configuration SET shard_id='changed'")
+                    .execute(&pool)
+                    .await
+                    .is_err()
+            );
+            pools.push(pool);
+            stores.push(store);
+        }
+        let ownership = std::array::from_fn(|n| n % 2);
+        let router = ShardedPostgres::new(stores.clone(), ownership).unwrap();
+        let peer = ShardedPostgres::new(stores.clone(), ownership).unwrap();
+        let scopes = [
+            Scope {
+                tenant: "synthetic-routing-tenant".into(),
+                context: format!("00{}", uuid::Uuid::new_v4()),
+            },
+            Scope {
+                tenant: "synthetic-routing-tenant".into(),
+                context: format!("01{}", uuid::Uuid::new_v4()),
+            },
+        ];
+        let proposed = Entry {
+            fingerprint: "c".repeat(64),
+            token: "[PERSON_1]".into(),
+            sealed: "synthetic routing ciphertext".into(),
+            expires_ms: chrono::Utc::now().timestamp_millis() + 60000,
+        };
+        for (index, scope) in scopes.iter().enumerate() {
+            router
+                .intern(scope, std::slice::from_ref(&proposed))
+                .await
+                .unwrap();
+            assert!(peer
+                .resolve(scope, std::slice::from_ref(&proposed.token))
+                .await
+                .unwrap()[0]
+                .is_some());
+            assert!(stores[1 - index]
+                .resolve(scope, std::slice::from_ref(&proposed.token))
+                .await
+                .unwrap()[0]
+                .is_none());
+        }
+        pools[0].close().await;
+        assert!(matches!(
+            router
+                .resolve(&scopes[0], std::slice::from_ref(&proposed.token))
+                .await,
+            Err(Error::Unavailable)
+        ));
+        assert!(router
+            .resolve(&scopes[1], std::slice::from_ref(&proposed.token))
+            .await
+            .unwrap()[0]
+            .is_some());
+        router.retire(&scopes[1]).await.unwrap();
+    }
     #[tokio::test]
     #[ignore = "requires isolated migrated TOKEN_STORE_PG_URL"]
     async fn selective_lookups_do_not_scan_context() {
@@ -289,7 +571,15 @@ mod tests {
             );
         }
         tx.rollback().await.unwrap();
-        store.retire(&scope).await.unwrap();
+        assert_eq!(store.retire(&scope).await, Err(Error::Busy));
+        assert!(store.resolve(&scope, &["[PERSON_1]".into()]).await.unwrap()[0].is_none());
+        for attempt in 0..8 {
+            match store.retire(&scope).await {
+                Ok(()) => break,
+                Err(Error::Busy) if attempt < 7 => {}
+                other => panic!("retirement did not converge: {other:?}"),
+            }
+        }
         // Fill every partition with unrelated scopes, then inspect retirement
         // under the restricted role before ANALYZE can mask a missing index.
         let entries: Vec<_> = (0..8)
@@ -313,7 +603,7 @@ mod tests {
         };
         store.intern(&target, &entries).await.unwrap();
         let mut tx = store.begin(&target).await.unwrap();
-        let query = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {RETIRE_DELETE_QUERY}");
+        let query = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {RETIRE_SELECT_QUERY}");
         let plan: serde_json::Value = sqlx::query_scalar(&query)
             .bind(&target.tenant)
             .bind(&target.context)
