@@ -138,40 +138,53 @@ impl IndexedStore {
             } => source,
             ContextState::Active => return Err(failure(Error::Integrity)),
             ContextState::Absent => {
-                let frozen = self
-                    .source
-                    .freeze(tenant, context)
-                    .await
-                    .map_err(source_failure)?;
-                if frozen.mappings.len() > redact_token_store::MAX_IMPORT_ENTRIES
-                    || frozen
-                        .mappings
-                        .iter()
-                        .map(|m| m.sealed_value.len())
-                        .sum::<usize>()
-                        > redact_token_store::MAX_IMPORT_BYTES
-                {
-                    return Err(failure(Error::Capacity));
+                let frozen = self.source.freeze(tenant, context).await;
+                // A peer can import and destroy the frozen source after our
+                // initial Absent read. Its committed target lifecycle is now
+                // authoritative; never re-import the cleared source as empty.
+                match self.vault.context_state(&scope).await.map_err(failure)? {
+                    ContextState::Imported {
+                        legacy_clean: true, ..
+                    }
+                    | ContextState::Retired => return Ok(scope),
+                    ContextState::Imported {
+                        source,
+                        legacy_clean: false,
+                    } => source,
+                    ContextState::Active => return Err(failure(Error::Integrity)),
+                    ContextState::Absent => {
+                        let frozen = frozen.map_err(source_failure)?;
+                        if frozen.mappings.len() > redact_token_store::MAX_IMPORT_ENTRIES
+                            || frozen
+                                .mappings
+                                .iter()
+                                .map(|m| m.sealed_value.len())
+                                .sum::<usize>()
+                                > redact_token_store::MAX_IMPORT_BYTES
+                        {
+                            return Err(failure(Error::Capacity));
+                        }
+                        let values: Vec<_> = frozen
+                            .mappings
+                            .iter()
+                            .map(|m| {
+                                Ok(LegacyValue {
+                                    token: m.token.clone(),
+                                    kind: m.entity_type.clone(),
+                                    original: self
+                                        .dek
+                                        .open(&m.sealed_value)
+                                        .map_err(|_| failure(Error::Integrity))?,
+                                    expires_ms: frozen.expires_ms,
+                                })
+                            })
+                            .collect::<Result<_, TokenMapError>>()?;
+                        self.vault
+                            .import_legacy(&scope, &values)
+                            .await
+                            .map_err(failure)?
+                    }
                 }
-                let values: Vec<_> = frozen
-                    .mappings
-                    .iter()
-                    .map(|m| {
-                        Ok(LegacyValue {
-                            token: m.token.clone(),
-                            kind: m.entity_type.clone(),
-                            original: self
-                                .dek
-                                .open(&m.sealed_value)
-                                .map_err(|_| failure(Error::Integrity))?,
-                            expires_ms: frozen.expires_ms,
-                        })
-                    })
-                    .collect::<Result<_, TokenMapError>>()?;
-                self.vault
-                    .import_legacy(&scope, &values)
-                    .await
-                    .map_err(failure)?
             }
         };
         self.source

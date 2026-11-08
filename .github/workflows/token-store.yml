@@ -38,4 +38,5 @@ jobs:
           TOKEN_STORE_PG_BIN: /usr/lib/postgresql/16/bin
           TOKEN_STORE_PG_SHARE: /usr/share/postgresql/16
           TOKEN_STORE_BAO_BIN: ${{ runner.temp }}/token-store-bao/bao
+          TOKEN_STORE_RUN_BETA_ACCEPTANCE: '1'
         run: python3 scripts/token-store/test-local.py

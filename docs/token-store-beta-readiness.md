@@ -6,7 +6,18 @@ storage mode. No registry publication or live configuration change was performed
 for this PR. See the [contract and migration protocol](../crates/redact-token-store/README.md)
 and [measured storage comparison](benchmarks/token-store-20261107.md).
 
-## Release and registry gates
+## Source-built beta images and public release gates
+
+Source-built beta images use the checked-out workspace crates through path
+dependencies in `Dockerfile.gateway`; they do **not** require crates.io publication.
+The existing Docker build/smoke CI checks that path. Building/pushing an approved
+image, verifying its NER base/provenance and recording its immutable digest remain
+separate operator actions. This workspace has no container runtime; no candidate
+image was built or pushed here. Public package publication is a distinct process.
+
+See the [concrete infrastructure specification](token-store-beta-infrastructure.md)
+and [two-process acceptance/load procedure](token-store-beta-acceptance.md) for
+configuration, connection/rollout budgets, writer drain and recovery evidence.
 
 The future release workflow publishes `redact-token-store` before
 `redact-gateway`. It refuses to publish the gateway until the exact dependency
@@ -59,7 +70,8 @@ been frozen/imported, ordinary compatible-binary rollback remains possible.
 
 Runtime currently allows 16 connections per configured shard per gateway replica.
 Budget `16 × replicas` on each shard, plus migrations, maintenance and monitoring;
-startup validates even currently unassigned configured shards. Request admission
+include rolling-surge and separate preflight processes in that budget. Startup
+validates even currently unassigned configured shards. Request admission
 is bounded to 64 operations per replica. Request batches are at most 256 mappings
 or references, with independent byte limits. A 413 is terminal; do not turn it
 into an unbounded retry loop. There is no promise of linear throughput.

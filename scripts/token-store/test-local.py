@@ -87,6 +87,9 @@ def main():
             preflight_contract(root, work, env, fixture_sql)
             run(['cargo', 'test', '-p', 'redact-token-store', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
             run(['cargo', 'test', '-p', 'redact-gateway', '--test', 'indexed_tokens', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
+            if os.environ.get('TOKEN_STORE_RUN_BETA_ACCEPTANCE') == '1':
+                from beta_acceptance import exercise as beta_acceptance
+                beta_acceptance(root, work, env, fixture_sql)
             if os.environ.get('TOKEN_STORE_RUN_BENCH') == '1':
                 outdir = pathlib.Path(os.environ['TOKEN_STORE_BENCH_OUTPUT'])
                 outdir.mkdir(parents=True, exist_ok=True)

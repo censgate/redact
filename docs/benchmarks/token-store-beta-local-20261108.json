@@ -1,0 +1,229 @@
+{
+  "fixture": "two-process-loopback-debug-regex-only",
+  "replicas": 2,
+  "logical_databases": 2,
+  "postgres_servers": 1,
+  "ner_enabled": false,
+  "postgres_version": "17.11 (Debian 17.11-0+deb13u1)",
+  "source_sha256": {
+    "scripts/token-store/beta_acceptance.py": "90d18a5a583723d75d17a3a142d140c7d3187d095a55ab43c40ce168314bab88",
+    "Cargo.lock": "31db17e23fa6af2a529e444df2120ed00acacfb4e6e2c743aacbc8241a9fcf7f",
+    "crates/redact-gateway/Cargo.toml": "a223e115392008e27c65d70ec0c897b6d89882b94073506c1c0ce3484f6097e9",
+    "crates/redact-core/src/recognizers/pattern.rs": "be8ddf73d0b419d1464312d720fd05821ba29f2dec1a1fa94cc7d5ca3bd3e800",
+    "crates/redact-gateway/src/vault/indexed.rs": "470c5c3def88a15383122152a8a7eb994cdcee85753f01da753740c5a66ab03e",
+    "crates/redact-gateway/src/vault/kv2.rs": "ad171635211ea1ebbc0469cffc0f28f0693b94f44361cc18f80ba0f18c3dd9a2"
+  },
+  "checks": [
+    "legacy-drain",
+    "identity-import",
+    "foreign-principal",
+    "concurrent-reuse",
+    "process-restart",
+    "logical-shard-outage-recovery",
+    "retire-no-rebind",
+    "otlp-http-traces-metrics",
+    "telemetry-canary-exclusion"
+  ],
+  "otlp_requests": 268,
+  "otlp_bytes": 5467464,
+  "load": [
+    {
+      "context_mappings": 10,
+      "concurrency": 1,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 3.079,
+      "p95_ms": 4.493,
+      "p99_ms": 7.427,
+      "requests_per_second": 306.61
+    },
+    {
+      "context_mappings": 10,
+      "concurrency": 1,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 4.332,
+      "p95_ms": 6.266,
+      "p99_ms": 16.175,
+      "requests_per_second": 209.16
+    },
+    {
+      "context_mappings": 10,
+      "concurrency": 8,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 6.732,
+      "p95_ms": 13.953,
+      "p99_ms": 17.036,
+      "requests_per_second": 980.23
+    },
+    {
+      "context_mappings": 10,
+      "concurrency": 8,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 12.517,
+      "p95_ms": 19.097,
+      "p99_ms": 30.453,
+      "requests_per_second": 597.6
+    },
+    {
+      "context_mappings": 10,
+      "concurrency": 32,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 17.224,
+      "p95_ms": 45.816,
+      "p99_ms": 54.536,
+      "requests_per_second": 1180.31
+    },
+    {
+      "context_mappings": 10,
+      "concurrency": 32,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 43.579,
+      "p95_ms": 63.39,
+      "p99_ms": 67.648,
+      "requests_per_second": 603.57
+    },
+    {
+      "context_mappings": 1000,
+      "concurrency": 1,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 3.669,
+      "p95_ms": 6.726,
+      "p99_ms": 9.597,
+      "requests_per_second": 244.26
+    },
+    {
+      "context_mappings": 1000,
+      "concurrency": 1,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 4.842,
+      "p95_ms": 5.746,
+      "p99_ms": 6.674,
+      "requests_per_second": 200.74
+    },
+    {
+      "context_mappings": 1000,
+      "concurrency": 8,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 6.76,
+      "p95_ms": 10.967,
+      "p99_ms": 15.273,
+      "requests_per_second": 1022.12
+    },
+    {
+      "context_mappings": 1000,
+      "concurrency": 8,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 13.423,
+      "p95_ms": 17.852,
+      "p99_ms": 19.563,
+      "requests_per_second": 571.79
+    },
+    {
+      "context_mappings": 1000,
+      "concurrency": 32,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 13.539,
+      "p95_ms": 26.897,
+      "p99_ms": 32.444,
+      "requests_per_second": 1209.67
+    },
+    {
+      "context_mappings": 1000,
+      "concurrency": 32,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 44.338,
+      "p95_ms": 58.909,
+      "p99_ms": 61.435,
+      "requests_per_second": 617.88
+    },
+    {
+      "context_mappings": 10000,
+      "concurrency": 1,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 3.51,
+      "p95_ms": 4.373,
+      "p99_ms": 5.9,
+      "requests_per_second": 275.57
+    },
+    {
+      "context_mappings": 10000,
+      "concurrency": 1,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 4.816,
+      "p95_ms": 5.623,
+      "p99_ms": 5.958,
+      "requests_per_second": 205.78
+    },
+    {
+      "context_mappings": 10000,
+      "concurrency": 8,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 6.1,
+      "p95_ms": 8.931,
+      "p99_ms": 12.778,
+      "requests_per_second": 1185.84
+    },
+    {
+      "context_mappings": 10000,
+      "concurrency": 8,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 11.648,
+      "p95_ms": 16.031,
+      "p99_ms": 23.773,
+      "requests_per_second": 630.27
+    },
+    {
+      "context_mappings": 10000,
+      "concurrency": 32,
+      "operation": "resolve",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 16.079,
+      "p95_ms": 29.723,
+      "p99_ms": 40.936,
+      "requests_per_second": 1351.33
+    },
+    {
+      "context_mappings": 10000,
+      "concurrency": 32,
+      "operation": "reuse",
+      "requests": 96,
+      "errors": 0,
+      "p50_ms": 44.088,
+      "p95_ms": 60.613,
+      "p99_ms": 72.651,
+      "requests_per_second": 601.14
+    }
+  ]
+}

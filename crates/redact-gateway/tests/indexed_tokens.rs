@@ -9,6 +9,7 @@ use std::{sync::Arc, time::Duration};
 use support::*;
 
 async fn exercise(target: Arc<dyn TokenStore>) {
+    completed_peer_import_contract(target.clone()).await;
     erasure_contract(target.clone()).await;
     let upstream = mock_json_upstream(chat_response("ok")).await;
     let mut config = config_for(&upstream);
@@ -201,6 +202,13 @@ async fn exercise(target: Arc<dyn TokenStore>) {
 struct InterruptErasure {
     inner: Arc<redact_gateway::vault::Kv2Store>,
     stage: std::sync::atomic::AtomicU8,
+    freeze_pause: Option<Arc<FreezePause>>,
+}
+#[derive(Debug)]
+struct FreezePause {
+    entered: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+    integrity: bool,
 }
 #[async_trait::async_trait]
 impl redact_gateway::vault::TokenMapStore for InterruptErasure {
@@ -255,6 +263,13 @@ impl redact_gateway::vault::TokenMapStore for InterruptErasure {
         t: &str,
         c: &str,
     ) -> Result<redact_gateway::vault::FrozenSnapshot, redact_gateway::vault::TokenMapError> {
+        if let Some(pause) = &self.freeze_pause {
+            pause.entered.notify_one();
+            pause.resume.notified().await;
+            if pause.integrity {
+                return Err(redact_token_store::Error::Integrity.into());
+            }
+        }
         self.inner.freeze(t, c).await
     }
     async fn fence_for_erasure(
@@ -279,6 +294,128 @@ impl redact_gateway::vault::TokenMapStore for InterruptErasure {
     ) -> Result<(), redact_gateway::vault::TokenMapError> {
         self.inner.clear_frozen(t, c).await
     }
+}
+
+async fn completed_peer_import_contract(target: Arc<dyn TokenStore>) {
+    use redact_gateway::{
+        redact::token::{Dek, TokenMapping},
+        vault::{Kv2Store, TokenMapStore},
+    };
+    let credential =
+        std::fs::read_to_string(std::env::var("TOKEN_STORE_BAO_TOKEN_FILE").unwrap()).unwrap();
+    let source = Arc::new(
+        Kv2Store::from_settings(&redact_gateway::config::VaultSettings {
+            backend: redact_gateway::config::VaultBackend::VaultKv2,
+            address: Some(std::env::var("TOKEN_STORE_BAO_ADDR").unwrap()),
+            token: Some(credential.trim().into()),
+            path_prefix: format!("peer-import-{}", uuid::Uuid::new_v4()),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let key = Arc::new(Dek::from_bytes([7; 32]));
+    for integrity in [false, true] {
+        let context = uuid::Uuid::new_v4().to_string();
+        let value = TokenMapping {
+            token: "[PERSON_1]".into(),
+            entity_type: "PERSON".into(),
+            sealed_value: key.seal("Synthetic Original").unwrap(),
+            created_at: chrono::Utc::now(),
+        };
+        source
+            .put("synthetic-tenant", &context, &[value])
+            .await
+            .unwrap();
+        let pause = Arc::new(FreezePause {
+            entered: tokio::sync::Notify::new(),
+            resume: tokio::sync::Notify::new(),
+            integrity,
+        });
+        let slow = Arc::new(
+            IndexedStore::new(
+                target.clone(),
+                Arc::new(InterruptErasure {
+                    inner: source.clone(),
+                    stage: std::sync::atomic::AtomicU8::new(0),
+                    freeze_pause: Some(pause.clone()),
+                }),
+                key.clone(),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
+        );
+        let pending = tokio::spawn({
+            let context = context.clone();
+            async move {
+                slow.lookup("synthetic-tenant", &context, "[PERSON_1]")
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(3), pause.entered.notified())
+            .await
+            .unwrap();
+        let peer = IndexedStore::new(
+            target.clone(),
+            source.clone(),
+            key.clone(),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        let expected = peer
+            .lookup("synthetic-tenant", &context, "[PERSON_1]")
+            .await
+            .unwrap();
+        assert_eq!(
+            expected.get("[PERSON_1]").map(String::as_str),
+            Some("Synthetic Original")
+        );
+        assert!(source
+            .freeze("synthetic-tenant", &context)
+            .await
+            .unwrap()
+            .mappings
+            .is_empty());
+        pause.resume.notify_one();
+        let actual = tokio::time::timeout(Duration::from_secs(3), pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            actual, expected,
+            "completed peer import must win over a stale source read"
+        );
+    }
+    // An integrity failure without a committed peer import remains terminal.
+    let pause = Arc::new(FreezePause {
+        entered: tokio::sync::Notify::new(),
+        resume: tokio::sync::Notify::new(),
+        integrity: true,
+    });
+    pause.resume.notify_one();
+    let broken = IndexedStore::new(
+        target,
+        Arc::new(InterruptErasure {
+            inner: source,
+            stage: std::sync::atomic::AtomicU8::new(0),
+            freeze_pause: Some(pause),
+        }),
+        key,
+        Duration::from_secs(3600),
+    )
+    .unwrap();
+    assert!(matches!(
+        broken
+            .lookup(
+                "synthetic-tenant",
+                &uuid::Uuid::new_v4().to_string(),
+                "[PERSON_1]"
+            )
+            .await,
+        Err(redact_gateway::vault::TokenMapError::Indexed(
+            redact_token_store::Error::Integrity
+        ))
+    ));
 }
 
 async fn erasure_contract(target: Arc<dyn TokenStore>) {
@@ -430,6 +567,7 @@ async fn erasure_contract(target: Arc<dyn TokenStore>) {
                 Arc::new(InterruptErasure {
                     inner: source.clone(),
                     stage: std::sync::atomic::AtomicU8::new(stage),
+                    freeze_pause: None,
                 }),
                 state.dek.clone(),
                 Duration::from_secs(3600),

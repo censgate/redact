@@ -329,24 +329,33 @@ impl Kv2Store {
     ) -> Result<(StoredSession, u32), TokenMapError> {
         self.ensure_fresh_token().await?;
         let inner = self.inner.read().await;
-        let endpoint = ReadSecretRequest::builder()
-            .mount(self.mount.as_str())
-            .path(path)
-            .build()
-            .map_err(|e| TokenMapError::Backend(format!("invalid vault read request: {e}")))?;
+        let mut retry_missing = verify_missing;
+        let response: ReadSecretResponse = loop {
+            let endpoint = ReadSecretRequest::builder()
+                .mount(self.mount.as_str())
+                .path(path)
+                .build()
+                .map_err(|e| TokenMapError::Backend(format!("invalid vault read request: {e}")))?;
 
-        let response: ReadSecretResponse =
             match api::exec_with_result(&inner.client, endpoint).await {
-                Ok(res) => res,
+                Ok(res) => break res,
                 Err(ClientError::APIError { code: 404, .. }) => {
                     // A deleted latest version with surviving metadata cannot
                     // safely be interpreted as an empty source namespace.
                     if verify_missing {
                         match kv2::read_metadata(&inner.client, &self.mount, path).await {
                             Ok(_) => {
+                                // A concurrent first writer may create data
+                                // between the 404 and metadata read. Re-read
+                                // once; a genuinely missing latest version still
+                                // fails closed, never becoming an empty source.
+                                if retry_missing {
+                                    retry_missing = false;
+                                    continue;
+                                }
                                 return Err(TokenMapError::Indexed(
                                     redact_token_store::Error::Integrity,
-                                ))
+                                ));
                             }
                             Err(ClientError::APIError { code: 404, .. }) => {}
                             Err(err) => return Err(map_client_error(err)),
@@ -364,7 +373,8 @@ impl Kv2Store {
                     ));
                 }
                 Err(err) => return Err(map_client_error(err)),
-            };
+            }
+        };
 
         let cas = version_to_cas(response.metadata.version)?;
         let entry: StoredSession = serde_json::value::from_value(response.data)

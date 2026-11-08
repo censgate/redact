@@ -62,7 +62,9 @@ opentelemetry-semantic-conventions = { version = "0.33", features = ["semconv_ex
 opentelemetry-appender-tracing = "0.33"
 tracing-opentelemetry = "0.34"
 
-opentelemetry-otlp = { version = "0.33", features = ["trace", "metrics", "logs", "grpc-tonic", "http-proto", "reqwest-client"], optional = true }
+# Default batch processors/periodic readers export from SDK-owned threads.
+# OTLP/HTTP needs the blocking client there; the async client requires a runtime.
+opentelemetry-otlp = { version = "0.33", features = ["trace", "metrics", "logs", "grpc-tonic", "http-proto", "reqwest-blocking-client"], optional = true }
 opentelemetry-prometheus = { version = "0.33", optional = true }
 prometheus = { version = "0.14", optional = true }
 jsonwebtoken = { version = "11", optional = true, features = ["aws_lc_rs"] }

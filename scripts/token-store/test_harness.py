@@ -3,15 +3,34 @@ import importlib.util
 from pathlib import Path
 import socket
 import subprocess
+import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from beta_acceptance import owns_listener
 
 spec = importlib.util.spec_from_file_location('harness', Path(__file__).with_name('test-local.py'))
 harness = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(harness)
 
 class InstanceChecks(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'linux', 'Linux process/socket proof')
+    def test_gateway_listener_must_belong_to_child(self):
+        with socket.socket() as unrelated:
+            unrelated.bind(('127.0.0.1', 0))
+            unrelated.listen()
+            port = unrelated.getsockname()[1]
+            owner = Mock(pid=os.getpid())
+            owner.poll.return_value = None
+            self.assertTrue(owns_listener(owner, port))
+            child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)'])
+            try:
+                self.assertFalse(owns_listener(child, port))
+            finally:
+                child.terminate()
+                child.wait(timeout=5)
+
     def test_failed_child_cannot_borrow_unrelated_listener(self):
         with socket.socket() as unrelated:
             unrelated.bind(('127.0.0.1', 0))
