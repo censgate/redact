@@ -52,12 +52,9 @@ impl Postgres {
     /// Reject superuser, BYPASSRLS and table-owner runtime connections.
     /// Set a finite pool acquire_timeout and max_connections at construction.
     pub async fn new(pool: PgPool) -> Result<Self, Error> {
-        let unsafe_role: bool = sqlx::query_scalar("SELECT rolsuper OR rolbypassrls OR EXISTS (SELECT 1 FROM pg_tables WHERE schemaname='redact_tokens_v1' AND tableowner=current_user) FROM pg_roles WHERE rolname=current_user")
-            .fetch_one(&pool).await.map_err(|_| Error::Unavailable)?;
-        if unsafe_role {
-            return Err(Error::Invalid);
-        }
-        Ok(Self { pool })
+        let store = Self { pool };
+        store.health().await?;
+        Ok(store)
     }
 
     async fn begin(&self, scope: &Scope) -> Result<Transaction<'_, Pg>, Error> {
@@ -92,6 +89,17 @@ fn entry(row: sqlx::postgres::PgRow) -> Result<Entry, Error> {
 
 #[async_trait::async_trait]
 impl TokenStore for Postgres {
+    async fn health(&self) -> Result<(), Error> {
+        let safe: bool = sqlx::query_scalar(include_str!("runtime-check.sql"))
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|_| Error::Unavailable)?;
+        if safe {
+            Ok(())
+        } else {
+            Err(Error::Invalid)
+        }
+    }
     fn backend(&self) -> &'static str {
         "postgres"
     }
@@ -380,6 +388,14 @@ impl ShardedPostgres {
 
 #[async_trait::async_trait]
 impl TokenStore for ShardedPostgres {
+    async fn health(&self) -> Result<(), Error> {
+        // Check even currently unassigned configured shards; rollout must not
+        // hide a broken pool behind the bucket chosen by a synthetic context.
+        for shard in &self.shards {
+            shard.health().await?;
+        }
+        Ok(())
+    }
     async fn purge_expired(&self, scope: &Scope, limit: usize) -> Result<usize, Error> {
         self.shard(scope)?.purge_expired(scope, limit).await
     }
@@ -462,6 +478,7 @@ mod tests {
         let ownership = std::array::from_fn(|n| n % 2);
         let router = ShardedPostgres::new(stores.clone(), ownership).unwrap();
         let peer = ShardedPostgres::new(stores.clone(), ownership).unwrap();
+        router.health().await.unwrap();
         let scopes = [
             Scope {
                 tenant: "synthetic-routing-tenant".into(),
@@ -495,6 +512,7 @@ mod tests {
                 .is_none());
         }
         pools[0].close().await;
+        assert_eq!(router.health().await, Err(Error::Unavailable));
         assert!(matches!(
             router
                 .resolve(&scopes[0], std::slice::from_ref(&proposed.token))

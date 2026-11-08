@@ -14,6 +14,7 @@ fn facade(store: Arc<dyn TokenStore>) -> Vault {
 }
 
 async fn contract(store: Arc<dyn TokenStore>) {
+    facade(store.clone()).health().await.unwrap();
     import_contract(store.clone()).await;
     let vault = Arc::new(facade(store.clone()));
     let peer = Arc::new(facade(store.clone()));
@@ -324,6 +325,9 @@ async fn admission_and_deadline_fail_closed() {
         fn backend(&self) -> &'static str {
             "pending"
         }
+        async fn health(&self) -> Result<(), Error> {
+            std::future::pending().await
+        }
         async fn intern(&self, _: &Scope, _: &[Entry]) -> Result<Vec<Entry>, Error> {
             unreachable!()
         }
@@ -352,6 +356,7 @@ async fn admission_and_deadline_fail_closed() {
         Err(Error::Busy)
     );
     assert_eq!(first.await.unwrap(), Err(Error::Unavailable));
+    assert_eq!(vault.health().await, Err(Error::Unavailable));
     assert_eq!(
         vault.resolve(&scope, &["[PERSON_1]".into()]).await,
         Err(Error::Unavailable)

@@ -218,6 +218,22 @@ async fn backoff(attempt: usize) {
 
 #[async_trait::async_trait]
 impl TokenStore for OpenBao {
+    async fn health(&self) -> Result<(), Error> {
+        let response = self
+            .client
+            .get(format!(
+                "{}/v1/sys/health?standbyok=true&perfstandbyok=true",
+                self.address
+            ))
+            .send()
+            .await
+            .map_err(|_| Error::Unavailable)?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(Error::Unavailable)
+        }
+    }
     async fn purge_expired(&self, scope: &Scope, limit: usize) -> Result<usize, Error> {
         if limit == 0 || limit > crate::MAX_BATCH {
             return Err(Error::Invalid);

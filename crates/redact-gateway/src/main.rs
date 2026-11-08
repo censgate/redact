@@ -68,6 +68,8 @@ enum Command {
     Serve,
     /// Load the configuration and report any problems without serving.
     ValidateConfig,
+    /// Check indexed storage prerequisites without serving or migrating contexts.
+    CheckTokenStore,
     /// Print the resolved configuration with secrets redacted.
     PrintConfig,
     /// Print the effective policy as YAML.
@@ -153,6 +155,11 @@ async fn main() -> Result<()> {
                 config.policy.default_profile,
                 config.source.as_str()
             );
+            Ok(())
+        }
+        Command::CheckTokenStore => {
+            let backend = redact_gateway::server::check_token_store(&config).await?;
+            println!("token-store preflight passed: {backend}; writer drain and restore rehearsal remain operator gates");
             Ok(())
         }
         Command::PrintConfig => {

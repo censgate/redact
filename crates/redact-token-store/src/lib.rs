@@ -104,6 +104,11 @@ pub struct Entry {
 pub trait TokenStore: Send + Sync {
     /// Stable, low-cardinality telemetry label.
     fn backend(&self) -> &'static str;
+    /// Read-only readiness of every configured dependency, without creating a
+    /// context or resolving customer data. Unsupported probes fail closed.
+    async fn health(&self) -> Result<(), Error> {
+        Err(Error::Invalid)
+    }
     /// Atomically find or create every identity. Preserve request order and
     /// duplicates. An existing live identity wins over proposed ciphertext.
     async fn intern(&self, scope: &Scope, candidates: &[Entry]) -> Result<Vec<Entry>, Error>;
@@ -190,6 +195,12 @@ pub struct Vault {
 }
 
 impl Vault {
+    /// Probe every backend dependency within one deadline. No context is minted.
+    pub async fn health(&self) -> Result<(), Error> {
+        tokio::time::timeout(self.timeout, self.store.health())
+            .await
+            .map_err(|_| Error::Unavailable)?
+    }
     /// Stable commitment to key and routing configuration, stored by an operator
     /// in each backend before startup. Runtime credentials must not modify it.
     pub fn configuration_commitment(key: &[u8; 32], routing: &[u8]) -> String {

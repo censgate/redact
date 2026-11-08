@@ -65,6 +65,6 @@ DO $$ BEGIN
             WITH CHECK (tenant = current_setting('redact.tenant', true));
     END IF;
 END $$;
--- Grant USAGE on the schema and SELECT/INSERT/UPDATE/DELETE on the two parent
+-- Grant USAGE on the schema and SELECT/INSERT/UPDATE/DELETE on the three parent
 -- tables only to a dedicated NOSUPERUSER NOBYPASSRLS runtime role. Do not grant
 -- access directly to partitions, schema CREATE, ownership, or migration rights.

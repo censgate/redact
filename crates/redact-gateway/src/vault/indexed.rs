@@ -357,11 +357,12 @@ impl TokenMapStore for IndexedStore {
             .await
     }
     async fn health(&self) -> Result<(), TokenMapError> {
-        self.vault
-            .context_state(&self.scope("health-probe", "read-only")?)
-            .await
-            .map_err(failure)?;
-        self.source.health().await.map_err(source_failure)
+        tokio::time::timeout(Duration::from_secs(2), async {
+            self.vault.health().await.map_err(failure)?;
+            self.source.health().await.map_err(source_failure)
+        })
+        .await
+        .map_err(|_| failure(Error::Unavailable))?
     }
 }
 

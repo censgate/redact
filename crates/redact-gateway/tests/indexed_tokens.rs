@@ -60,6 +60,12 @@ async fn exercise(target: Arc<dyn TokenStore>) {
         .unwrap(),
     );
     let router = create_router(state.clone());
+    let ready = get_path(router.clone(), "/readyz").await;
+    assert_eq!(ready.status, StatusCode::OK);
+    assert_eq!(
+        ready.json()["token_map"]["backend"],
+        state.tokens.backend_name()
+    );
     let imported = post_json_with_headers(
         router.clone(),
         "/v1/restore",
@@ -69,6 +75,17 @@ async fn exercise(target: Arc<dyn TokenStore>) {
     .await;
     assert_eq!(imported.status, StatusCode::OK, "{}", imported.body);
     assert_eq!(imported.json()["text"], "mail fixture@example.invalid");
+    // The compatible legacy binary still cannot write a migrated context. A
+    // digest rollback must never reopen the source or allocate a new identity.
+    let rollback_write = post_json_with_headers(
+        original.clone(),
+        "/v1/redact",
+        json!({"text":"rollback@example.invalid","session_id":context}),
+        &headers,
+    )
+    .await;
+    assert!(!rollback_write.status.is_success());
+    assert!(!rollback_write.body.contains("rollback@example.invalid"));
     // A separately constructed replica has no request-local migration state.
     let mut peer = state.clone();
     peer.tokens = Arc::new(

@@ -34,6 +34,7 @@ def ready(process, port):
     raise RuntimeError('local dependency did not become ready')
 
 def main():
+    from preflight_contract import exercise as preflight_contract
     root = pathlib.Path(__file__).resolve().parents[2]
     pgbin = pathlib.Path(os.environ['TOKEN_STORE_PG_BIN'])
     pgshare = os.environ['TOKEN_STORE_PG_SHARE']
@@ -79,6 +80,11 @@ def main():
             tokenfile.write_text(token.group(1))
             tokenfile.chmod(0o600)
             env = dict(os.environ, OTEL_SDK_DISABLED='true', TOKEN_STORE_PG_URL=f'postgres://token_runtime@127.0.0.1:{pgport}/postgres', TOKEN_STORE_PG_URL_2=f'postgres://token_runtime@127.0.0.1:{pgport}/token_shard_fixture', TOKEN_STORE_BAO_ADDR=f'http://127.0.0.1:{baoport}', TOKEN_STORE_BAO_TOKEN_FILE=str(tokenfile))
+            def fixture_sql(index, statement):
+                connection = [psql, shard_psql][index]
+                verify_postgres(processes[0], connection, work/'pg')
+                return run(connection + ['-At', '-c', statement], capture_output=True, text=True).stdout
+            preflight_contract(root, work, env, fixture_sql)
             run(['cargo', 'test', '-p', 'redact-token-store', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
             run(['cargo', 'test', '-p', 'redact-gateway', '--test', 'indexed_tokens', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
             if os.environ.get('TOKEN_STORE_RUN_BENCH') == '1':

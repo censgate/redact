@@ -6,6 +6,10 @@ adapter. The gateway has an opt-in PostgreSQL integration. No existing settings
 select it automatically; this draft must not be deployed before its migration
 and release gates are reviewed.
 
+The [coordinated review and beta runbook](../../docs/token-store-beta-readiness.md)
+defines registry prerequisites, the two-phase rollout, preflight checks, acceptance
+evidence and the irreversible source-fence rollback boundary.
+
 ## Contract and Platform access patterns
 
 `Vault::intern` accepts up to 256 `(entity type, original value)` pairs and commits
@@ -42,7 +46,8 @@ Apply `src/schema.sql` with a migration role to a dedicated database. Runtime us
 NOSUPERUSER NOBYPASSRLS, owns no tables, receives schema USAGE and
 SELECT/INSERT/UPDATE/DELETE on `contexts`, `entries`, `aliases` only, plus SELECT
 on `configuration`. Do not grant child-partition access, schema CREATE or migration
-rights. Startup rejects privileged/owner roles. Every operation binds scope and
+rights. Startup and readiness reject privileged/owner roles, unsafe grants, direct
+partition access, disabled/altered RLS and extra policies. Every operation binds scope and
 sets the tenant transaction-locally for forced RLS. This defends missing predicates;
 it does not authorize a compromised trusted service role.
 
@@ -58,6 +63,9 @@ storage rewrite. Startup validates an operator-installed key/routing commitment
 and logical shard ID on each database. Wrong keys/maps/IDs or absent configuration
 fail closed. A two-database test verifies replica routing, cross-shard absence and
 that one unavailable pool does not reroute requests into another namespace.
+Readiness probes every configured shard, even one with no current bucket ownership.
+The gateway's `check-token-store` command validates candidate configuration and
+dependencies without migrating or creating contexts; it cannot prove writer drain.
 This is functional isolation evidence, not a linear-throughput claim. Online
 rebalance, automatic database failover and replica reads are not implemented.
 

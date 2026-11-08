@@ -208,7 +208,7 @@ async fn ready(State(state): State<AppState>) -> Response {
     let body = json!({
         "status": if ready { "ok" } else { "degraded" },
         "provider": config.provider.base_url,
-        "token_map": {"backend": config.vault.backend.as_str(), "ready": token_map_ready},
+        "token_map": {"backend": state.tokens.backend_name(), "ready": token_map_ready},
         "auth": {"mode": state.auth.mode(), "ready": auth_ready},
         "audit": config.audit.export.as_str(),
     });

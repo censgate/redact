@@ -718,10 +718,18 @@ impl TokenMapStore for Kv2Store {
         let probed = {
             self.ensure_fresh_token().await?;
             let inner = self.inner.read().await;
-            match inner.client.status().await {
-                Ok(_) => Ok(()),
-                Err(err) => Err(err.to_string()),
-            }
+            // OpenBao omits Vault enterprise replication fields. Check the
+            // protocol's health status instead of deserializing those fields.
+            // Unlike Client::status(), this rejects sealed/uninitialized states
+            // rather than treating every successfully decoded enum as healthy.
+            let endpoint = api::sys::requests::ReadHealthRequest::builder()
+                .standbyok(true)
+                .perfstandbyok(true)
+                .build()
+                .expect("static health request");
+            api::exec_with_empty(&inner.client, endpoint)
+                .await
+                .map_err(|_| "token source is not ready".to_string())
         };
 
         *self.health.lock().await = Some((Instant::now(), probed.clone()));
