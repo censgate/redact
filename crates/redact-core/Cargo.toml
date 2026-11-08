@@ -7,11 +7,15 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-keywords.workspace = true
-categories.workspace = true
+keywords = ["pii", "redaction", "privacy", "gdpr", "anonymization"]
+categories = ["text-processing"]
 readme.workspace = true
 documentation = "https://docs.rs/redact-core"
 description = "Core PII detection and anonymization engine"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 regex = { workspace = true }
