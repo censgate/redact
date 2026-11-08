@@ -20,6 +20,8 @@ SELECT
     NOT EXISTS (
         SELECT 1 FROM runtime_roles r JOIN pg_roles p USING (oid)
         WHERE p.rolsuper OR p.rolbypassrls OR p.rolcreaterole OR p.rolreplication
+           -- These native roles bypass SQL object ACLs through server access.
+           OR p.rolname IN ('pg_read_server_files','pg_write_server_files','pg_execute_server_program')
     )
     AND has_schema_privilege('redact_tokens_v1','USAGE')
     AND NOT EXISTS (

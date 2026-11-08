@@ -54,6 +54,12 @@ def exercise(sql, check, runtime_check):
             (f'ALTER ROLE {reader} REPLICATION', f'ALTER ROLE {reader} NOREPLICATION',
              'SELECT rolreplication::int FROM pg_roles WHERE rolname=current_user'),
         ]
+        # Prove these native capabilities are assumable, without reading a file
+        # or executing a server-side program. Table ACL checks cannot detect them.
+        for native in ['pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program']:
+            cases.append((f'GRANT {native} TO {reader}{options}',
+                          f'REVOKE {native} FROM {reader}',
+                          f"SET ROLE {native}; SELECT (current_user='{native}')::int"))
         for edges in [[(reader, 'token_runtime')],
                       [(reader, bridge_b), (bridge_b, bridge_a), (bridge_a, 'token_runtime')]]:
             for parent, member in edges:
@@ -88,8 +94,9 @@ def exercise(sql, check, runtime_check):
             assert result.splitlines()[-1] == 'f', 'privileged login identity escaped validation'
         finally:
             sql(1, f'REVOKE token_runtime FROM {reader}; ALTER ROLE {reader} NOBYPASSRLS')
-        print('Role preflight: 18 direct/multi-hop capability rejections, safe membership, '
-              'blocked SET edge and privileged login identity passed')
+        print('Role preflight: 24 direct/multi-hop capability rejections, safe membership '
+              'and privileged login identity passed; blocked SET edge ' +
+              ('passed' if version >= 160000 else 'not applicable before PostgreSQL 16'))
     finally:
         sql(1, "DELETE FROM redact_tokens_v1.contexts WHERE tenant='synthetic-foreign-role-fixture'; "
                f'DROP OWNED BY {reader}; DROP ROLE {reader},{bridge_a},{bridge_b}; '

@@ -56,7 +56,10 @@ both login and effective identities. A non-inheriting role can still use `SET RO
 ([PostgreSQL membership semantics](https://www.postgresql.org/docs/16/role-membership.html)).
 Every member role is checked for privileged attributes, ownership, schema CREATE,
 parent TRUNCATE, child-partition access and configuration writes (including column
-grants). CREATEROLE and REPLICATION are also forbidden. The closure conservatively
+grants). CREATEROLE, REPLICATION and the predefined server-file/program roles are
+also forbidden; their native capabilities bypass SQL object ACLs
+([PostgreSQL predefined roles](https://www.postgresql.org/docs/16/predefined-roles.html)).
+The closure conservatively
 includes PostgreSQL 16+ `SET FALSE` edges; dedicated runtime identities must not
 belong to privileged groups even if an edge currently blocks switching. The query
 uses version-stable catalog columns, not PostgreSQL 16-only grant-option fields.
