@@ -13,6 +13,10 @@ description = "OpenAI-compatible AI privacy gateway embedding redact-core"
 keywords = ["pii", "redaction", "gateway", "openai", "privacy"]
 categories = ["web-programming", "network-programming"]
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["otlp", "vault", "oidc", "prometheus"]
 # OTLP exporters for traces, metrics and logs.
