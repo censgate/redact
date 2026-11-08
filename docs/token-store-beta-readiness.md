@@ -48,7 +48,7 @@ been frozen/imported, ordinary compatible-binary rollback remains possible.
 | Gate | Evidence required from the operator |
 | --- | --- |
 | Dedicated Postgres shards | Reviewed schema, runtime role, TLS verification, bounded connection allowance, storage capacity, backups/PITR and service ownership. |
-| Isolation | Runtime owns no schema/tables and cannot assume their owner; no superuser/BYPASSRLS, schema CREATE, TRUNCATE, direct child-partition access or configuration writes. Parent RLS/policies and required grants match v1. |
+| Isolation | Login/effective identities and their entire direct/indirect role-membership closure have no ownership, SUPERUSER/BYPASSRLS/CREATEROLE/REPLICATION, schema CREATE, parent TRUNCATE, child-partition access or configuration writes (including column grants). Non-inheriting and SET-only memberships are checked; SET FALSE edges are conservatively included. Parent RLS/policies and required grants match v1. |
 | Key and routing | Existing durable root DEK preserved; ordered shard IDs, matching runtime connection environment names and all 256 ownership entries identical across replicas. Operator-installed commitment and logical ID match each database. |
 | Network and secrets | Reviewed GitOps config mount, secret references and PG egress; source OpenBao/Kubernetes auth, lineage access, write/metadata/destruction privileges and TLS remain available. No connection strings or key material in Git. |
 | Source history | Authorized inventory of existing principal contexts and predecessor/shard contexts. Recover pruned, rebound, unreadable or over-limit history offline; automatic import must reject evidence gaps. |

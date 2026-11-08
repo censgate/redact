@@ -51,6 +51,16 @@ partition access, disabled/altered RLS and extra policies. Every operation binds
 sets the tenant transaction-locally for forced RLS. This defends missing predicates;
 it does not authorize a compromised trusted service role.
 
+Privilege validation includes the complete direct/indirect membership closure of
+both login and effective identities. A non-inheriting role can still use `SET ROLE`
+([PostgreSQL membership semantics](https://www.postgresql.org/docs/16/role-membership.html)).
+Every member role is checked for privileged attributes, ownership, schema CREATE,
+parent TRUNCATE, child-partition access and configuration writes (including column
+grants). CREATEROLE and REPLICATION are also forbidden. The closure conservatively
+includes PostgreSQL 16+ `SET FALSE` edges; dedicated runtime identities must not
+belong to privileged groups even if an edge currently blocks switching. The query
+uses version-stable catalog columns, not PostgreSQL 16-only grant-option fields.
+
 Sixteen hash partitions use tenant/context. Fingerprint/token-leading indexes and
 parameterized lateral queries keep point reads independent of context size.
 Retirement's scope-leading expression index avoids unrelated tenants in a partition.

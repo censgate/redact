@@ -6,6 +6,7 @@ import subprocess
 
 
 def exercise(root, work, env, sql):
+    from role_preflight_contract import exercise as role_preflight
     # sql is the harness callback that verifies the child PID/data directory
     # before each administrative write. Credentials never enter argv or output.
     key = base64.b64encode(os.urandom(32)).decode()
@@ -92,6 +93,7 @@ def exercise(root, work, env, sql):
                 check(False)
             finally:
                 sql(1, repaired)
+        role_preflight(sql, check, (root / 'crates/redact-token-store/src/runtime-check.sql').read_text())
         check(True)
         for index in range(2):
             assert sql(index, 'SELECT count(*) FROM redact_tokens_v1.contexts').strip() == '0', \
