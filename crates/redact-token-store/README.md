@@ -180,10 +180,12 @@ SLOs, actual traffic traces and availability claims are not measurements.
 Remaining operational gates: production history recovery where automatic import
 refuses evidence gaps; scheduled expiry maintenance and backup retention; online
 rebalance/key rotation/failover; end-to-end production-shaped load/OTel exporter
-validation. The crate remains `publish=false`: updating the release workflow to
-publish it before the gateway was blocked by automatic approval review. That edit
-needs authorization before a crates.io gateway release can depend on this crate.
-No package was published and no live resource or feature flag was changed.
+validation. The draft makes this crate publishable to crates.io and orders its
+future publication before `redact-gateway`. An exact-version, non-yanked sparse
+index check gates the gateway step and the final release verification includes
+this crate. Registry ownership/trusted-publisher setup and the actual release
+remain separate operational actions. Local package validation does not publish
+anything. No package was published and no live resource or feature flag was changed.
 
 ## Reproduce
 

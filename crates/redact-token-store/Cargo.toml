@@ -3,9 +3,16 @@ name = "redact-token-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+authors.workspace = true
 license.workspace = true
-publish = false
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/redact-token-store"
+publish = ["crates-io"]
 description = "Scoped, encrypted token interning and selective resolution"
+keywords = ["pii", "redaction", "privacy", "postgres", "openbao"]
+categories = ["database", "cryptography"]
 
 [dependencies]
 async-trait = "0.1"
