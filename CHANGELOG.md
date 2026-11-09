@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-09
+
 ### Added
 
 - `redact-token-store`: scoped encrypted token interning with PostgreSQL and
@@ -569,4 +571,4 @@ See [README.md](README.md) for usage examples.
 ## Previous Releases (Go Implementation)
 
 For historical reference, versions v0.1.0 through v0.4.1 were the Go implementation.
-Those versions are no longer maintained. Please upgrade to v0.12.7 or later.
+Those versions are no longer maintained. Please upgrade to v0.13.0 or later.
