@@ -52,6 +52,20 @@ pub async fn build(
     IndexedStore::new(Arc::new(target), source, dek, Duration::from_secs(ttl_secs))
 }
 
+/// Expiry-maintenance eligibility of one authorized context. Carries no
+/// identifiers so it is safe to record as a telemetry outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaintenanceState {
+    /// Imported with legacy cleanup complete: expiry maintenance may run.
+    Eligible,
+    /// Imported but legacy cleanup is unfinished; the request path owns it.
+    CleanupPending,
+    /// Permanently retired; ciphertext was already destroyed.
+    Retired,
+    /// Never imported; maintenance must not start its migration.
+    NotImported,
+}
+
 /// Purpose-built token store with a fenced legacy source and durable lineage.
 /// All writers to the source must support freezing before constructing this
 /// adapter. Existing processes must be drained before migration is enabled.
@@ -86,15 +100,55 @@ fn source_failure(error: TokenMapError) -> TokenMapError {
     }
 }
 impl IndexedStore {
+    /// Classify an authorized subject-bound context for expiry maintenance
+    /// without importing, freezing or cleaning its legacy source. Maintenance
+    /// must never expand migration scope through the request preparation path.
+    pub async fn maintenance_state(
+        &self,
+        tenant: &str,
+        context: &str,
+    ) -> Result<MaintenanceState, TokenMapError> {
+        let scope = self.scope(tenant, context)?;
+        Ok(
+            match self.vault.context_state(&scope).await.map_err(failure)? {
+                ContextState::Imported {
+                    legacy_clean: true, ..
+                } => MaintenanceState::Eligible,
+                ContextState::Imported {
+                    legacy_clean: false,
+                    ..
+                } => MaintenanceState::CleanupPending,
+                ContextState::Retired => MaintenanceState::Retired,
+                ContextState::Absent => MaintenanceState::NotImported,
+                // The gateway only creates contexts through import; a directly
+                // active context is outside this adapter's lineage contract.
+                ContextState::Active => return Err(failure(Error::Integrity)),
+            },
+        )
+    }
     /// Maintenance worker entry point for an authorized subject-bound context.
-    /// Retry bounded batches until zero; never delete expired identity reservations.
+    /// Clears at most `limit` expired ciphertexts; identity reservations remain.
+    /// Only already imported contexts whose legacy cleanup completed are
+    /// eligible: other states fail closed instead of starting a migration.
+    /// Retry bounded batches until zero.
     pub async fn purge_expired(
         &self,
         tenant: &str,
         context: &str,
         limit: usize,
     ) -> Result<usize, TokenMapError> {
-        let scope = self.prepare(tenant, context).await?;
+        if limit == 0 || limit > MAX_BATCH {
+            return Err(failure(Error::Invalid));
+        }
+        match self.maintenance_state(tenant, context).await? {
+            MaintenanceState::Eligible => {}
+            // Retirement already destroyed ciphertext; nothing to expire.
+            MaintenanceState::Retired => return Ok(0),
+            MaintenanceState::CleanupPending | MaintenanceState::NotImported => {
+                return Err(failure(Error::Invalid))
+            }
+        }
+        let scope = self.scope(tenant, context)?;
         self.vault
             .purge_expired(&scope, limit)
             .await

@@ -56,6 +56,9 @@ pub struct CapturedMetric {
     pub kind: CapturedMetricKind,
     /// Explicit histogram boundaries when present.
     pub boundaries: Vec<f64>,
+    /// Debug rendering of the aggregated data points, including attributes,
+    /// for privacy assertions.
+    pub data_debug: String,
 }
 
 /// Instrument kind as observed after aggregation.
@@ -237,6 +240,7 @@ impl PushMetricExporter for CapturingMetricExporter {
                     unit: metric.unit().to_string(),
                     kind,
                     boundaries,
+                    data_debug: format!("{:?}", metric.data()),
                 });
             }
         }

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `redact-gateway maintain-token-store`: bounded expiry-maintenance worker for
+  indexed token storage. It purges expired ciphertext of already imported
+  contexts from an authorized inventory, keeps identity reservations, never
+  migrates never-imported contexts, persists an identifier-free durable cursor,
+  fails closed on non-retryable errors and emits RED metrics and spans.
+
+### Changed
+
+- `IndexedStore::purge_expired` no longer runs request-path migration; it
+  rejects contexts that are not imported with cleanup complete and returns zero
+  for retired contexts. `IndexedStore::maintenance_state` exposes eligibility.
+
 ## [0.13.0] - 2026-11-09
 
 ### Added

@@ -916,3 +916,147 @@ async fn legacy_fence_survives_cleanup_and_rebinding_is_rejected() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+#[ignore = "requires isolated token-store PostgreSQL and OpenBao source"]
+async fn expiry_maintenance_clears_only_expired_imported_ciphertext() {
+    use redact_gateway::{
+        redact::token::{Dek, TokenMapping},
+        vault::{
+            indexed::MaintenanceState,
+            maintenance::{
+                CheckpointStore, Inventory, Limits, MaintenanceMetrics, StopReason, Worker,
+            },
+            Kv2Store, TokenMapStore,
+        },
+    };
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&std::env::var("TOKEN_STORE_PG_URL").unwrap())
+        .await
+        .unwrap();
+    let target: Arc<dyn TokenStore> = Arc::new(Postgres::new(pool).await.unwrap());
+    let credential =
+        std::fs::read_to_string(std::env::var("TOKEN_STORE_BAO_TOKEN_FILE").unwrap()).unwrap();
+    let source = Arc::new(
+        Kv2Store::from_settings(&redact_gateway::config::VaultSettings {
+            backend: redact_gateway::config::VaultBackend::VaultKv2,
+            address: Some(std::env::var("TOKEN_STORE_BAO_ADDR").unwrap()),
+            token: Some(credential.trim().into()),
+            path_prefix: format!("maintenance-{}", uuid::Uuid::new_v4()),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let key = Arc::new(Dek::from_bytes([11; 32]));
+    let mapping = |token: &str, original: &str| TokenMapping {
+        token: token.into(),
+        entity_type: "EMAIL_ADDRESS".into(),
+        sealed_value: key.seal(original).unwrap(),
+        created_at: chrono::Utc::now(),
+    };
+    let tenant = format!("synthetic-maint-tenant-{}", uuid::Uuid::new_v4());
+    let live = uuid::Uuid::new_v4().to_string();
+    let untouched = uuid::Uuid::new_v4().to_string();
+    let retired = uuid::Uuid::new_v4().to_string();
+    for context in [&live, &untouched, &retired] {
+        source
+            .put(
+                &tenant,
+                context,
+                &[mapping("[EMAIL_ADDRESS_1]", "legacy@example.invalid")],
+            )
+            .await
+            .unwrap();
+    }
+    // One-second retention for values interned after import.
+    let store =
+        IndexedStore::new(target, source.clone(), key.clone(), Duration::from_secs(1)).unwrap();
+    let assigned = store
+        .commit(
+            &tenant,
+            &live,
+            &[mapping("[EMAIL_ADDRESS_2]", "short-lived@example.invalid")],
+        )
+        .await
+        .unwrap();
+    let durable = assigned["[EMAIL_ADDRESS_2]"].clone();
+    store
+        .commit(
+            &tenant,
+            &retired,
+            &[mapping("[EMAIL_ADDRESS_2]", "erased@example.invalid")],
+        )
+        .await
+        .unwrap();
+    TokenMapStore::purge(&store, &tenant, &retired)
+        .await
+        .unwrap();
+    let before = store
+        .lookup(&tenant, &live, &format!("{durable} [EMAIL_ADDRESS_1]"))
+        .await
+        .unwrap();
+    assert_eq!(before[&durable], "short-lived@example.invalid");
+    assert_eq!(
+        store.maintenance_state(&tenant, &untouched).await.unwrap(),
+        MaintenanceState::NotImported
+    );
+    // The direct entry point refuses to start a migration.
+    assert!(store.purge_expired(&tenant, &untouched, 1).await.is_err());
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    let lines = [&live, &untouched, &retired]
+        .iter()
+        .map(|c| json!({"tenant":tenant,"context":c}).to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let inventory = Inventory::parse(lines.as_bytes()).unwrap();
+    let checkpoint =
+        std::env::temp_dir().join(format!("maintenance-{}.json", uuid::Uuid::new_v4()));
+    let checkpoints = CheckpointStore::new(&checkpoint);
+    let worker = Worker::new(&store, Limits::default(), MaintenanceMetrics::noop()).unwrap();
+    let summary = worker.run(&inventory, &checkpoints, false).await.unwrap();
+    assert_eq!(summary.stop_reason, Some(StopReason::PassComplete));
+    assert_eq!(
+        (
+            summary.drained,
+            summary.retired,
+            summary.not_imported,
+            summary.cleared
+        ),
+        (1, 1, 1, 1),
+        "{summary:?}"
+    );
+    // Expired ciphertext is gone; the unexpired imported identity still restores.
+    let after = store
+        .lookup(&tenant, &live, &format!("{durable} [EMAIL_ADDRESS_1]"))
+        .await
+        .unwrap();
+    assert!(!after.contains_key(&durable), "expired value restored");
+    assert_eq!(after["[EMAIL_ADDRESS_1]"], "legacy@example.invalid");
+    // The expired identity stays reserved: reuse never binds a new token.
+    if let Ok(again) = store
+        .commit(
+            &tenant,
+            &live,
+            &[mapping("[EMAIL_ADDRESS_3]", "short-lived@example.invalid")],
+        )
+        .await
+    {
+        assert_eq!(
+            again["[EMAIL_ADDRESS_3]"], durable,
+            "expired identity rebound"
+        );
+    }
+    // Maintenance did not migrate the never-imported context.
+    assert_eq!(
+        store.maintenance_state(&tenant, &untouched).await.unwrap(),
+        MaintenanceState::NotImported
+    );
+    assert!(source.exists(&tenant, &untouched).await.unwrap());
+    // Idempotent: the next pass finds nothing further to clear.
+    let next = worker.run(&inventory, &checkpoints, false).await.unwrap();
+    assert_eq!((next.pass, next.cleared), (2, 0));
+    let raw = std::fs::read_to_string(&checkpoint).unwrap();
+    assert!(!raw.contains(&tenant) && !raw.contains(&live));
+}

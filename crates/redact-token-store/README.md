@@ -152,7 +152,10 @@ bounded batches while retaining fingerprint/token reservations. PostgreSQL uses 
 partial expiry index; OpenBao rewrites the bounded document and destroys prior
 versions. Retry until zero. An authorized maintenance worker must supply subject-bound
 contexts from its inventory; no global tenant-enumerating API or automatic scheduler
-is installed here. Backups, WAL, replicas and storage-level remnants require their
+is installed here. The gateway's `maintain-token-store` command is that worker: it
+purges only already imported contexts listed in an operator-supplied inventory,
+with a durable cursor, bounded batches/retries and RED telemetry (see
+[the readiness runbook](../../docs/token-store-beta-readiness.md#expiry-maintenance)). Backups, WAL, replicas and storage-level remnants require their
 own retention/erasure procedures; row updates are not physical-media zeroization.
 
 On uncertain commit, retry the same operation. On interrupted migration, retain both

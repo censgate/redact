@@ -97,6 +97,60 @@ is bounded to 64 operations per replica. Request batches are at most 256 mapping
 or references, with independent byte limits. A 413 is terminal; do not turn it
 into an unbounded retry loop. There is no promise of linear throughput.
 
+## Expiry maintenance
+
+`redact-gateway maintain-token-store` is the bounded expiry worker. Run it with the
+same candidate configuration, image and runtime secrets as `check-token-store`, as
+one process per generation (it keeps one batch in flight):
+
+```sh
+redact-gateway --config /run/config/gateway.yaml maintain-token-store \
+  --inventory /run/maintenance/inventory.jsonl \
+  --checkpoint /var/lib/redact-maintenance/cursor.json
+```
+
+The inventory is supplied by the authorized owning system (for example Platform)
+and lists subject-bound contexts, one `{"tenant":"…","context":"…"}` object per
+line. Mount it as a secret: it contains identifiers. The worker never enumerates
+storage. For each entry it reads the target lifecycle without importing, freezing
+or cleaning the legacy source:
+
+| State | Action |
+| --- | --- |
+| Imported, legacy cleanup complete | `IndexedStore::purge_expired` in batches of `--batch-limit` (<=256) until a batch clears zero |
+| Imported, cleanup pending | Skipped; the request path owns cleanup |
+| Retired | Skipped; ciphertext was already destroyed |
+| Never imported | Skipped; maintenance never starts a migration |
+
+Expired identities stay reserved: rows keep their fingerprint and token and only
+ciphertext is cleared. `IndexedStore::purge_expired` itself rejects contexts that
+are not imported, so no caller can expand migration scope through maintenance.
+
+Progress is a durable cursor (inventory SHA-256, length, pass and next index; no
+identifiers) replaced atomically after every context. `<checkpoint>.lock` keeps a
+single worker; a crash leaves it behind and the next run fails closed until an
+operator confirms no worker runs and removes it. Purging is idempotent, so the
+interrupted context is safely repeated. An unfinished cursor bound to a different
+inventory is rejected unless `--restart-pass` is given; a completed pass accepts a
+refreshed inventory and starts the next pass.
+
+Each run is bounded by `--max-contexts`, `--max-batches-per-context`,
+`--max-attempts` (<=10, exponential backoff for `Unavailable`/`Busy` only) and
+`--deadline-secs`. Budget and deadline stops exit 0 and resume next run.
+Integrity, invalid-state, capacity and other non-retryable errors, and exhausted
+retries, stop immediately without advancing the cursor and exit 1. The command
+prints an identifier-free JSON summary (counts, stop reason, error category,
+remaining contexts, pass age).
+
+Telemetry uses the standard `OTEL_*` exporter settings. RED metrics:
+`redact.gateway.tokenstore.maintenance.batches` (by outcome/`error.type`),
+`…batch.duration` (s), `…entries_cleared`, `…contexts` (by outcome), `…retries`,
+and gauges `…backlog.contexts` and `…pass.age` (s). Spans
+`redact.gateway.tokenstore.maintenance.run` and `…batch` carry only backend,
+limits, counts and error category. Alert on failed runs, rising backlog or pass
+age, and sustained retries. The scheduler, its owner and the inventory export are
+deployment-specific and remain activation gates.
+
 ## Candidate preflight and activation
 
 Prepare the complete candidate configuration using the settings documented in the

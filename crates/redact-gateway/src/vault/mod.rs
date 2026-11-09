@@ -8,6 +8,7 @@
 //! never see plaintext original values.
 
 pub mod indexed;
+pub mod maintenance;
 pub mod memory;
 
 #[cfg(feature = "vault")]
