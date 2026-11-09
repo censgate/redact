@@ -65,6 +65,8 @@ fn metric_instruments_match_spec_names_units_and_kinds() {
     metrics.record_policy_decision("default", "allow");
     metrics.record_tokenmap_operation("memory", "put", 0.001, None);
     metrics.record_audit_dropped(1);
+    metrics.record_redact_red("text", "completed", 0.01);
+    metrics.record_redact_red("texts", "overload", 0.002);
 
     // Histograms need at least one data point for boundaries to appear.
     let captured = tt.collect_metrics();
@@ -118,6 +120,39 @@ fn metric_instruments_match_spec_names_units_and_kinds() {
         .expect("redact.gateway.audit.records_dropped");
     assert_eq!(dropped.unit, "{record}");
     assert_eq!(dropped.kind, CapturedMetricKind::Counter);
+
+    let requests = by_name
+        .get(semconv::REDACT_GATEWAY_REDACT_REQUESTS)
+        .expect("redact.gateway.redact.requests");
+    assert_eq!(requests.unit, "{request}");
+    assert_eq!(requests.kind, CapturedMetricKind::Counter);
+    assert_eq!(
+        requests
+            .points
+            .iter()
+            .map(|point| point.value as u64)
+            .sum::<u64>(),
+        2
+    );
+
+    let errors = by_name
+        .get(semconv::REDACT_GATEWAY_REDACT_ERRORS)
+        .expect("redact.gateway.redact.errors");
+    assert_eq!(errors.unit, "{request}");
+    assert_eq!(errors.kind, CapturedMetricKind::Counter);
+    assert_eq!(errors.points.len(), 1);
+    assert_eq!(errors.points[0].value, 1.0);
+
+    let duration = by_name
+        .get(semconv::REDACT_GATEWAY_REDACT_DURATION)
+        .expect("redact.gateway.redact.duration");
+    assert_eq!(duration.unit, "s");
+    assert_eq!(duration.kind, CapturedMetricKind::Histogram);
+    assert_eq!(duration.boundaries, semconv::REDACT_DURATION_BOUNDS);
+    assert_eq!(
+        duration.points.iter().map(|point| point.count).sum::<u64>(),
+        2
+    );
 }
 
 #[test]

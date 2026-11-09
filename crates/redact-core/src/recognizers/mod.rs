@@ -27,6 +27,19 @@ pub trait Recognizer: Send + Sync + Debug {
     /// Analyze text and return detected entities
     fn analyze(&self, text: &str, language: &str) -> Result<Vec<RecognizerResult>>;
 
+    /// Analyze each text independently.
+    ///
+    /// The default calls [`analyze`](Recognizer::analyze) once per text.
+    /// A recognizer may pack model forwards internally. It must not concatenate
+    /// texts, and the outer vector must stay aligned with `texts`.
+    fn analyze_batch(&self, texts: &[&str], language: &str) -> Result<Vec<Vec<RecognizerResult>>> {
+        let mut out = Vec::with_capacity(texts.len());
+        for text in texts {
+            out.push(self.analyze(text, language)?);
+        }
+        Ok(out)
+    }
+
     /// Get the minimum confidence score for this recognizer
     fn min_score(&self) -> f32 {
         0.0

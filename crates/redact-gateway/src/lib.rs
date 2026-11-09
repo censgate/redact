@@ -34,6 +34,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod batch;
 pub mod config;
 pub mod error;
 pub mod openai;

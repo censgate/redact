@@ -70,6 +70,14 @@ pub struct ServerDocument {
     pub enable_http_trace: Option<bool>,
     /// Serve `/metrics`.
     pub metrics_endpoint: Option<bool>,
+    /// Accept field-preserving redact batches.
+    pub redact_batch_enabled: Option<bool>,
+    /// In-flight `texts` requests. Requires a restart.
+    pub redact_batch_inflight: Option<u32>,
+    /// Queue wait for a `texts` permit, in milliseconds. Requires a restart.
+    pub redact_batch_queue_ms: Option<u64>,
+    /// Waiting `texts` requests. Requires a restart.
+    pub redact_batch_queue_depth: Option<u32>,
 }
 
 /// Provider section.
@@ -257,6 +265,22 @@ impl GatewayDocument {
                 server.enable_http_trace,
             );
             apply_opt(&mut config.server.metrics_endpoint, server.metrics_endpoint);
+            apply_opt(
+                &mut config.server.redact_batch_enabled,
+                server.redact_batch_enabled,
+            );
+            apply_opt(
+                &mut config.server.redact_batch_inflight,
+                server.redact_batch_inflight,
+            );
+            apply_opt(
+                &mut config.server.redact_batch_queue_ms,
+                server.redact_batch_queue_ms,
+            );
+            apply_opt(
+                &mut config.server.redact_batch_queue_depth,
+                server.redact_batch_queue_depth,
+            );
         }
 
         if let Some(provider) = self.provider {
@@ -465,6 +489,10 @@ server:
   host: 127.0.0.1
   port: 9090
   metrics_endpoint: false
+  redact_batch_enabled: true
+  redact_batch_inflight: 2
+  redact_batch_queue_ms: 250
+  redact_batch_queue_depth: 3
 provider:
   base_url: https://api.openai.com
   request_timeout_secs: 120
@@ -490,6 +518,10 @@ telemetry:
         assert_eq!(config.server.host, "127.0.0.1");
         assert_eq!(config.server.port, 9090);
         assert!(!config.server.metrics_endpoint);
+        assert!(config.server.redact_batch_enabled);
+        assert_eq!(config.server.redact_batch_inflight, 2);
+        assert_eq!(config.server.redact_batch_queue_ms, 250);
+        assert_eq!(config.server.redact_batch_queue_depth, 3);
         assert_eq!(config.provider.base_url, "https://api.openai.com");
         assert_eq!(config.provider.request_timeout_secs, 120);
         assert_eq!(config.redaction.stream_mode, StreamMode::Incremental);

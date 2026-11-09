@@ -14,6 +14,7 @@ Further reading:
 | Configuration (YAML, env, reload) | [docs/gateway/configuration.md](../../docs/gateway/configuration.md) |
 | Policy profiles and actions | [docs/gateway/policy.md](../../docs/gateway/policy.md) |
 | Reversible tokenization | [docs/gateway/tokenization.md](../../docs/gateway/tokenization.md) |
+| Field-preserving batches | [docs/redaction-batching.md](../../docs/redaction-batching.md) |
 | Authentication | [docs/gateway/authentication.md](../../docs/gateway/authentication.md) |
 | OpenTelemetry traces and metrics | [docs/gateway/telemetry.md](../../docs/gateway/telemetry.md) |
 | Audit records | [docs/gateway/audit.md](../../docs/gateway/audit.md) |
@@ -196,6 +197,10 @@ Every gateway knob uses the `CENSGATE_` prefix (one name per setting). The only 
 | `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
 | `CENSGATE_ENABLE_TRACING` | `true` | HTTP request tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
+| `CENSGATE_REDACT_BATCH_ENABLED` | `false` | Accept `texts` on `/v1/redact` | <!-- pragma: allowlist secret -->
+| `CENSGATE_REDACT_BATCH_INFLIGHT` | `1` | In-flight `texts` requests (restart) | <!-- pragma: allowlist secret -->
+| `CENSGATE_REDACT_BATCH_QUEUE_MS` | `5000` | Queue wait for a `texts` permit (restart) | <!-- pragma: allowlist secret -->
+| `CENSGATE_REDACT_BATCH_QUEUE_DEPTH` | `4` | Waiting `texts` requests (restart) | <!-- pragma: allowlist secret -->
 | `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout |
 | `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout |
 | `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Cap on buffered provider response bodies |
@@ -246,7 +251,7 @@ Every gateway knob uses the `CENSGATE_` prefix (one name per setting). The only 
 Documents use `deny_unknown_fields`. Unknown keys fail startup. Sections:
 
 ```yaml
-server:      # host, port, enable_http_trace, metrics_endpoint
+server:      # host, port, enable_http_trace, metrics_endpoint, redact_batch_enabled, redact_batch_inflight, redact_batch_queue_ms, redact_batch_queue_depth
 provider:    # name, base_url, api_key, timeouts, max_body_bytes, forward_client_authorization
 redaction:   # stream_mode, stream_holdback_bytes, session_header, profile_header, allow_profile_header
 packs:       # paths, disable_builtin

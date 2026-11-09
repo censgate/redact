@@ -14,11 +14,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use tracing::{debug, info, warn};
 
-/// Pad buckets used when the ONNX `input_ids` sequence dim is dynamic.
+/// Pad lengths when the ONNX `input_ids` sequence dim is dynamic.
 /// Fixed-length exports keep `max_seq_length` (default 512).
-const PAD_BUCKETS: &[usize] = &[32, 64, 128, 256, 512];
+///
+/// The steps between 64 and 512 keep a short leaf off the next power-of-two
+/// sequence. Extra pad positions are attention-masked, so a tighter bucket
+/// does not change logits on real tokens.
+const PAD_BUCKETS: &[usize] = &[32, 48, 64, 96, 128, 192, 256, 384, 512];
 const DEFAULT_SESSION_POOL: usize = 2;
 const MAX_SESSION_POOL: usize = 4;
+/// Sequences packed into one ONNX forward. A bound, not a latency target.
+pub(crate) const MAX_INFER_SEQUENCES: usize = 32;
+/// Tokens in one forward. Longer buckets use fewer sequences.
+pub(crate) const MAX_INFER_TOKENS: usize = 2048;
 
 /// Bounded ONNX session pool. `try_lock` round-robin, then block.
 struct SessionPool {
@@ -89,6 +97,39 @@ pub(crate) fn pad_length(token_len: usize, max_seq: usize, dynamic: bool) -> usi
         }
     }
     cap
+}
+
+/// How many equal-length sequences fit in one forward.
+pub(crate) fn infer_chunk_limit(seq_len: usize) -> usize {
+    if seq_len == 0 {
+        return 1;
+    }
+    (MAX_INFER_TOKENS / seq_len).clamp(1, MAX_INFER_SEQUENCES)
+}
+
+/// Forwards required to score `sequences` rows that already share `seq_len`.
+#[cfg(test)]
+pub(crate) fn planned_forward_count(seq_len: usize, sequences: usize) -> usize {
+    if sequences == 0 {
+        return 0;
+    }
+    sequences.div_ceil(infer_chunk_limit(seq_len))
+}
+
+/// Forwards required when each length is one already-padded sequence.
+///
+/// Equal lengths share a forward. Different lengths never share one, because
+/// a forward is a rectangular tensor.
+#[cfg(test)]
+pub(crate) fn planned_forwards(lengths: &[usize]) -> usize {
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for length in lengths {
+        *counts.entry(*length).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(seq_len, sequences)| planned_forward_count(seq_len, sequences))
+        .sum()
 }
 
 fn input_seq_is_dynamic(session: &Session) -> bool {
@@ -540,37 +581,48 @@ impl NerRecognizer {
         self.config.label_mappings.get(label).cloned()
     }
 
-    /// Run inference on tokenized input
-    fn infer(&self, input_ids: &[u32], attention_mask: &[u32]) -> Result<Vec<Vec<f32>>> {
+    /// Run one forward. Every row must already share `seq_len`.
+    ///
+    /// Returns one logit matrix per row, in request order. Rows stay
+    /// independent: padding is masked, and nothing is concatenated into a
+    /// single sequence.
+    fn infer_batch(&self, rows: &[(Vec<u32>, Vec<u32>)]) -> Result<Vec<Vec<Vec<f32>>>> {
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
         let session_mutex = self
             .session
             .as_ref()
             .ok_or_else(|| anyhow!("ONNX session not loaded"))?;
-
         let mut session = {
             let _wait = redact_core::operations_enabled()
                 .then(|| tracing::info_span!("redact.gateway.detect.onnx.lock_wait").entered());
             session_mutex.lock()?
         };
 
-        // Create 2D arrays with shape [1, seq_len]
-        let seq_len = input_ids.len();
-        let input_ids_i64: Vec<i64> = input_ids.iter().map(|&x| x as i64).collect();
-        let attention_mask_i64: Vec<i64> = attention_mask.iter().map(|&x| x as i64).collect();
-
-        let input_ids_value = Value::from_array(([1, seq_len], input_ids_i64))?;
-        let attention_mask_value = Value::from_array(([1, seq_len], attention_mask_i64))?;
-
-        // Build inputs list — only include token_type_ids when the model expects it
-        // (BERT-family needs it; DistilBERT and others do not).
+        let batch = rows.len();
+        let seq_len = rows[0].0.len();
+        if rows
+            .iter()
+            .any(|(ids, mask)| ids.len() != seq_len || mask.len() != seq_len)
+        {
+            return Err(anyhow!("mixed sequence lengths in one forward"));
+        }
+        let mut input_ids_i64 = Vec::with_capacity(batch * seq_len);
+        let mut attention_mask_i64 = Vec::with_capacity(batch * seq_len);
+        for (ids, mask) in rows {
+            input_ids_i64.extend(ids.iter().map(|&id| id as i64));
+            attention_mask_i64.extend(mask.iter().map(|&bit| bit as i64));
+        }
+        let input_ids_value = Value::from_array(([batch, seq_len], input_ids_i64))?;
+        let attention_mask_value = Value::from_array(([batch, seq_len], attention_mask_i64))?;
         let mut inputs: Vec<(std::borrow::Cow<'_, str>, Value)> = vec![
             ("input_ids".into(), input_ids_value.into()),
             ("attention_mask".into(), attention_mask_value.into()),
         ];
-
         if self.needs_token_type_ids {
-            let token_type_ids_i64: Vec<i64> = vec![0i64; seq_len];
-            let token_type_ids_value = Value::from_array(([1, seq_len], token_type_ids_i64))?;
+            let token_type_ids_i64 = vec![0i64; batch * seq_len];
+            let token_type_ids_value = Value::from_array(([batch, seq_len], token_type_ids_i64))?;
             inputs.push(("token_type_ids".into(), token_type_ids_value.into()));
         }
 
@@ -579,30 +631,119 @@ impl NerRecognizer {
                 .then(|| tracing::info_span!("redact.gateway.detect.onnx.exec").entered());
             session.run(inputs)?
         };
-
-        // Extract logits - shape should be [1, seq_len, num_labels]
         let (shape, logits_data) = outputs["logits"].try_extract_tensor::<f32>()?;
         let shape_dims: &[i64] = shape.as_ref();
-
-        if shape_dims.len() != 3 || shape_dims[0] != 1 {
+        if shape_dims.len() != 3 || shape_dims[0] as usize != batch {
             return Err(anyhow!("Unexpected logits shape: {:?}", shape_dims));
         }
-
         let seq_len_out = shape_dims[1] as usize;
         let num_labels = shape_dims[2] as usize;
-
-        // Convert to Vec<Vec<f32>> where outer vec is tokens, inner vec is label scores
-        let mut result = Vec::new();
-        for i in 0..seq_len_out {
-            let mut token_logits = Vec::new();
-            for j in 0..num_labels {
-                let idx = i * num_labels + j;
-                token_logits.push(logits_data[idx]);
+        let mut result = Vec::with_capacity(batch);
+        for row in 0..batch {
+            let mut tokens = Vec::with_capacity(seq_len_out);
+            for token in 0..seq_len_out {
+                let mut token_logits = Vec::with_capacity(num_labels);
+                for label in 0..num_labels {
+                    let idx = (row * seq_len_out + token) * num_labels + label;
+                    token_logits.push(logits_data[idx]);
+                }
+                tokens.push(token_logits);
             }
-            result.push(token_logits);
+            result.push(tokens);
         }
-
         Ok(result)
+    }
+
+    fn infer(&self, input_ids: &[u32], attention_mask: &[u32]) -> Result<Vec<Vec<f32>>> {
+        let rows = self.infer_batch(&[(input_ids.to_vec(), attention_mask.to_vec())])?;
+        rows.into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("ONNX forward returned no rows"))
+    }
+
+    fn spans_from_logits(
+        &self,
+        text: &str,
+        logits: &[Vec<f32>],
+        offsets: &[(usize, usize)],
+    ) -> Vec<RecognizerResult> {
+        let mut predictions = Vec::with_capacity(logits.len());
+        let mut probabilities = Vec::with_capacity(logits.len());
+        for token_logits in logits {
+            let probs = Self::softmax(token_logits);
+            let (pred_id, &max_prob) = probs
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .expect("softmax produced a label");
+            predictions.push(pred_id);
+            probabilities.push(max_prob);
+        }
+        self.parse_bio_tags(text, &predictions, &probabilities, offsets)
+    }
+
+    /// Detect each text independently, packing equal-length rows into one forward.
+    pub(crate) fn analyze_many(&self, texts: &[&str]) -> Result<Vec<Vec<RecognizerResult>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.is_available() {
+            return Ok(vec![Vec::new(); texts.len()]);
+        }
+        let tokenizer = self.tokenizer.as_ref().unwrap();
+        let pad_id = tokenizer.get_padding_id().unwrap_or(0);
+        let mut encoded = Vec::with_capacity(texts.len());
+        for text in texts {
+            let encoding = {
+                let _tok = redact_core::operations_enabled()
+                    .then(|| tracing::info_span!("redact.gateway.detect.tokenizer").entered());
+                let mut encoding = tokenizer.encode(text, true)?;
+                let target = pad_length(
+                    encoding.ids.len(),
+                    self.config.max_seq_length,
+                    self.dynamic_seq,
+                );
+                encoding.pad_to_length(target, pad_id);
+                encoding
+            };
+            encoded.push(encoding);
+        }
+        let mut by_len: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (index, encoding) in encoded.iter().enumerate() {
+            by_len.entry(encoding.ids.len()).or_default().push(index);
+        }
+        let mut outputs = vec![Vec::new(); texts.len()];
+        for (seq_len, indices) in by_len {
+            let limit = infer_chunk_limit(seq_len);
+            for chunk in indices.chunks(limit) {
+                let rows: Vec<(Vec<u32>, Vec<u32>)> = chunk
+                    .iter()
+                    .map(|&index| {
+                        (
+                            encoded[index].ids.clone(),
+                            encoded[index].attention_mask.clone(),
+                        )
+                    })
+                    .collect();
+                let logits = self.infer_batch(&rows)?;
+                if logits.len() != chunk.len() {
+                    return Err(anyhow!(
+                        "ONNX forward returned {} rows for {} sequences",
+                        logits.len(),
+                        chunk.len()
+                    ));
+                }
+                for (row, &index) in chunk.iter().enumerate() {
+                    let decoded = {
+                        let _decode = redact_core::operations_enabled()
+                            .then(|| tracing::info_span!("redact.gateway.detect.decode").entered());
+                        self.spans_from_logits(texts[index], &logits[row], &encoded[index].offsets)
+                    };
+                    outputs[index] = decoded;
+                }
+            }
+        }
+        Ok(outputs)
     }
 
     /// Apply softmax to convert logits to probabilities
@@ -788,19 +929,7 @@ impl NerRecognizer {
         let target = pad.max(encoding.ids.len()).min(self.config.max_seq_length);
         encoding.pad_to_length(target, pad_id);
         let logits = self.infer(&encoding.ids, &encoding.attention_mask)?;
-        let mut predictions = Vec::new();
-        let mut probabilities = Vec::new();
-        for token_logits in &logits {
-            let probs = Self::softmax(token_logits);
-            let (pred_id, &max_prob) = probs
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                .unwrap();
-            predictions.push(pred_id);
-            probabilities.push(max_prob);
-        }
-        Ok(self.parse_bio_tags(text, &predictions, &probabilities, &encoding.offsets))
+        Ok(self.spans_from_logits(text, &logits, &encoding.offsets))
     }
 }
 
@@ -818,52 +947,13 @@ impl Recognizer for NerRecognizer {
         ]
     }
 
-    fn analyze(&self, text: &str, _language: &str) -> Result<Vec<RecognizerResult>> {
-        // Check if NER is available
-        if !self.is_available() {
-            return Ok(vec![]);
-        }
+    fn analyze(&self, text: &str, language: &str) -> Result<Vec<RecognizerResult>> {
+        let mut rows = self.analyze_batch(std::slice::from_ref(&text), language)?;
+        Ok(rows.pop().unwrap_or_default())
+    }
 
-        let tokenizer = self.tokenizer.as_ref().unwrap();
-
-        let encoding = {
-            let _tok = redact_core::operations_enabled()
-                .then(|| tracing::info_span!("redact.gateway.detect.tokenizer").entered());
-            let mut encoding = tokenizer.encode(text, true)?;
-            let pad_id = tokenizer.get_padding_id().unwrap_or(0);
-            let target = pad_length(
-                encoding.ids.len(),
-                self.config.max_seq_length,
-                self.dynamic_seq,
-            );
-            encoding.pad_to_length(target, pad_id);
-            encoding
-        };
-
-        // Run inference
-        let logits = self.infer(&encoding.ids, &encoding.attention_mask)?;
-
-        let results = {
-            let _decode = redact_core::operations_enabled()
-                .then(|| tracing::info_span!("redact.gateway.detect.decode").entered());
-            let mut predictions = Vec::new();
-            let mut probabilities = Vec::new();
-
-            for token_logits in &logits {
-                let probs = Self::softmax(token_logits);
-                let (pred_id, &max_prob) = probs
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-                    .unwrap();
-                predictions.push(pred_id);
-                probabilities.push(max_prob);
-            }
-
-            self.parse_bio_tags(text, &predictions, &probabilities, &encoding.offsets)
-        };
-
-        Ok(results)
+    fn analyze_batch(&self, texts: &[&str], _language: &str) -> Result<Vec<Vec<RecognizerResult>>> {
+        self.analyze_many(texts)
     }
 
     fn supports_language(&self, language: &str) -> bool {
@@ -1055,18 +1145,39 @@ mod tests {
     }
 
     #[test]
+    fn test_infer_chunk_limit_shrinks_for_long_sequences() {
+        assert_eq!(infer_chunk_limit(32), 32);
+        assert_eq!(infer_chunk_limit(48), 32);
+        assert_eq!(infer_chunk_limit(64), 32);
+        assert_eq!(infer_chunk_limit(96), 21);
+        assert_eq!(infer_chunk_limit(128), 16);
+        assert_eq!(infer_chunk_limit(192), 10);
+        assert_eq!(infer_chunk_limit(256), 8);
+        assert_eq!(infer_chunk_limit(384), 5);
+        assert_eq!(infer_chunk_limit(512), 4);
+        assert_eq!(infer_chunk_limit(4096), 1);
+        assert_eq!(planned_forward_count(32, 800), 25);
+        assert_eq!(planned_forward_count(32, 0), 0);
+        assert_eq!(planned_forwards(&[32, 32, 96, 32]), 2);
+        assert_eq!(planned_forwards(&vec![32; 800]), 25);
+    }
+
+    #[test]
     fn test_pad_length_dynamic_buckets() {
         assert_eq!(pad_length(1, 512, true), 32);
         assert_eq!(pad_length(32, 512, true), 32);
-        assert_eq!(pad_length(33, 512, true), 64);
-        assert_eq!(pad_length(64, 512, true), 64);
-        assert_eq!(pad_length(65, 512, true), 128);
+        assert_eq!(pad_length(33, 512, true), 48);
+        assert_eq!(pad_length(49, 512, true), 64);
+        assert_eq!(pad_length(65, 512, true), 96);
+        assert_eq!(pad_length(97, 512, true), 128);
+        assert_eq!(pad_length(160, 512, true), 192);
         assert_eq!(pad_length(200, 512, true), 256);
-        assert_eq!(pad_length(257, 512, true), 512);
+        assert_eq!(pad_length(300, 512, true), 384);
+        assert_eq!(pad_length(400, 512, true), 512);
         assert_eq!(pad_length(512, 512, true), 512);
         assert_eq!(pad_length(600, 512, true), 512);
         assert_eq!(pad_length(10, 64, true), 32);
-        assert_eq!(pad_length(40, 64, true), 64);
+        assert_eq!(pad_length(40, 64, true), 48);
         assert_eq!(pad_length(80, 64, true), 64);
     }
 

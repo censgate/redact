@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use crate::audit::{AuditContext, AuditDispatcher, AuditEvent, AuditOutcome};
 use crate::auth::{AuthContext, Authenticator};
+use crate::batch::{AdmitFail, BatchGate, RedGuard};
 use crate::config::{ConfigHandle, ResolvedConfig, StreamMode};
 use crate::error::GatewayError;
 use crate::policy::Profile;
@@ -62,6 +63,8 @@ pub struct AppState {
     pub audit: Arc<AuditDispatcher>,
     /// Telemetry handles.
     pub telemetry: Arc<Telemetry>,
+    /// Admission gate for `texts` batches. Built once at startup.
+    pub batch: BatchGate,
 }
 
 impl AppState {
@@ -1332,8 +1335,17 @@ impl VaultContextRequest {
 /// Request body for `/v1/redact` and `/v1/compliance/check`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RedactRequest {
-    /// Text to analyze.
-    pub text: String,
+    /// Text to analyze. Mutually exclusive with [`texts`](Self::texts).
+    ///
+    /// Absent and a present null are different: null is rejected, and omitting
+    /// both `text` and `texts` is rejected. An empty string is a scalar request.
+    #[serde(default, deserialize_with = "present_value")]
+    pub text: Option<String>,
+    /// Independent strings in request order. Mutually exclusive with `text`.
+    ///
+    /// A present null is rejected. Omitted means this is not a batch.
+    #[serde(default, deserialize_with = "present_value")]
+    pub texts: Option<Vec<String>>,
     /// Policy profile to apply. Defaults to the configured default profile.
     #[serde(default)]
     pub profile: Option<String>,
@@ -1343,6 +1355,76 @@ pub struct RedactRequest {
     /// Optional vault addressing. `vault.context_id` aliases `session_id`.
     #[serde(default)]
     pub vault: Option<VaultContextRequest>,
+}
+
+/// A present null is invalid, rather than treated as an absent field.
+fn present_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+/// Maximum independent strings per batch.
+pub const MAX_BATCH_TEXTS: usize = 800;
+/// Maximum UTF-8 bytes in one batch string.
+pub const MAX_BATCH_TEXT_BYTES: usize = 64 * 1024;
+/// Maximum decoded UTF-8 bytes across a batch.
+pub const MAX_BATCH_TOTAL_BYTES: usize = 1024 * 1024;
+/// Caller deadline for a `texts` request. A caller can shorten it and cannot extend it.
+pub const BATCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// Leaves detected together so a deadline can stop the next chunk and the write.
+const DETECT_CHUNK: usize = 32;
+/// Shortens [`BATCH_TIMEOUT`]. Ignored on scalar requests.
+const REDACT_TIMEOUT: HeaderName = HeaderName::from_static("x-censgate-redact-timeout-ms"); // pragma: allowlist secret
+
+impl RedactRequest {
+    fn validate_shape(&self) -> Result<(), GatewayError> {
+        match (&self.text, self.texts.as_ref()) {
+            (Some(_), None) => Ok(()),
+            (None, Some(texts)) => {
+                if texts.is_empty() || texts.len() > MAX_BATCH_TEXTS {
+                    return Err(GatewayError::InvalidRequest(
+                        "texts must contain 1 to 800 strings".into(),
+                    ));
+                }
+                let mut total = 0usize;
+                for text in texts {
+                    if text.len() > MAX_BATCH_TEXT_BYTES {
+                        return Err(GatewayError::InvalidRequest(
+                            "batch string exceeds 65536 UTF-8 bytes".into(),
+                        ));
+                    }
+                    total = total.saturating_add(text.len());
+                }
+                if total > MAX_BATCH_TOTAL_BYTES {
+                    return Err(GatewayError::InvalidRequest(
+                        "batch exceeds 1048576 UTF-8 bytes".into(),
+                    ));
+                }
+                Ok(())
+            }
+            _ => Err(GatewayError::InvalidRequest(
+                "provide exactly one of text or texts".into(),
+            )),
+        }
+    }
+}
+
+/// Field-preserving batch response. `outcome` is aggregated across every leaf.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchRedactResponse {
+    /// Redacted strings in the same order and cardinality as the request.
+    pub texts: Vec<String>,
+    /// Profile applied to every leaf.
+    pub profile: String,
+    /// Session owning the batch's mappings.
+    pub session_id: String,
+    /// Whether any leaf was blocked by policy.
+    pub blocked: bool,
+    /// Aggregate counts, without plaintext.
+    pub outcome: RedactionOutcome,
 }
 
 /// Response body for `/v1/redact`.
@@ -1403,7 +1485,53 @@ fn mint_retry_backoff(attempt: u32) -> Duration {
 async fn redact_endpoint(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
-    Json(request): Json<RedactRequest>,
+    headers: HeaderMap,
+    request: Result<Json<RedactRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let mut guard = RedGuard::new(state.telemetry.metrics().clone(), "text");
+    match request {
+        Ok(Json(request)) => {
+            if request.texts.is_some() {
+                guard.mode = "texts";
+            }
+            dispatch_redact(&mut guard, state, auth, &headers, request).await
+        }
+        Err(err) => (
+            err.status(),
+            Json(json!({
+                "error": {
+                    "message": "invalid redact request body",
+                    "type": "invalid_request_error"
+                }
+            })),
+        )
+            .into_response(),
+    }
+}
+
+async fn dispatch_redact(
+    guard: &mut RedGuard,
+    state: AppState,
+    auth: AuthContext,
+    headers: &HeaderMap,
+    request: RedactRequest,
+) -> Response {
+    if let Err(err) = request.validate_shape() {
+        return err.into_response();
+    }
+    if request.texts.is_some() {
+        return redact_texts(guard, state, auth, headers, request).await;
+    }
+    let text = request.text.clone().unwrap_or_default();
+    redact_scalar(guard, state, auth, request, text).await
+}
+
+async fn redact_scalar(
+    guard: &mut RedGuard,
+    state: AppState,
+    auth: AuthContext,
+    request: RedactRequest,
+    text_input: String,
 ) -> Response {
     let config = state.config();
     let profile = match resolve_profile(&config, &auth, request.profile.as_deref()) {
@@ -1483,7 +1611,7 @@ async fn redact_endpoint(
         };
         let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session)
             .with_trace_level(level);
-        let text = match ctx.redact(&request.text) {
+        let text = match ctx.redact(&text_input) {
             Ok(text) => text,
             Err(err) => return redaction_error(err).into_response(),
         };
@@ -1563,6 +1691,7 @@ async fn redact_endpoint(
         .metrics()
         .record_redaction_outcome(&outcome, &profile.name);
 
+    guard.outcome = "completed";
     Json(RedactResponse {
         content_sha256: content_digest(&text),
         text,
@@ -1572,6 +1701,274 @@ async fn redact_endpoint(
         outcome,
     })
     .into_response()
+}
+
+fn batch_deadline(headers: &HeaderMap) -> Result<tokio::time::Instant, GatewayError> {
+    let timeout = match headers.get(REDACT_TIMEOUT) {
+        None => BATCH_TIMEOUT,
+        Some(value) => match value.to_str().ok().and_then(|raw| raw.parse::<u64>().ok()) {
+            Some(ms) if ms > 0 => Duration::from_millis(ms).min(BATCH_TIMEOUT),
+            _ => {
+                return Err(GatewayError::InvalidRequest(
+                    "invalid redact timeout".into(),
+                ))
+            }
+        },
+    };
+    Ok(tokio::time::Instant::now() + timeout)
+}
+
+fn batch_error(err: GatewayError) -> (&'static str, Response) {
+    let outcome = match &err {
+        GatewayError::Overloaded => "overload",
+        GatewayError::Deadline => "deadline",
+        _ => "error",
+    };
+    (outcome, err.into_response())
+}
+
+async fn redact_texts(
+    guard: &mut RedGuard,
+    state: AppState,
+    auth: AuthContext,
+    headers: &HeaderMap,
+    request: RedactRequest,
+) -> Response {
+    let texts = request.texts.clone().unwrap_or_default();
+    if !state.config().server.redact_batch_enabled {
+        return GatewayError::InvalidRequest("redact batching is disabled".into()).into_response();
+    }
+    let deadline = match batch_deadline(headers) {
+        Ok(deadline) => deadline,
+        Err(err) => return err.into_response(),
+    };
+    let permit = match state.batch.acquire(deadline).await {
+        Ok(permit) => permit,
+        Err(AdmitFail::Overload) => {
+            guard.outcome = "overload";
+            return GatewayError::Overloaded.into_response();
+        }
+        Err(AdmitFail::Deadline) => {
+            guard.outcome = "deadline";
+            return GatewayError::Deadline.into_response();
+        }
+        Err(AdmitFail::Closed) => {
+            return GatewayError::DependencyUnavailable("redact admission closed".into())
+                .into_response();
+        }
+    };
+    let work = redact_texts_admitted(state.clone(), auth, request, texts, deadline);
+    let result = tokio::time::timeout_at(deadline, work).await;
+    drop(permit);
+    match result {
+        Ok(Ok(response)) => {
+            guard.outcome = "completed";
+            response
+        }
+        Ok(Err(err)) => {
+            let (outcome, response) = batch_error(err);
+            guard.outcome = outcome;
+            response
+        }
+        Err(_) => {
+            guard.outcome = "deadline";
+            GatewayError::Deadline.into_response()
+        }
+    }
+}
+
+async fn redact_texts_admitted(
+    state: AppState,
+    auth: AuthContext,
+    request: RedactRequest,
+    inputs: Vec<String>,
+    deadline: tokio::time::Instant,
+) -> Result<Response, GatewayError> {
+    let config = state.config();
+    let profile = resolve_profile(&config, &auth, request.profile.as_deref())?;
+    if profile.uses_tokenization() && state.tokens.backend_name() == "off" {
+        return Err(GatewayError::DependencyUnavailable(
+            "batch tokenization requires a token map backend".into(),
+        ));
+    }
+    let session_id = caller_session_id(request.session_id, request.vault.as_ref(), true)?;
+    let token_map_session = match auth.subject.as_deref() {
+        Some(subject) => subject_bound_session_key(&session_id, subject),
+        None => session_id.clone(),
+    };
+    let level = config.telemetry.operations;
+    let mut attempt = 0u32;
+    let (texts, outcome) = loop {
+        attempt += 1;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(GatewayError::Deadline);
+        }
+        let mut session = if state.tokens.indexed().is_some() {
+            if auth.subject.is_none() || auth.mode == "none" {
+                return Err(GatewayError::Forbidden(
+                    "indexed token storage requires authentication".into(),
+                ));
+            }
+            TokenSession::pending(session_id.clone(), &auth.tenant, state.dek.clone())
+        } else if state.tokens.backend_name() != "off" {
+            let get_span = spans::tokenmap_get(
+                level,
+                state.tokens.backend_name(),
+                0,
+                config.vault.address.as_deref(),
+                None,
+            );
+            let get_fut = state.tokens.get(&auth.tenant, &token_map_session);
+            let got = if let Some(span) = get_span.clone() {
+                get_fut.instrument(span).await
+            } else {
+                get_fut.await
+            };
+            match got {
+                Ok(existing) => {
+                    if let Some(span) = &get_span {
+                        spans::finish_tokenmap(span, existing.len(), None);
+                    }
+                    TokenSession::resume(
+                        session_id.clone(),
+                        &auth.tenant,
+                        state.dek.clone(),
+                        existing,
+                    )
+                }
+                Err(_) => {
+                    if let Some(span) = &get_span {
+                        spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                    }
+                    return Err(GatewayError::DependencyUnavailable(
+                        "token map read failed".into(),
+                    ));
+                }
+            }
+        } else {
+            TokenSession::new(session_id.clone(), &auth.tenant, state.dek.clone())
+        };
+
+        let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session)
+            .with_trace_level(level);
+        let mut texts = Vec::with_capacity(inputs.len());
+        let mut offset = 0usize;
+        while offset < inputs.len() {
+            tokio::task::yield_now().await;
+            if tokio::time::Instant::now() >= deadline {
+                return Err(GatewayError::Deadline);
+            }
+            let end = (offset + DETECT_CHUNK).min(inputs.len());
+            let slice = &inputs[offset..end];
+            let mut pending_at = Vec::new();
+            let mut pending = Vec::new();
+            for (index, text) in slice.iter().enumerate() {
+                if text.trim().is_empty() {
+                    continue;
+                }
+                pending_at.push(index);
+                pending.push(text.as_str());
+            }
+            let detected = if pending.is_empty() {
+                Vec::new()
+            } else {
+                ctx.detect_many(&pending).map_err(|_| {
+                    GatewayError::Redaction("batch detection or tokenization failed".into())
+                })?
+            };
+            if detected.len() != pending.len() {
+                return Err(GatewayError::Redaction(
+                    "batch detection or tokenization failed".into(),
+                ));
+            }
+            let mut by_index = vec![None; slice.len()];
+            for (index, entities) in pending_at.into_iter().zip(detected) {
+                by_index[index] = Some(entities);
+            }
+            for (index, text) in slice.iter().enumerate() {
+                let redacted = match by_index[index].take() {
+                    None => text.to_string(),
+                    Some(entities) => ctx.apply_detected(text, entities).map_err(|_| {
+                        GatewayError::Redaction("batch detection or tokenization failed".into())
+                    })?,
+                };
+                texts.push(redacted);
+            }
+            offset = end;
+        }
+        let outcome = ctx.finish();
+        if tokio::time::Instant::now() >= deadline {
+            return Err(GatewayError::Deadline);
+        }
+
+        let minted = session.take_new_mappings();
+        if let Some(indexed) = state.tokens.indexed() {
+            let replacements = indexed
+                .commit(&auth.tenant, &token_map_session, &minted)
+                .await?;
+            let texts = texts
+                .iter()
+                .map(|text| crate::redact::token::restore_text(text, &replacements).0)
+                .collect();
+            break (texts, outcome);
+        }
+        if !minted.is_empty() && state.tokens.backend_name() != "off" {
+            let put_span = spans::tokenmap_put(
+                level,
+                state.tokens.backend_name(),
+                minted.len(),
+                config.vault.address.as_deref(),
+                None,
+            );
+            let put_fut = state.tokens.put(&auth.tenant, &token_map_session, &minted);
+            let put_result = if let Some(span) = put_span.clone() {
+                put_fut.instrument(span).await
+            } else {
+                put_fut.await
+            };
+            if let Err(err) = put_result {
+                if let Some(span) = &put_span {
+                    spans::finish_tokenmap(span, 0, Some("token_map_error"));
+                }
+                if matches!(err, TokenMapError::Conflict(_)) && attempt < MAX_MINT_ATTEMPTS {
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(GatewayError::Deadline);
+                    }
+                    debug!(
+                        attempt,
+                        "token label conflict; re-reading session and re-minting"
+                    );
+                    tokio::time::sleep(mint_retry_backoff(attempt)).await;
+                    continue;
+                }
+                if matches!(err, TokenMapError::Conflict(_)) {
+                    warn!(
+                        attempts = attempt,
+                        "token label conflicts persisted after bounded retries; failing closed"
+                    );
+                }
+                return Err(GatewayError::DependencyUnavailable(
+                    "token map write failed".into(),
+                ));
+            } else if let Some(span) = &put_span {
+                spans::finish_tokenmap(span, minted.len(), None);
+            }
+        }
+        break (texts, outcome);
+    };
+
+    state
+        .telemetry
+        .metrics()
+        .record_redaction_outcome(&outcome, &profile.name);
+    Ok(Json(BatchRedactResponse {
+        texts,
+        profile: profile.name.clone(),
+        session_id,
+        blocked: outcome.is_blocked(),
+        outcome,
+    })
+    .into_response())
 }
 
 /// Request body for `/v1/restore`.
@@ -1976,6 +2373,10 @@ async fn compliance_check(
     Extension(auth): Extension<AuthContext>,
     Json(request): Json<RedactRequest>,
 ) -> Response {
+    if request.texts.is_some() || request.text.is_none() {
+        return GatewayError::InvalidRequest("compliance check accepts text only".into())
+            .into_response();
+    }
     let config = state.config();
     let profile = match resolve_profile(&config, &auth, request.profile.as_deref()) {
         Ok(profile) => profile,
@@ -1987,7 +2388,7 @@ async fn compliance_check(
     // touching the token map.
     let mut session = TokenSession::new(Uuid::new_v4().to_string(), "check", state.dek.clone());
     let mut ctx = RedactionContext::with_session(&state.engine, &profile, &mut session);
-    let outcome = match ctx.redact(&request.text) {
+    let outcome = match ctx.redact(request.text.as_deref().unwrap_or("")) {
         Ok(_) => ctx.finish(),
         Err(err) => return redaction_error(err).into_response(),
     };
@@ -2035,6 +2436,13 @@ async fn compliance_status(State(state): State<AppState>) -> impl IntoResponse {
         "auth_mode": config.auth.mode.as_str(),
         "audit_export": config.audit.export.as_str(),
         "telemetry": state.telemetry.summary(),
+        "capabilities": {
+            "redact_texts_v1": config.server.redact_batch_enabled,
+            "max_texts": MAX_BATCH_TEXTS,
+            "max_text_bytes": MAX_BATCH_TEXT_BYTES,
+            "max_total_bytes": MAX_BATCH_TOTAL_BYTES,
+            "timeout_ms": BATCH_TIMEOUT.as_millis() as u64,
+        },
     }))
 }
 

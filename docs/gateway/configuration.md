@@ -60,6 +60,7 @@ On Unix, the binary listens for `SIGHUP` and reloads configuration from the same
 | Policy profiles (`policy` / `policy_file` / `CENSGATE_POLICY_FILE` / `CENSGATE_DEFAULT_PROFILE`) | Bind host and port (`server.host`, `server.port`) |
 | Everything under `redaction` (stream mode, hold-back, session/profile headers, `allow_profile_header`) | HTTP request trace layer (`server.enable_http_trace`) |
 | `server.metrics_endpoint` | Provider client settings (`provider.base_url`, `provider.api_key`, timeouts, `max_body_bytes`, `forward_client_authorization`, `name`) |
+| `server.redact_batch_enabled` | `texts` admission limits (`server.redact_batch_inflight`, `server.redact_batch_queue_ms`, `server.redact_batch_queue_depth`). Contract: [redaction batching](../redaction-batching.md). |
 | `telemetry.operations` | Pattern packs (`packs.paths`, `packs.disable_builtin`) |
 | `telemetry.genai_attributes` | All token map settings (`vault.*`, including the sealing key) |
 | `audit.include_entity_types` | All auth settings (`auth.mode`, `auth.api_keys`, `auth.oidc.*`) |
@@ -79,6 +80,10 @@ server:
   port: 8080
   enable_http_trace: true
   metrics_endpoint: true
+  redact_batch_enabled: false      # texts[] stays off until explicitly enabled
+  redact_batch_inflight: 1         # restart required
+  redact_batch_queue_ms: 5000      # restart required; 0 rejects immediately
+  redact_batch_queue_depth: 4      # restart required
 
 provider:
   name: openai                     # gen_ai.provider.name value
@@ -187,6 +192,10 @@ Each setting has exactly one environment name under the `CENSGATE_` prefix. The 
 | `CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZATION` | `false` | Forward the caller's `Authorization` to the provider |
 | `CENSGATE_ENABLE_TRACING` | `true` | HTTP tracing |
 | `CENSGATE_METRICS_ENDPOINT` | `true` | Serve `/metrics` |
+| `CENSGATE_REDACT_BATCH_ENABLED` | `false` | Accept `texts` on `/v1/redact` (reloadable) | <!-- pragma: allowlist secret -->
+| `CENSGATE_REDACT_BATCH_INFLIGHT` | `1` | In-flight `texts` requests (restart) | <!-- pragma: allowlist secret -->
+| `CENSGATE_REDACT_BATCH_QUEUE_MS` | `5000` | Queue wait for a `texts` permit (restart) | <!-- pragma: allowlist secret -->
+| `CENSGATE_REDACT_BATCH_QUEUE_DEPTH` | `4` | Waiting `texts` requests (restart) | <!-- pragma: allowlist secret -->
 | `CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS` | `10` | Provider connect timeout |
 | `CENSGATE_PROVIDER_REQUEST_TIMEOUT_SECS` | `600` | Provider request timeout |
 | `CENSGATE_PROVIDER_MAX_BODY_BYTES` | `33554432` | Buffered body cap |

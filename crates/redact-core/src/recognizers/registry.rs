@@ -80,6 +80,40 @@ impl RecognizerRegistry {
         Ok(resolved)
     }
 
+    /// Analyze each text with the same recognizer order and overlap rules as [`analyze`](Self::analyze).
+    pub fn analyze_batch(
+        &self,
+        texts: &[&str],
+        language: &str,
+    ) -> Result<Vec<Vec<RecognizerResult>>> {
+        let mut per_text = vec![Vec::new(); texts.len()];
+        for recognizer in &self.recognizers {
+            if !recognizer.supports_language(language) {
+                continue;
+            }
+            let batch = recognizer.analyze_batch(texts, language).with_context(|| {
+                format!("Failed to analyze with recognizer: {}", recognizer.name())
+            })?;
+            if batch.len() != texts.len() {
+                anyhow::bail!(
+                    "recognizer {} returned {} results for {} texts",
+                    recognizer.name(),
+                    batch.len(),
+                    texts.len()
+                );
+            }
+            for (slot, hits) in per_text.iter_mut().zip(batch) {
+                slot.extend(hits);
+            }
+        }
+        for hits in &mut per_text {
+            hits.sort();
+            let resolved = self.resolve_overlaps(std::mem::take(hits));
+            *hits = resolved;
+        }
+        Ok(per_text)
+    }
+
     /// Analyze text using only specific entity types
     pub fn analyze_with_entities(
         &self,
@@ -368,5 +402,52 @@ mod tests {
         let stats = registry.stats();
         assert_eq!(stats.recognizer_count, 1);
         assert!(!stats.entity_coverage.is_empty());
+    }
+
+    #[test]
+    fn analyze_batch_keeps_texts_independent() {
+        let mut registry = RecognizerRegistry::new();
+        registry.add_recognizer(Arc::new(PatternRecognizer::new()));
+        let texts = ["ada@example.com", "no address here", "bob@example.com"];
+        let rows = registry.analyze_batch(&texts, "en").unwrap();
+        assert_eq!(rows.len(), texts.len());
+        assert!(rows[0]
+            .iter()
+            .any(|hit| hit.entity_type == EntityType::EmailAddress));
+        assert!(rows[1].is_empty());
+        assert!(rows[2]
+            .iter()
+            .any(|hit| hit.entity_type == EntityType::EmailAddress));
+        assert!(rows[0][0].end <= texts[0].len());
+        assert!(rows[2][0].end <= texts[2].len());
+    }
+
+    #[derive(Debug)]
+    struct ShortBatch;
+
+    impl Recognizer for ShortBatch {
+        fn name(&self) -> &str {
+            "short"
+        }
+        fn supported_entities(&self) -> &[EntityType] {
+            &[]
+        }
+        fn analyze(&self, _: &str, _: &str) -> Result<Vec<RecognizerResult>> {
+            Ok(Vec::new())
+        }
+        fn analyze_batch(&self, texts: &[&str], _: &str) -> Result<Vec<Vec<RecognizerResult>>> {
+            Ok(vec![Vec::new(); texts.len().saturating_sub(1)])
+        }
+    }
+
+    #[test]
+    fn analyze_batch_rejects_a_short_recognizer_result() {
+        let mut registry = RecognizerRegistry::new();
+        registry.add_recognizer(Arc::new(ShortBatch));
+        let err = registry
+            .analyze_batch(&["a", "b"], "en")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("returned 1 results for 2 texts"), "{err}");
     }
 }
