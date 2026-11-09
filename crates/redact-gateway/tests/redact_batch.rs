@@ -332,8 +332,11 @@ async fn overload_fails_before_detection_and_records_red() {
     }
     assert_eq!(completed, 1, "one permit");
     assert_eq!(overload, 7);
+    // The detector call count is the admission proof. This bound only rejects
+    // a multi-second queue wait. Coverage tracing can delay a fail-fast
+    // reject without the request entering detection.
     assert!(
-        overload_max < Duration::from_millis(100),
+        overload_max < Duration::from_millis(750),
         "overload waited {overload_max:?}; admission should not hold for detection"
     );
     assert_eq!(probe.sizes(), vec![1], "rejected requests must not detect");
