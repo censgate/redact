@@ -15,8 +15,8 @@ documentation = "https://github.com/censgate/redact/tree/main/crates/redact-cli"
 description = "CLI tool for PII detection and anonymization"
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.12.7" }
-redact-ner = { path = "../redact-ner", version = "0.12.7" }
+redact-core = { path = "../redact-core", version = "0.13.0" }
+redact-ner = { path = "../redact-ner", version = "0.13.0" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

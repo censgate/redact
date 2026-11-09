@@ -18,7 +18,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-redact-core = { path = "../redact-core", version = "0.12.7" }
+redact-core = { path = "../redact-core", version = "0.13.0" }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }

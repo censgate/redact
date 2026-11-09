@@ -106,15 +106,15 @@
       "--language"
     ]
   },
-  "workspace_version": "0.12.7",
+  "workspace_version": "0.13.0",
   "crate_versions": {
-    "redact-core": "0.12.7",
-    "redact-ner": "0.12.7",
-    "redact-api": "0.12.7",
-    "redact-cli": "0.12.7",
-    "redact-wasm": "0.12.7",
-    "redact-gateway": "0.12.7",
-    "redact-scan": "0.12.7",
-    "redact-verify": "0.12.7"
+    "redact-core": "0.13.0",
+    "redact-ner": "0.13.0",
+    "redact-api": "0.13.0",
+    "redact-cli": "0.13.0",
+    "redact-wasm": "0.13.0",
+    "redact-gateway": "0.13.0",
+    "redact-scan": "0.13.0",
+    "redact-verify": "0.13.0"
   }
 }

@@ -18,7 +18,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.12.7"
+version = "0.13.0"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Censgate LLC <support@censgate.com>"]

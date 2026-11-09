@@ -96,7 +96,7 @@ cargo install redact-scan
 redact-scan --url postgres://reader@localhost/app --schema public --out report.json
 ```
 
-Crate: [`redact-scan`](https://crates.io/crates/redact-scan) 0.12.7.
+Crate: [`redact-scan`](https://crates.io/crates/redact-scan) 0.13.0.
 
 `--fail-on` exits 1 when findings match. `--include-samples` is a local sidecar
 only and cannot be combined with `--report-url`.
@@ -124,7 +124,7 @@ cargo install redact-verify
 redact-verify --pack <file> --pubkey <file> [--online] [--format json]
 ```
 
-Crate: [`redact-verify`](https://crates.io/crates/redact-verify) 0.12.7. `--online` does not dial the network.
+Crate: [`redact-verify`](https://crates.io/crates/redact-verify) 0.13.0. `--online` does not dial the network.
 
 Exit **0** only if every check passes and R2 (`pack_anchored`) is `pass`.
 **1** on any fail or R2 unproven. **2** if the pack is malformed.
@@ -138,8 +138,8 @@ Library (version pin is updated by Prepare Release):
 
 ```toml
 [dependencies]
-redact-core = "0.12.7"
-redact-ner = "0.12.7"  # optional ONNX NER
+redact-core = "0.13.0"
+redact-ner = "0.13.0"  # optional ONNX NER
 ```
 
 ```rust

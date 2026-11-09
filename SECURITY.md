@@ -14,8 +14,8 @@ We aim to respond within 48 hours and will work with you to understand and resol
 
 | Version | Supported | Notes |
 |---------|-----------|-------|
-| 0.12.x  | ✅ Yes | Current release |
-| 0.11.x  | ✅ Yes | Prior minor (security fixes) |
+| 0.13.x  | ✅ Yes | Current release |
+| 0.12.x  | ✅ Yes | Prior minor (security fixes) |
 | 0.5.x - 0.10.x | ❌ No | Older Rust releases |
 | 0.1.x - 0.4.x | ❌ No | Legacy Go implementation (deprecated) |
 
