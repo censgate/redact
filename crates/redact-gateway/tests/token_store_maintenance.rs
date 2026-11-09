@@ -385,6 +385,47 @@ async fn held_lock_and_corrupt_checkpoint_fail_closed() {
     assert_eq!(fake.state_calls("ctx-a"), 0);
 }
 
+#[tokio::test]
+async fn interrupted_run_releases_lock_and_resumes_after_completed_contexts() {
+    let mut slow = eligible(5);
+    slow.delay = Some(Duration::from_secs(3600));
+    let fake = Fake::with(vec![("ctx-a", eligible(2)), ("ctx-b", slow)]);
+    let path = checkpoint_path();
+    let store = CheckpointStore::new(&path);
+    let lock = PathBuf::from(format!("{}.lock", path.display()));
+    let both = inventory(&["ctx-a", "ctx-b"]);
+    // Shutdown (SIGTERM) drops the run future mid-batch.
+    let interrupted = tokio::time::timeout(
+        Duration::from_millis(200),
+        worker(&fake, fast()).run(&both, &store, false),
+    )
+    .await;
+    assert!(interrupted.is_err(), "run must still be in the slow batch");
+    assert!(!lock.exists(), "dropping the run releases the lock");
+    let saved = store.read().unwrap().unwrap();
+    assert_eq!(saved.next_index, 1, "completed context is durable");
+    assert_eq!(fake.expired("ctx-a"), 0);
+    fake.contexts
+        .lock()
+        .unwrap()
+        .get_mut("ctx-b")
+        .unwrap()
+        .delay = None;
+    let resumed = worker(&fake, fast())
+        .run(&both, &store, false)
+        .await
+        .unwrap();
+    assert_eq!(resumed.stop_reason, Some(StopReason::PassComplete));
+    assert_eq!(resumed.pass, saved.pass);
+    assert_eq!((resumed.drained, resumed.contexts_visited), (1, 1));
+    assert_eq!(fake.expired("ctx-b"), 0);
+    assert_eq!(
+        fake.purge_calls("ctx-a"),
+        2,
+        "completed context is not repeated"
+    );
+}
+
 #[test]
 fn limits_are_bounded() {
     let fake = Fake::default();

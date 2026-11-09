@@ -128,8 +128,10 @@ are not imported, so no caller can expand migration scope through maintenance.
 
 Progress is a durable cursor (inventory SHA-256, length, pass and next index; no
 identifiers) replaced atomically after every context. `<checkpoint>.lock` keeps a
-single worker; a crash leaves it behind and the next run fails closed until an
-operator confirms no worker runs and removes it. Purging is idempotent, so the
+single worker. SIGTERM or Ctrl-C (CronJob deadline, eviction, node drain) stops the
+run, releases the lock and exits 1; a hard kill (SIGKILL, OOM) leaves the lock behind
+and the next run fails closed until an operator confirms no worker runs and removes
+it. Purging is idempotent, so the
 interrupted context is safely repeated. An unfinished cursor bound to a different
 inventory is rejected unless `--restart-pass` is given; a completed pass accepts a
 refreshed inventory and starts the next pass.
@@ -143,7 +145,8 @@ prints an identifier-free JSON summary (counts, stop reason, error category,
 remaining contexts, pass age).
 
 Telemetry uses the standard `OTEL_*` exporter settings. RED metrics:
-`redact.gateway.tokenstore.maintenance.batches` (by outcome/`error.type`),
+`redact.gateway.tokenstore.maintenance.batches` (purge attempts only, by
+outcome/`error.type`; eligibility lookups are not batches),
 `…batch.duration` (s), `…entries_cleared`, `…contexts` (by outcome), `…retries`,
 and gauges `…backlog.contexts` and `…pass.age` (s). Spans
 `redact.gateway.tokenstore.maintenance.run` and `…batch` carry only backend,

@@ -726,7 +726,7 @@ impl<'a, T: ExpiryTarget + ?Sized> Worker<'a, T> {
 
     async fn visit(&self, subject: &Subject, started: Instant, summary: &mut Summary) -> Visit {
         let state = match self
-            .with_retries(summary, || {
+            .with_retries(summary, false, || {
                 self.target.state(&subject.tenant, &subject.context)
             })
             .await
@@ -755,7 +755,7 @@ impl<'a, T: ExpiryTarget + ?Sized> Worker<'a, T> {
             );
             let limit = self.limits.batch_limit;
             let result = self
-                .with_retries(summary, || {
+                .with_retries(summary, true, || {
                     self.target.purge(&subject.tenant, &subject.context, limit)
                 })
                 .instrument(span.clone())
@@ -790,11 +790,13 @@ impl<'a, T: ExpiryTarget + ?Sized> Worker<'a, T> {
         Visit::BatchBudget
     }
 
-    /// Run one operation with bounded retries for transient failures. Every
-    /// attempt is recorded as a batch-level RED sample.
+    /// Run one operation with bounded retries for transient failures. When
+    /// `batch` is set (purge calls), every attempt is recorded as a batch-level
+    /// RED sample; eligibility lookups are not batches and only count retries.
     async fn with_retries<F, Fut, R>(
         &self,
         summary: &mut Summary,
+        batch: bool,
         mut operation: F,
     ) -> Result<R, &'static str>
     where
@@ -807,14 +809,19 @@ impl<'a, T: ExpiryTarget + ?Sized> Worker<'a, T> {
             let begun = Instant::now();
             let result = operation().await;
             let secs = begun.elapsed().as_secs_f64();
+            let record = |error: Option<&'static str>| {
+                if batch {
+                    self.metrics.batch(backend, secs, error);
+                }
+            };
             match result {
                 Ok(value) => {
-                    self.metrics.batch(backend, secs, None);
+                    record(None);
                     return Ok(value);
                 }
                 Err(error) => match classify(&error) {
                     Classified::Fatal(kind) => {
-                        self.metrics.batch(backend, secs, Some(kind));
+                        record(Some(kind));
                         tracing::warn!(
                             target: semconv::target::TOKENMAP,
                             error_type = kind,
@@ -823,7 +830,7 @@ impl<'a, T: ExpiryTarget + ?Sized> Worker<'a, T> {
                         return Err(kind);
                     }
                     Classified::Transient(kind) => {
-                        self.metrics.batch(backend, secs, Some(kind));
+                        record(Some(kind));
                         if attempt == self.limits.max_attempts {
                             tracing::warn!(
                                 target: semconv::target::TOKENMAP,

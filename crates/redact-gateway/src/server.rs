@@ -107,7 +107,16 @@ pub async fn maintain_token_store(
         None => MaintenanceMetrics::noop(),
     };
     let worker = Worker::new(&target, limits, metrics)?;
-    Ok(worker.run(&inventory, &store, restart_pass).await?)
+    // A CronJob deadline, eviction or node drain sends SIGTERM. Dropping the
+    // run releases the single-worker lock; progress up to the last completed
+    // context is already durable and purging is idempotent, so the next run
+    // resumes safely. Only SIGKILL/OOM leaves the lock behind (fail closed).
+    tokio::select! {
+        result = worker.run(&inventory, &store, restart_pass) => Ok(result?),
+        () = shutdown_signal() => anyhow::bail!(
+            "token-store maintenance interrupted by shutdown signal; progress up to the last completed context is saved"
+        ),
+    }
 }
 
 impl GatewayServer {
