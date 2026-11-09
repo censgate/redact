@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version Update Script for Censgate Redact (Rust)
-# Updates version across workspace Cargo.toml and inter-crate dependencies
+# Updates the workspace version, every internal path dependency version, and docs.
 
 set -e
 
@@ -34,11 +34,8 @@ show_usage() {
     echo ""
     echo "This script updates version in:"
     echo "  - Cargo.toml (workspace.package.version)"
-    echo "  - crates/redact-ner/Cargo.toml (redact-core dependency)"
-    echo "  - crates/redact-api/Cargo.toml (redact-core, redact-ner dependencies)"
-    echo "  - crates/redact-cli/Cargo.toml (redact-core, redact-ner dependencies)"
-    echo "  - crates/redact-gateway/Cargo.toml (redact-core dependency)"
-    echo "  - crates/redact-scan/Cargo.toml (redact-core dependency)"
+    echo "  - every workspace-internal path dependency version"
+    echo "    (scripts/ci/align-internal-versions.sh; a missed pin fails)"
     echo "  - README.md (library Cargo.toml example versions)"
     echo "  - docs/benchmarks/README.md (current release link)"
     echo "  - CHANGELOG.md (moves Unreleased notes under the new version)"
@@ -56,43 +53,6 @@ validate_version() {
     fi
     
     echo "$version"
-}
-
-update_workspace_version() {
-    local new_version=$1
-    local dry_run=$2
-    local file="Cargo.toml"
-    
-    print_status "Updating workspace version in $file"
-    
-    if [[ $dry_run == "true" ]]; then
-        echo "  Would change: version = \"$new_version\""
-        return
-    fi
-    
-    # Update workspace.package.version
-    sed -i.bak "s/^\(version = \"\)[^\"]*\"/\1$new_version\"/" "$file"
-    rm -f "$file.bak"
-    print_success "Updated workspace version to $new_version"
-}
-
-update_crate_dependency() {
-    local file=$1
-    local dep_name=$2
-    local new_version=$3
-    local dry_run=$4
-    
-    print_status "Updating $dep_name dependency in $file"
-    
-    if [[ $dry_run == "true" ]]; then
-        echo "  Would change: $dep_name version to $new_version"
-        return
-    fi
-    
-    # Update path + version dependency
-    sed -i.bak "s/\($dep_name = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$new_version/" "$file"
-    rm -f "$file.bak"
-    print_success "Updated $dep_name to $new_version in $file"
 }
 
 update_changelog() {
@@ -269,16 +229,15 @@ main() {
     print_status "Starting version update to $new_version"
     echo ""
     
-    # Update all version references
-    update_workspace_version "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-ner/Cargo.toml" "redact-core" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-api/Cargo.toml" "redact-core" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-api/Cargo.toml" "redact-ner" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-core" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-cli/Cargo.toml" "redact-ner" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-gateway/Cargo.toml" "redact-core" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-gateway/Cargo.toml" "redact-token-store" "$new_version" "$dry_run"
-    update_crate_dependency "crates/redact-scan/Cargo.toml" "redact-core" "$new_version" "$dry_run"
+    # One manifest walk. Do not grow a crate/dependency allowlist here.
+    print_status "Aligning workspace version and internal path dependency pins"
+    local align_script
+    align_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci/align-internal-versions.sh"
+    if [[ $dry_run == "true" ]]; then
+        "$align_script" --dry-run "$new_version"
+    else
+        "$align_script" "$new_version"
+    fi
     update_doc_versions "$new_version" "$dry_run"
     update_changelog "$new_version" "$dry_run"
     

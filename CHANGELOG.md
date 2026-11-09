@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `redact-token-store`: scoped encrypted token interning with PostgreSQL and
+  OpenBao backends, selective resolution, and fenced migration. The gateway
+  can use it as optional indexed token storage (`vault.indexed`). Nothing
+  selects that configuration automatically. Release publishing uploads
+  `redact-token-store` before `redact-gateway` and does not publish the
+  gateway until that exact version is on the crates.io index and is not
+  yanked. (#207)
+
 ### Changed
 
 - Workspace Cargo resolver is 3, so `cargo update` (including the weekly
@@ -19,6 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inherit that requirement, so a downstream resolver-2 user on Rust 1.88
   would otherwise pull uuid 1.29. Dependabot still ignores `uuid` 1.27+
   because `cargo update --precise` can select an MSRV-incompatible version.
+- `redact-core`, `redact-ner`, `redact-api`, `redact-gateway`, `redact-scan`,
+  and `redact-verify` set docs.rs metadata (`all-features`, `--cfg docsrs`).
+  `redact-core`, `redact-ner`, `redact-api`, and `redact-cli` use their own
+  keywords and categories. `redact-cli` documentation points at the
+  repository source, because docs.rs does not build a binary-only crate.
+  The unused workspace `tokenizers` dependency is removed. (#204)
+- Lockfile-only updates: `cc` 1.10.0 → 1.11.0, `openssl` 0.10.81 → 0.10.82,
+  `openssl-sys` 0.9.117 → 0.9.118. (#203)
+
+### Fixed
+
+- Adjacent email addresses are all detected. The pattern no longer consumes
+  the separator between addresses, and a trailing ASCII letter or digit still
+  rejects the match. (#207)
+- Gateway OTLP export uses the blocking reqwest client so the SDK batch
+  processors can export from their own threads. (#207)
+- Prepare Release and `scripts/update-version.sh` take workspace-internal
+  path dependency versions from the manifests. A pin that is not moved to
+  the release version fails the bump. The 0.13.0 dry run had left
+  `redact-gateway`'s `redact-token-store` requirement at 0.12.7.
 
 ## [0.12.7] - 2026-11-01
 
