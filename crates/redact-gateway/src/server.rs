@@ -60,6 +60,65 @@ pub async fn check_token_store(config: &ResolvedConfig) -> Result<&'static str> 
     .context("token-store preflight deadline exceeded")?
 }
 
+/// Run one bounded expiry-maintenance slice against the configured indexed
+/// generation. Requires an indexed configuration; never serves traffic, loads
+/// NER or contacts the inference provider. Only already imported contexts in
+/// the authorized inventory are purged; see [`crate::vault::maintenance`].
+pub async fn maintain_token_store(
+    config: &ResolvedConfig,
+    telemetry: &Telemetry,
+    inventory: &std::path::Path,
+    checkpoint: &std::path::Path,
+    limits: crate::vault::maintenance::Limits,
+    restart_pass: bool,
+) -> Result<crate::vault::maintenance::Summary> {
+    use crate::vault::maintenance::{CheckpointStore, Inventory, MaintenanceMetrics, Worker};
+    config.validate()?;
+    limits.validate()?;
+    let settings = config
+        .vault
+        .indexed
+        .as_ref()
+        .context("maintain-token-store requires an indexed configuration")?;
+    // Reject a bad inventory before contacting any backend.
+    let inventory = Inventory::load(inventory)?;
+    let store = CheckpointStore::new(checkpoint);
+    let target = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let dek = build_dek(config)?;
+        let source = build_store(&config.vault)
+            .await
+            .map_err(|_| anyhow::anyhow!("token-store source initialization failed"))?;
+        let target = crate::vault::indexed::build(settings, source, dek, config.vault.ttl_secs)
+            .await
+            .context("token-store generation or runtime prerequisites failed")?;
+        target
+            .health()
+            .await
+            .context("token-store dependencies are not ready")?;
+        anyhow::Ok(target)
+    })
+    .await
+    .context("token-store maintenance setup deadline exceeded")??;
+    let metrics = match telemetry.meter_provider() {
+        Some(provider) => MaintenanceMetrics::new(&opentelemetry::metrics::MeterProvider::meter(
+            provider,
+            "redact-gateway",
+        )),
+        None => MaintenanceMetrics::noop(),
+    };
+    let worker = Worker::new(&target, limits, metrics)?;
+    // A CronJob deadline, eviction or node drain sends SIGTERM. Dropping the
+    // run releases the single-worker lock; progress up to the last completed
+    // context is already durable and purging is idempotent, so the next run
+    // resumes safely. Only SIGKILL/OOM leaves the lock behind (fail closed).
+    tokio::select! {
+        result = worker.run(&inventory, &store, restart_pass) => Ok(result?),
+        () = shutdown_signal() => anyhow::bail!(
+            "token-store maintenance interrupted by shutdown signal; progress up to the last completed context is saved"
+        ),
+    }
+}
+
 impl GatewayServer {
     /// Build a server from resolved configuration.
     pub async fn new(config: ResolvedConfig) -> Result<Self> {

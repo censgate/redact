@@ -4,5 +4,12 @@
 # only because sqlx lists optional `sqlx-mysql`; redact-scan enables the
 # `postgres` feature and never talks to MySQL. Revisit if a crate starts
 # enabling sqlx `mysql` or otherwise decrypts RSA PKCS#1 v1.5.
+#
+# RUSTSEC-2026-0459 (C SQLite in `libsqlite3-sys` 0.30.1; fix needs >=0.39,
+# which sqlx 0.8 cannot use) is the same case: the crate is in the lockfile
+# only because sqlx lists optional `sqlx-sqlite`. No workspace crate enables
+# sqlx `sqlite`; `cargo tree --workspace --all-features --target all -i
+# libsqlite3-sys` prints nothing, so it is never compiled or linked. Revisit if
+# a crate enables sqlx `sqlite` or on the sqlx 0.9 upgrade.
 [advisories]
-ignore = ["RUSTSEC-2023-0071"]
+ignore = ["RUSTSEC-2023-0071", "RUSTSEC-2026-0459"]

@@ -70,10 +70,46 @@ enum Command {
     ValidateConfig,
     /// Check indexed storage prerequisites without serving or migrating contexts.
     CheckTokenStore,
+    /// Run one bounded expiry-maintenance slice over an authorized inventory.
+    ///
+    /// Clears expired ciphertext of already imported contexts only; identity
+    /// reservations are kept and never-imported contexts are not migrated.
+    /// Prints an identifier-free JSON summary. Exits 0 when the slice stopped
+    /// cleanly (including budget/deadline stops that the next run resumes) and
+    /// 1 when it failed closed.
+    MaintainTokenStore(MaintainArgs),
     /// Print the resolved configuration with secrets redacted.
     PrintConfig,
     /// Print the effective policy as YAML.
     PrintPolicy,
+}
+
+#[derive(Debug, clap::Args)]
+struct MaintainArgs {
+    /// Authorized inventory: one `{"tenant":…,"context":…}` JSON object per line.
+    #[arg(long)]
+    inventory: PathBuf,
+    /// Durable cursor file; `<path>.lock` is the single-worker lock.
+    #[arg(long)]
+    checkpoint: PathBuf,
+    /// Expired entries cleared per batch (1..=256).
+    #[arg(long, default_value_t = 256)]
+    batch_limit: usize,
+    /// Batches per context before stopping and resuming it next run.
+    #[arg(long, default_value_t = 1024)]
+    max_batches_per_context: u32,
+    /// Contexts visited per run.
+    #[arg(long, default_value_t = 10_000)]
+    max_contexts: usize,
+    /// Attempts per operation for transient failures (1..=10).
+    #[arg(long, default_value_t = 5)]
+    max_attempts: u32,
+    /// Wall-clock budget for this run, in seconds.
+    #[arg(long, default_value_t = 3300)]
+    deadline_secs: u64,
+    /// Discard an unfinished cursor bound to a different inventory.
+    #[arg(long)]
+    restart_pass: bool,
 }
 
 impl Cli {
@@ -160,6 +196,33 @@ async fn main() -> Result<()> {
         Command::CheckTokenStore => {
             let backend = redact_gateway::server::check_token_store(&config).await?;
             println!("token-store preflight passed: {backend}; writer drain and restore rehearsal remain operator gates");
+            Ok(())
+        }
+        Command::MaintainTokenStore(args) => {
+            let limits = redact_gateway::vault::maintenance::Limits {
+                batch_limit: args.batch_limit,
+                max_batches_per_context: args.max_batches_per_context,
+                max_contexts_per_run: args.max_contexts,
+                max_attempts: args.max_attempts,
+                run_deadline: std::time::Duration::from_secs(args.deadline_secs),
+                ..Default::default()
+            };
+            let result = redact_gateway::server::maintain_token_store(
+                &config,
+                &telemetry,
+                &args.inventory,
+                &args.checkpoint,
+                limits,
+                args.restart_pass,
+            )
+            .await;
+            // Flush RED metrics and spans before exiting.
+            telemetry.shutdown();
+            let summary = result?;
+            println!("{}", serde_json::to_string(&summary)?);
+            if summary.failed() {
+                std::process::exit(1);
+            }
             Ok(())
         }
         Command::PrintConfig => {
