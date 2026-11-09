@@ -14,19 +14,18 @@ use redact_gateway::telemetry::semconv;
 use redact_gateway::telemetry::testing::{init_test, test_settings};
 use redact_gateway::GatewayServer;
 use serde_json::json;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use support::*;
+use tokio::sync::Mutex;
 
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+async fn env_lock() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    LOCK.get_or_init(|| Mutex::new(())).lock().await
 }
 
 #[tokio::test]
 async fn standalone_redact_emits_detect_policy_and_patterns_without_changing_bytes() {
-    let _guard = env_lock();
+    let _guard = env_lock().await;
     let redact_gateway::telemetry::testing::TestTelemetry {
         telemetry,
         handles,
@@ -80,7 +79,7 @@ async fn standalone_redact_emits_detect_policy_and_patterns_without_changing_byt
 
 #[tokio::test]
 async fn standalone_redact_omits_stage_spans_when_operations_off() {
-    let _guard = env_lock();
+    let _guard = env_lock().await;
     let redact_gateway::telemetry::testing::TestTelemetry {
         telemetry,
         handles,

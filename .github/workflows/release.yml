@@ -254,6 +254,18 @@ jobs:
         run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-cli
         continue-on-error: true
 
+      - name: Publish redact-token-store
+        run: cargo publish --token ${{ steps.crates-auth.outputs.token }} -p redact-token-store
+        continue-on-error: true
+
+      # A retry may find the version already published. In either case the
+      # gateway must not proceed until its dependency is resolvable by Cargo.
+      - name: Verify token-store index availability
+        run: ./scripts/ci/verify-crates.sh
+        env:
+          CRATES: redact-token-store
+          TAG_VERSION: ${{ env.TAG_VERSION }}
+
       - name: Wait for crates.io index
         run: sleep 45
 

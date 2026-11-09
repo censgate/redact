@@ -208,7 +208,7 @@ async fn ready(State(state): State<AppState>) -> Response {
     let body = json!({
         "status": if ready { "ok" } else { "degraded" },
         "provider": config.provider.base_url,
-        "token_map": {"backend": config.vault.backend.as_str(), "ready": token_map_ready},
+        "token_map": {"backend": state.tokens.backend_name(), "ready": token_map_ready},
         "auth": {"mode": state.auth.mode(), "ready": auth_ready},
         "audit": config.audit.export.as_str(),
     });
@@ -260,6 +260,7 @@ struct RequestScope {
     tenant: String,
     subject: Option<String>,
     known_mappings: Vec<TokenMapping>,
+    indexed_lookup: HashMap<String, String>,
     forwarded_auth: Option<String>,
     provider_headers: reqwest::header::HeaderMap,
 }
@@ -271,6 +272,11 @@ impl RequestScope {
         auth: &AuthContext,
     ) -> Result<Self, GatewayError> {
         let config = state.config();
+        if state.tokens.indexed().is_some() && (auth.subject.is_none() || auth.mode == "none") {
+            return Err(GatewayError::Forbidden(
+                "indexed token storage requires authentication".into(),
+            ));
+        }
 
         // A credential-supplied profile wins over the request header so a
         // caller cannot widen the policy their credential was issued for.
@@ -303,7 +309,10 @@ impl RequestScope {
 
         // Resume prior tokens only when the caller identified a session, so
         // unrelated requests never share a token namespace.
-        let known_mappings = if caller_session.is_some() && state.tokens.backend_name() != "off" {
+        let known_mappings = if state.tokens.indexed().is_none()
+            && caller_session.is_some()
+            && state.tokens.backend_name() != "off"
+        {
             let span = spans::tokenmap_get(
                 config.telemetry.operations,
                 state.tokens.backend_name(),
@@ -347,12 +356,16 @@ impl RequestScope {
             Vec::new()
         };
 
-        let session = TokenSession::resume(
-            session_id.clone(),
-            tenant.clone(),
-            state.dek.clone(),
-            known_mappings.clone(),
-        );
+        let session = if state.tokens.indexed().is_some() {
+            TokenSession::pending(session_id.clone(), tenant.clone(), state.dek.clone())
+        } else {
+            TokenSession::resume(
+                session_id.clone(),
+                tenant.clone(),
+                state.dek.clone(),
+                known_mappings.clone(),
+            )
+        };
 
         let forwarded_auth = if config.provider.forward_client_authorization {
             headers
@@ -375,14 +388,33 @@ impl RequestScope {
             tenant,
             subject: auth.subject.clone(),
             known_mappings,
+            indexed_lookup: HashMap::new(),
             forwarded_auth,
             provider_headers,
         })
     }
 
     /// Persist newly minted mappings so a later request can restore them.
-    async fn persist_tokens(&mut self, state: &AppState) -> Result<(), GatewayError> {
+    async fn persist_tokens(
+        &mut self,
+        state: &AppState,
+        payload: &mut Value,
+    ) -> Result<(), GatewayError> {
         let minted = self.session.take_new_mappings();
+        if let Some(indexed) = state.tokens.indexed() {
+            let replacements = indexed
+                .commit(&self.tenant, &self.token_map_session, &minted)
+                .await
+                .map_err(GatewayError::from)?;
+            crate::vault::indexed::replace_payload(payload, &replacements);
+            if self.profile.restore_responses {
+                self.indexed_lookup = indexed
+                    .lookup(&self.tenant, &self.token_map_session, &payload.to_string())
+                    .await
+                    .map_err(GatewayError::from)?;
+            }
+            return Ok(());
+        }
         if minted.is_empty() || state.tokens.backend_name() == "off" {
             self.known_mappings.extend(minted);
             return Ok(());
@@ -446,6 +478,9 @@ impl RequestScope {
     fn restore_lookup(&self, dek: &Dek) -> HashMap<String, String> {
         if !self.profile.restore_responses {
             return HashMap::new();
+        }
+        if !self.indexed_lookup.is_empty() {
+            return self.indexed_lookup.clone();
         }
         self.known_mappings
             .iter()
@@ -644,7 +679,7 @@ async fn chat_completions_inner(
         return Err(error);
     }
 
-    scope.persist_tokens(&state).await?;
+    scope.persist_tokens(&state, body).await?;
     let lookup = scope.restore_lookup(&state.dek);
 
     state.audit.emit(AuditEvent::from_outcome(
@@ -1192,7 +1227,7 @@ async fn proxy_json_surface(
         return Err(error);
     }
 
-    scope.persist_tokens(&state).await?;
+    scope.persist_tokens(&state, body).await?;
     let mut response = call_provider(&state, &scope, path, body).await?;
 
     // Always scan the response: successful embedding vectors have no text
@@ -1392,7 +1427,15 @@ async fn redact_endpoint(
         // continue the counter instead of reminting `[ENTITY_1]` and clobbering.
         // Re-read on every attempt: a merge conflict means a concurrent request
         // persisted labels this snapshot did not have.
-        let mut session = if state.tokens.backend_name() != "off" {
+        let mut session = if state.tokens.indexed().is_some() {
+            if auth.subject.is_none() || auth.mode == "none" {
+                return GatewayError::Forbidden(
+                    "indexed token storage requires authentication".into(),
+                )
+                .into_response();
+            }
+            TokenSession::pending(session_id.clone(), &auth.tenant, state.dek.clone())
+        } else if state.tokens.backend_name() != "off" {
             let get_span = spans::tokenmap_get(
                 level,
                 state.tokens.backend_name(),
@@ -1447,6 +1490,19 @@ async fn redact_endpoint(
         let outcome = ctx.finish();
 
         let minted = session.take_new_mappings();
+        if let Some(indexed) = state.tokens.indexed() {
+            let replacements = match indexed
+                .commit(&auth.tenant, &token_map_session, &minted)
+                .await
+            {
+                Ok(replacements) => replacements,
+                Err(err) => return GatewayError::from(err).into_response(),
+            };
+            break (
+                crate::redact::token::restore_text(&text, &replacements).0,
+                outcome,
+            );
+        }
         if !minted.is_empty() && state.tokens.backend_name() != "off" {
             let put_span = spans::tokenmap_put(
                 level,
@@ -1559,6 +1615,23 @@ async fn restore_endpoint(
     };
 
     let token_map_session = subject_bound_session_key(&session_id, subject);
+
+    if let Some(indexed) = state.tokens.indexed() {
+        let started = Instant::now();
+        let lookup = match indexed
+            .lookup(&auth.tenant, &token_map_session, &request.text)
+            .await
+        {
+            Ok(lookup) => lookup,
+            Err(err) => return GatewayError::from(err).into_response(),
+        };
+        let (text, outcome) = crate::redact::token::restore_text(&request.text, &lookup);
+        let response = Json(json!({"text":text,"session_id":session_id,"restored":outcome.restored,"missing":outcome.missing})).into_response();
+        if started.elapsed() >= std::time::Duration::from_secs(10) {
+            return GatewayError::from(redact_token_store::Error::Unavailable).into_response();
+        }
+        return response;
+    }
 
     // Missing and foreign-subject sessions both yield an empty mapping list so
     // callers cannot probe whether a session id exists for another subject.
@@ -1677,7 +1750,7 @@ fn require_authenticated_subject(auth: &AuthContext) -> Result<&str, GatewayErro
 }
 
 fn token_map_unavailable(err: TokenMapError) -> GatewayError {
-    GatewayError::DependencyUnavailable(format!("token map backend is unavailable: {err}"))
+    GatewayError::from(err)
 }
 
 fn require_token_map(state: &AppState) -> Result<(), GatewayError> {

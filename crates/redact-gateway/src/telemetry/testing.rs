@@ -388,6 +388,9 @@ pub fn init_test(settings: &TelemetrySettings) -> Result<TestTelemetry, Telemetr
     let (span_exporter, span_recorder) = CapturingSpanExporter::new();
     let tracer_provider = SdkTracerProvider::builder()
         .with_resource(resource.clone())
+        // Conformance assertions require every span, independent of the
+        // operator's OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG environment.
+        .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
         .with_simple_exporter(span_exporter)
         .build();
 

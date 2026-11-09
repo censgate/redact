@@ -289,10 +289,11 @@ impl PatternRecognizer {
     fn load_default_patterns(&mut self) {
         // Email addresses. Explicit start/end classes instead of `\b`: CJK
         // letters are Unicode word characters, so `\b` does not fire between
-        // 邮箱 and the local part. Group 1 is the address only.
+        // 邮箱 and the local part. Group 1 is the address only. Check its right
+        // boundary below without consuming the next address's separator.
         let _ = self.add_pattern(
             EntityType::EmailAddress,
-            r"(?:^|[^A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?:[^A-Za-z0-9]|$)",
+            r"(?:^|[^A-Za-z0-9._%+-])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})",
             0.8,
         );
 
@@ -772,6 +773,15 @@ impl Recognizer for PatternRecognizer {
                         let end = matched.end();
                         let matched_text = matched.as_str();
 
+                        if *entity_type == EntityType::EmailAddress
+                            && text
+                                .as_bytes()
+                                .get(end)
+                                .is_some_and(u8::is_ascii_alphanumeric)
+                        {
+                            continue;
+                        }
+
                         // Base score from pattern
                         let mut score = pattern.score;
 
@@ -902,6 +912,31 @@ mod tests {
             Some("john.doe@example.com".to_string())
         );
         assert!(email_results[0].score >= 0.8);
+    }
+
+    #[test]
+    fn adjacent_emails_do_not_consume_each_others_boundary() {
+        let recognizer = PatternRecognizer::new();
+        let addresses = [
+            "one@fixture.invalid",
+            "two@fixture.invalid",
+            "three@fixture.invalid",
+        ];
+        for separator in [" ", ",", ";", "\n", "，", "中"] {
+            let text = addresses.join(separator);
+            let found: Vec<_> = recognizer
+                .analyze(&text, "en")
+                .unwrap()
+                .into_iter()
+                .filter(|r| r.entity_type == EntityType::EmailAddress)
+                .map(|r| r.text.unwrap())
+                .collect();
+            assert_eq!(found, addresses, "separator {separator:?}");
+        }
+        let invalid = recognizer.analyze("one@fixture.invalid1", "en").unwrap();
+        assert!(!invalid
+            .iter()
+            .any(|r| r.entity_type == EntityType::EmailAddress));
     }
 
     #[test]

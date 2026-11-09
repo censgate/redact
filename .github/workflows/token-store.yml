@@ -1,0 +1,42 @@
+name: Token store backends
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: PostgreSQL and OpenBao contract and migration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: token-store-backends
+      - name: Install disposable backend binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          mkdir -p "$RUNNER_TEMP/token-store-bao"
+          cd "$RUNNER_TEMP/token-store-bao"
+          curl --fail --location --retry 3 -o openbao.tar.gz https://github.com/openbao/openbao/releases/download/v2.7.2/openbao_2.7.2_linux_amd64.tar.gz
+          echo '582b1f3c2fdc5afd443b2d57a225ef654de75adea609fdb66731fd582a9cbc96  openbao.tar.gz' | sha256sum --check
+          tar -xzf openbao.tar.gz bao
+      - name: Run actual storage and gateway migration tests
+        env:
+          TOKEN_STORE_PG_BIN: /usr/lib/postgresql/16/bin
+          TOKEN_STORE_PG_SHARE: /usr/share/postgresql/16
+          TOKEN_STORE_BAO_BIN: ${{ runner.temp }}/token-store-bao/bao
+          TOKEN_STORE_RUN_BETA_ACCEPTANCE: '1'
+        run: python3 scripts/token-store/test-local.py

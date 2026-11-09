@@ -42,6 +42,12 @@ const HEALTH_CACHE_TTL: Duration = Duration::from_secs(2);
 /// Payload written under each session path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredSession {
+    #[serde(default)]
+    frozen: bool,
+    #[serde(default)]
+    cleanup_through: u64,
+    #[serde(default)]
+    destroyed_through: u64,
     mappings: Vec<TokenMapping>,
     expires_at: DateTime<Utc>,
 }
@@ -280,6 +286,9 @@ impl Kv2Store {
         let inner = self.inner.read().await;
         match kv2::read::<StoredSession>(&inner.client, &self.mount, path).await {
             Ok(entry) => {
+                if entry.frozen {
+                    return Err(TokenMapError::Conflict("context migrated".into()));
+                }
                 if entry.expires_at <= Utc::now() {
                     // Treat as absent without calling delete_latest: a concurrent
                     // put can CAS-write a fresh version between this read and a
@@ -302,35 +311,254 @@ impl Kv2Store {
     /// yields `cas = 0` ("create only"). Expired entries contribute no mappings
     /// but retain their version so the subsequent write still CAS-protects.
     async fn read_for_cas(&self, path: &str) -> Result<(Vec<TokenMapping>, u32), TokenMapError> {
-        self.ensure_fresh_token().await?;
-        let inner = self.inner.read().await;
-        let endpoint = ReadSecretRequest::builder()
-            .mount(self.mount.as_str())
-            .path(path)
-            .build()
-            .map_err(|e| TokenMapError::Backend(format!("invalid vault read request: {e}")))?;
-
-        let response: ReadSecretResponse =
-            match api::exec_with_result(&inner.client, endpoint).await {
-                Ok(res) => res,
-                Err(ClientError::APIError { code: 404, .. }) => return Ok((Vec::new(), 0)),
-                Err(err) => return Err(map_client_error(err)),
-            };
-
-        let cas = version_to_cas(response.metadata.version)?;
-        let entry: StoredSession = serde_json::value::from_value(response.data)
-            .map_err(|e| TokenMapError::Backend(format!("invalid vault session payload: {e}")))?;
-
+        let (entry, cas) = self.read_snapshot(path, false).await?;
+        if entry.frozen {
+            return Err(TokenMapError::Conflict("context migrated".into()));
+        }
         if entry.expires_at <= Utc::now() {
             Ok((Vec::new(), cas))
         } else {
             Ok((entry.mappings, cas))
         }
     }
+
+    async fn read_snapshot(
+        &self,
+        path: &str,
+        verify_missing: bool,
+    ) -> Result<(StoredSession, u32), TokenMapError> {
+        self.ensure_fresh_token().await?;
+        let inner = self.inner.read().await;
+        let mut retry_missing = verify_missing;
+        let response: ReadSecretResponse = loop {
+            let endpoint = ReadSecretRequest::builder()
+                .mount(self.mount.as_str())
+                .path(path)
+                .build()
+                .map_err(|e| TokenMapError::Backend(format!("invalid vault read request: {e}")))?;
+
+            match api::exec_with_result(&inner.client, endpoint).await {
+                Ok(res) => break res,
+                Err(ClientError::APIError { code: 404, .. }) => {
+                    // A deleted latest version with surviving metadata cannot
+                    // safely be interpreted as an empty source namespace.
+                    if verify_missing {
+                        match kv2::read_metadata(&inner.client, &self.mount, path).await {
+                            Ok(_) => {
+                                // A concurrent first writer may create data
+                                // between the 404 and metadata read. Re-read
+                                // once; a genuinely missing latest version still
+                                // fails closed, never becoming an empty source.
+                                if retry_missing {
+                                    retry_missing = false;
+                                    continue;
+                                }
+                                return Err(TokenMapError::Indexed(
+                                    redact_token_store::Error::Integrity,
+                                ));
+                            }
+                            Err(ClientError::APIError { code: 404, .. }) => {}
+                            Err(err) => return Err(map_client_error(err)),
+                        }
+                    }
+                    return Ok((
+                        StoredSession {
+                            mappings: Vec::new(),
+                            expires_at: Utc::now(),
+                            frozen: false,
+                            cleanup_through: 0,
+                            destroyed_through: 0,
+                        },
+                        0,
+                    ));
+                }
+                Err(err) => return Err(map_client_error(err)),
+            }
+        };
+
+        let cas = version_to_cas(response.metadata.version)?;
+        let entry: StoredSession = serde_json::value::from_value(response.data)
+            .map_err(|e| TokenMapError::Backend(format!("invalid vault session payload: {e}")))?;
+
+        Ok((entry, cas))
+    }
 }
 
 #[async_trait::async_trait]
 impl TokenMapStore for Kv2Store {
+    async fn fence_for_erasure(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let path = self.path(tenant, session);
+        for attempt in 1..=PUT_CAS_ATTEMPTS {
+            self.ensure_fresh_token().await?;
+            let inner = self.inner.read().await;
+            // Metadata supplies the CAS revision even when the latest data is
+            // deleted, malformed or unreadable. Erasure does not import it.
+            let version = match kv2::read_metadata(&inner.client, &self.mount, &path).await {
+                Ok(metadata) => metadata.current_version,
+                Err(ClientError::APIError { code: 404, .. }) => 0,
+                Err(err) => return Err(map_client_error(err)),
+            };
+            let cas = version_to_cas(version)?;
+            if version > 0 {
+                // A retry must retain progress, not reset it after every bounded
+                // cleanup call. All versions after this cutoff are empty fences.
+                if let Ok(entry) =
+                    kv2::read_version::<StoredSession>(&inner.client, &self.mount, &path, version)
+                        .await
+                {
+                    if entry.frozen
+                        && entry.mappings.is_empty()
+                        && entry.destroyed_through <= entry.cleanup_through
+                        && entry.cleanup_through <= version
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+            let fence = StoredSession {
+                frozen: true,
+                cleanup_through: version,
+                destroyed_through: 0,
+                mappings: Vec::new(),
+                expires_at: Utc::now(),
+            };
+            match kv2::set_with_options(
+                &inner.client,
+                &self.mount,
+                &path,
+                &fence,
+                SetSecretRequestOptions { cas },
+            )
+            .await
+            {
+                Ok(_) => return Ok(()),
+                Err(err) if is_cas_conflict(&err) => {}
+                Err(err) => return Err(map_client_error(err)),
+            }
+            drop(inner);
+            tokio::time::sleep(cas_backoff(attempt)).await;
+        }
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
+    }
+
+    async fn freeze(
+        &self,
+        tenant: &str,
+        session: &str,
+    ) -> Result<super::FrozenSnapshot, TokenMapError> {
+        let path = self.path(tenant, session);
+        for attempt in 1..=PUT_CAS_ATTEMPTS {
+            let (mut entry, cas) = self.read_snapshot(&path, true).await?;
+            if entry.frozen {
+                return Ok(super::FrozenSnapshot {
+                    mappings: entry.mappings,
+                    expires_ms: entry.expires_at.timestamp_millis(),
+                });
+            }
+            // Cumulative legacy versions must retain all historical identities.
+            // Pruned history or a dropped/rebound label requires offline recovery.
+            if cas > 0 {
+                self.ensure_fresh_token().await?;
+                let inner = self.inner.read().await;
+                let metadata = kv2::read_metadata(&inner.client, &self.mount, &path)
+                    .await
+                    .map_err(map_client_error)?;
+                if cas > 2048
+                    || metadata.oldest_version > 1
+                    || metadata.versions.len() != cas as usize
+                {
+                    return Err(TokenMapError::Indexed(redact_token_store::Error::Integrity));
+                }
+                let current: std::collections::HashMap<_, _> =
+                    entry.mappings.iter().map(|m| (&m.token, m)).collect();
+                for version in 1..u64::from(cas) {
+                    let previous: StoredSession =
+                        kv2::read_version(&inner.client, &self.mount, &path, version)
+                            .await
+                            .map_err(map_client_error)?;
+                    if previous.mappings.iter().any(|old| {
+                        current.get(&old.token).is_none_or(|new| {
+                            new.entity_type != old.entity_type
+                                || new.sealed_value != old.sealed_value
+                        })
+                    }) {
+                        return Err(TokenMapError::Indexed(redact_token_store::Error::Integrity));
+                    }
+                }
+            }
+            entry.frozen = true;
+            self.ensure_fresh_token().await?;
+            let result = {
+                let inner = self.inner.read().await;
+                kv2::set_with_options(
+                    &inner.client,
+                    &self.mount,
+                    &path,
+                    &entry,
+                    SetSecretRequestOptions { cas },
+                )
+                .await
+            };
+            match result {
+                Ok(_) => {
+                    return Ok(super::FrozenSnapshot {
+                        mappings: entry.mappings,
+                        expires_ms: entry.expires_at.timestamp_millis(),
+                    })
+                }
+                Err(err) if is_cas_conflict(&err) => tokio::time::sleep(cas_backoff(attempt)).await,
+                Err(err) => return Err(map_client_error(err)),
+            }
+        }
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
+    }
+
+    async fn clear_frozen(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let path = self.path(tenant, session);
+        for attempt in 1..=PUT_CAS_ATTEMPTS {
+            let (mut entry, cas) = self.read_snapshot(&path, true).await?;
+            if !entry.frozen {
+                return Err(TokenMapError::Indexed(redact_token_store::Error::Integrity));
+            }
+            if entry.cleanup_through == 0 {
+                entry.cleanup_through = u64::from(cas);
+                entry.mappings.clear();
+            } else if entry.destroyed_through == entry.cleanup_through {
+                return Ok(());
+            } else {
+                let end = (entry.destroyed_through + 256).min(entry.cleanup_through);
+                self.ensure_fresh_token().await?;
+                let inner = self.inner.read().await;
+                kv2::destroy_versions(
+                    &inner.client,
+                    &self.mount,
+                    &path,
+                    ((entry.destroyed_through + 1)..=end).collect(),
+                )
+                .await
+                .map_err(map_client_error)?;
+                entry.destroyed_through = end;
+            }
+            self.ensure_fresh_token().await?;
+            let inner = self.inner.read().await;
+            match kv2::set_with_options(
+                &inner.client,
+                &self.mount,
+                &path,
+                &entry,
+                SetSecretRequestOptions { cas },
+            )
+            .await
+            {
+                Ok(_) => {}
+                Err(err) if is_cas_conflict(&err) => {}
+                Err(err) => return Err(map_client_error(err)),
+            }
+            drop(inner);
+            tokio::time::sleep(cas_backoff(attempt)).await;
+        }
+        Err(TokenMapError::Indexed(redact_token_store::Error::Busy))
+    }
     fn backend_name(&self) -> &'static str {
         "vault_kv2"
     }
@@ -353,6 +581,9 @@ impl TokenMapStore for Kv2Store {
             let (existing, cas) = self.read_for_cas(&path).await?;
             let merged = merge_mappings(existing, mappings)?;
             let payload = StoredSession {
+                frozen: false,
+                cleanup_through: 0,
+                destroyed_through: 0,
                 mappings: merged,
                 expires_at: Utc::now() + chrono::Duration::seconds(self.ttl_secs as i64),
             };
@@ -398,6 +629,9 @@ impl TokenMapStore for Kv2Store {
 
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let path = self.path(tenant, session);
+        if self.read_snapshot(&path, false).await?.0.frozen {
+            return Err(TokenMapError::Conflict("context migrated".into()));
+        }
         self.ensure_fresh_token().await?;
         let inner = self.inner.read().await;
         match kv2::delete_latest(&inner.client, &self.mount, &path).await {
@@ -409,6 +643,9 @@ impl TokenMapStore for Kv2Store {
 
     async fn purge(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let path = self.path(tenant, session);
+        if self.read_snapshot(&path, false).await?.0.frozen {
+            return Err(TokenMapError::Conflict("context migrated".into()));
+        }
         self.ensure_fresh_token().await?;
         let inner = self.inner.read().await;
         match kv2::delete_metadata(&inner.client, &self.mount, &path).await {
@@ -491,10 +728,18 @@ impl TokenMapStore for Kv2Store {
         let probed = {
             self.ensure_fresh_token().await?;
             let inner = self.inner.read().await;
-            match inner.client.status().await {
-                Ok(_) => Ok(()),
-                Err(err) => Err(err.to_string()),
-            }
+            // OpenBao omits Vault enterprise replication fields. Check the
+            // protocol's health status instead of deserializing those fields.
+            // Unlike Client::status(), this rejects sealed/uninitialized states
+            // rather than treating every successfully decoded enum as healthy.
+            let endpoint = api::sys::requests::ReadHealthRequest::builder()
+                .standbyok(true)
+                .perfstandbyok(true)
+                .build()
+                .expect("static health request");
+            api::exec_with_empty(&inner.client, endpoint)
+                .await
+                .map_err(|_| "token source is not ready".to_string())
         };
 
         *self.health.lock().await = Some((Instant::now(), probed.clone()));

@@ -261,7 +261,10 @@ fn anonymize_leaves_no_four_plus_digit_substring() {
                 );
             }
         }
-        for run in digit_runs_of_at_least(&anonymized.text, 4) {
+        if let Some(run) = digit_runs_of_at_least(&anonymized.text, 4)
+            .into_iter()
+            .next()
+        {
             panic!(
                 "{language}: anonymized text still has 4+ digit run {run} in {}",
                 anonymized.text

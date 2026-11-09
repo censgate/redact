@@ -12,6 +12,31 @@ use redact_gateway::vault::{
     DisabledStore, MemoryStore, TokenMapError, TokenMapStore,
 };
 
+#[cfg(feature = "vault")]
+#[tokio::test]
+async fn kv2_health_uses_status_and_rejects_sealed_or_uninitialized_sources() {
+    use axum::{http::StatusCode, routing::get, Router};
+    use redact_gateway::vault::Kv2Store;
+    for status in [
+        StatusCode::OK,
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::NOT_IMPLEMENTED,
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        // Minimal OpenBao response, without Vault enterprise fields.
+        let app = Router::new().route("/v1/sys/health", get(move || async move { (status, "{}") }));
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let store = Kv2Store::from_settings(&VaultSettings {
+            address: Some(format!("http://{address}")),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(store.health().await.is_ok(), status == StatusCode::OK);
+        server.abort();
+    }
+}
+
 fn mapping(token: &str, sealed: &str) -> TokenMapping {
     TokenMapping {
         token: token.to_string(),

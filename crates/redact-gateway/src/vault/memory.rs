@@ -27,6 +27,7 @@ use crate::redact::token::TokenMapping;
 /// One session's sealed mappings and when they should disappear.
 #[derive(Debug, Clone)]
 struct SessionEntry {
+    frozen: bool,
     mappings: Vec<TokenMapping>,
     expires_at: DateTime<Utc>,
 }
@@ -98,6 +99,50 @@ impl MemoryStore {
 
 #[async_trait::async_trait]
 impl TokenMapStore for MemoryStore {
+    async fn fence_for_erasure(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let mut guard = self.entries.write().await;
+        let entry = guard
+            .entry(Self::key(tenant, session))
+            .or_insert_with(|| SessionEntry {
+                frozen: true,
+                mappings: Vec::new(),
+                expires_at: Utc::now(),
+            });
+        entry.frozen = true;
+        entry.mappings.clear();
+        Ok(())
+    }
+    async fn freeze(
+        &self,
+        tenant: &str,
+        session: &str,
+    ) -> Result<super::FrozenSnapshot, TokenMapError> {
+        let mut guard = self.entries.write().await;
+        let entry = guard
+            .entry(Self::key(tenant, session))
+            .or_insert_with(|| SessionEntry {
+                frozen: true,
+                mappings: Vec::new(),
+                expires_at: Utc::now(),
+            });
+        entry.frozen = true;
+        Ok(super::FrozenSnapshot {
+            mappings: entry.mappings.clone(),
+            expires_ms: entry.expires_at.timestamp_millis(),
+        })
+    }
+
+    async fn clear_frozen(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
+        let mut guard = self.entries.write().await;
+        let entry = guard
+            .get_mut(&Self::key(tenant, session))
+            .ok_or_else(|| TokenMapError::Backend("source is not frozen".into()))?;
+        if !entry.frozen {
+            return Err(TokenMapError::Backend("source is not frozen".into()));
+        }
+        entry.mappings.clear();
+        Ok(())
+    }
     fn backend_name(&self) -> &'static str {
         "memory"
     }
@@ -116,6 +161,9 @@ impl TokenMapStore for MemoryStore {
 
         let mut guard = self.entries.write().await;
         if let Some(entry) = guard.get(&key) {
+            if entry.frozen {
+                return Err(TokenMapError::Conflict("context migrated".into()));
+            }
             if entry.expires_at <= now {
                 guard.remove(&key);
             }
@@ -130,6 +178,7 @@ impl TokenMapStore for MemoryStore {
         guard.insert(
             key,
             SessionEntry {
+                frozen: false,
                 mappings: merged,
                 expires_at,
             },
@@ -142,6 +191,7 @@ impl TokenMapStore for MemoryStore {
         let now = self.current_time().await;
         let mut guard = self.entries.write().await;
         match guard.get(&key) {
+            Some(entry) if entry.frozen => Err(TokenMapError::Conflict("context migrated".into())),
             Some(entry) if entry.expires_at > now => Ok(entry.mappings.clone()),
             Some(_) => {
                 guard.remove(&key);
@@ -157,7 +207,11 @@ impl TokenMapStore for MemoryStore {
 
     async fn delete(&self, tenant: &str, session: &str) -> Result<(), TokenMapError> {
         let key = Self::key(tenant, session);
-        self.entries.write().await.remove(&key);
+        let mut guard = self.entries.write().await;
+        if guard.get(&key).is_some_and(|entry| entry.frozen) {
+            return Err(TokenMapError::Conflict("context migrated".into()));
+        }
+        guard.remove(&key);
         Ok(())
     }
 

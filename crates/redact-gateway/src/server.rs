@@ -28,6 +28,38 @@ pub struct GatewayServer {
     state: AppState,
 }
 
+/// Check an indexed candidate configuration without serving, loading NER,
+/// contacting the inference provider or mutating token records. Source auth may
+/// log in/renew credentials. This cannot prove the operator's writer drain.
+pub async fn check_token_store(config: &ResolvedConfig) -> Result<&'static str> {
+    config.validate()?;
+    let settings = config
+        .vault
+        .indexed
+        .as_ref()
+        .context("check-token-store requires an indexed candidate configuration")?;
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let dek = build_dek(config)?;
+        let source = build_store(&config.vault)
+            .await
+            .map_err(|_| anyhow::anyhow!("token-store source initialization failed"))?;
+        source
+            .health()
+            .await
+            .map_err(|_| anyhow::anyhow!("token-store source health probe failed"))?;
+        let target = crate::vault::indexed::build(settings, source, dek, config.vault.ttl_secs)
+            .await
+            .context("token-store generation or runtime prerequisites failed")?;
+        target
+            .health()
+            .await
+            .context("token-store dependencies are not ready")?;
+        Ok(target.backend_name())
+    })
+    .await
+    .context("token-store preflight deadline exceeded")?
+}
+
 impl GatewayServer {
     /// Build a server from resolved configuration.
     pub async fn new(config: ResolvedConfig) -> Result<Self> {
@@ -64,6 +96,15 @@ impl GatewayServer {
         let tokens = build_store(&config.vault)
             .await
             .context("could not initialize the token map backend")?;
+        let tokens: Arc<dyn TokenMapStore> = if let Some(settings) = &config.vault.indexed {
+            Arc::new(
+                crate::vault::indexed::build(settings, tokens, dek.clone(), config.vault.ttl_secs)
+                    .await
+                    .context("could not validate indexed token-store generation")?,
+            )
+        } else {
+            tokens
+        };
         if tokens.backend_name() != "off" {
             if let Err(err) = tokens.health().await {
                 // Startup continues so a transient outage does not prevent the

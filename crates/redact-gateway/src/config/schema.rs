@@ -132,6 +132,8 @@ pub struct NerDocument {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VaultDocument {
+    /// Indexed target and explicit migration barrier; startup-only.
+    pub indexed: Option<super::IndexedTokenSettings>,
     /// `off`, `memory` or `vault_kv2`.
     pub backend: Option<VaultBackend>,
     /// Base address of the KV v2 server.
@@ -316,6 +318,9 @@ impl GatewayDocument {
         }
 
         if let Some(vault) = self.vault {
+            if vault.indexed.is_some() {
+                config.vault.indexed = vault.indexed;
+            }
             apply_opt(&mut config.vault.backend, vault.backend);
             if vault.address.is_some() {
                 config.vault.address = vault.address.filter(|v| !v.is_empty());
