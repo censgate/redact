@@ -158,8 +158,11 @@ Example filter: `CENSGATE_TRACE_FILTER=redact_gateway=info,tower_http=info`.
 | `redact.gateway.tokenmap.operations` | Counter | `{operation}` | `redact.tokenmap.backend`, `redact.tokenmap.operation`, `error.type` |
 | `redact.gateway.tokenmap.operation.duration` | Histogram | `s` | same as operations |
 | `redact.gateway.audit.records_dropped` | Counter | `{record}` | (none) |
+| `redact.gateway.redact.requests` | Counter | `{request}` | `redact.mode`, `redact.outcome` |
+| `redact.gateway.redact.errors` | Counter | `{request}` | `redact.mode`, `redact.outcome` |
+| `redact.gateway.redact.duration` | Histogram | `s` | `redact.mode`, `redact.outcome` |
 
-HTTP duration histograms use the spec-advised explicit bucket boundaries: `0.005` … `10.0` seconds.
+HTTP duration histograms use the spec-advised explicit bucket boundaries: `0.005` … `10.0` seconds. `/v1/redact` duration uses `0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60` seconds and includes time spent queued. `redact.mode` is `text` or `texts`. `redact.outcome` is `completed`, `error`, `overload`, or `deadline`. The error counter is not incremented for `completed`. See [redaction batching](../redaction-batching.md).
 
 Pull-based scrape: `GET /metrics` when `CENSGATE_METRICS_ENDPOINT=true` and the `prometheus` feature is enabled. Otherwise export metrics over OTLP.
 

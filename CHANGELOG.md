@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `POST /v1/redact` accepts an optional `texts` array when
+  `server.redact_batch_enabled` is set. The switch defaults to off.
+  Equal-length NER rows in one request share an ONNX forward. A bounded
+  in-flight and queue limit rejects excess `texts` requests before detection
+  or a token write. One caller deadline covers queueing, detection and
+  persistence. `/v1/redact` records rate, errors and duration for both `text`
+  and `texts`, including overload and deadline. Scalar `text` requests do not
+  take a batch permit. Large sessions continue to use indexed token storage
+  rather than extra vault documents.
+
+### Changed
+
+- `RedactRequest.text` is `Option<String>`. JSON clients that send `text`
+  are unchanged. Omitting both `text` and `texts` is
+  `400 invalid_request_error` (previously a serde `422`). A present null is
+  still rejected. An invalid `/v1/redact` body returns a static message and
+  does not echo the payload.
+
 ## [0.13.0] - 2026-11-09
 
 ### Added

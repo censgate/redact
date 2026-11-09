@@ -123,6 +123,34 @@ impl AnalyzerEngine {
         })
     }
 
+    /// Analyze each text independently. Overlap resolution stays per text.
+    pub fn analyze_batch(
+        &self,
+        texts: &[&str],
+        language: Option<&str>,
+    ) -> Result<Vec<AnalysisResult>> {
+        let start = Timer::new();
+        let lang = language.unwrap_or(&self.default_language);
+        let detected = self.recognizer_registry.analyze_batch(texts, lang)?;
+        let processing_time_ms = start.elapsed_ms();
+        let recognizers_used = self.recognizer_registry.recognizers().len();
+        let language = lang.to_string();
+        Ok(detected
+            .into_iter()
+            .map(|detected_entities| AnalysisResult {
+                original_text: None,
+                detected_entities,
+                anonymized: None,
+                metadata: AnalysisMetadata {
+                    recognizers_used,
+                    processing_time_ms,
+                    language: language.clone(),
+                    model_version: self.model_version.clone(),
+                },
+            })
+            .collect())
+    }
+
     /// Analyze text with specific entity types
     pub fn analyze_with_entities(
         &self,

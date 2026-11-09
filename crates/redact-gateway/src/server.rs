@@ -14,6 +14,7 @@ use tracing::{info, warn};
 
 use crate::audit::{build_dispatcher, AuditDispatcher};
 use crate::auth::{build_authenticator, Authenticator};
+use crate::batch::BatchGate;
 use crate::config::{ConfigHandle, ResolvedConfig};
 use crate::packs::load_packs;
 use crate::proxy::ProviderClient;
@@ -135,6 +136,7 @@ impl GatewayServer {
             .context("could not build the provider client")?;
 
         let handle = ConfigHandle::new(config);
+        let batch = BatchGate::from_settings(&handle.load().server);
         let state = AppState {
             config: handle.clone(),
             engine,
@@ -144,6 +146,7 @@ impl GatewayServer {
             auth: authenticator,
             audit,
             telemetry,
+            batch,
         };
 
         Ok(Self {

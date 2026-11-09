@@ -49,6 +49,24 @@ fn analyze_off_async_worker(
     }
 }
 
+fn analyze_batch_off_async_worker(
+    engine: &AnalyzerEngine,
+    texts: &[&str],
+) -> Result<Vec<redact_core::AnalysisResult>, RedactError> {
+    let run = || match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine.analyze_batch(texts, None)
+    })) {
+        Ok(result) => result.map_err(|e| RedactError::Detection(e.to_string())),
+        Err(_) => Err(RedactError::Detection("recognizer panicked".to_string())),
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(run)
+        }
+        _ => run(),
+    }
+}
+
 /// Redaction failures.
 #[derive(Debug, thiserror::Error)]
 pub enum RedactError {
@@ -264,18 +282,61 @@ impl<'a> RedactionContext<'a> {
                 return Err(err);
             }
         };
-        if analysis.detected_entities.is_empty() {
+        self.apply_detected(text, analysis.detected_entities)
+    }
+
+    /// Detect each text on its own. One span covers the call.
+    ///
+    /// Recognizers may pack model forwards inside this call. Texts are not
+    /// concatenated, and the result stays aligned with `texts`.
+    pub fn detect_many(&self, texts: &[&str]) -> Result<Vec<Vec<RecognizerResult>>, RedactError> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let level = self.trace_level.unwrap_or(TraceLevel::Off);
+        let bytes = texts.iter().map(|text| text.len()).sum();
+        let detect = spans::detect(level, bytes);
+        let analysis = {
+            let _enter = detect.as_ref().map(|span| span.enter());
+            redact_core::with_operation_spans(level.records_operations(), || {
+                analyze_batch_off_async_worker(self.engine, texts)
+            })
+        };
+        match analysis {
+            Ok(rows) => {
+                if let Some(span) = &detect {
+                    let count = rows.iter().map(|row| row.detected_entities.len()).sum();
+                    spans::finish_detect(span, count, level, None);
+                }
+                Ok(rows.into_iter().map(|row| row.detected_entities).collect())
+            }
+            Err(err) => {
+                if let Some(span) = &detect {
+                    spans::finish_detect(span, 0, level, Some("detect_error"));
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// Apply an already computed detection. Minting stays in call order.
+    pub fn apply_detected(
+        &mut self,
+        text: &str,
+        entities: Vec<RecognizerResult>,
+    ) -> Result<String, RedactError> {
+        if text.trim().is_empty() || entities.is_empty() {
             return Ok(text.to_string());
         }
-
+        let level = self.trace_level.unwrap_or(TraceLevel::Off);
         let policy = spans::policy_evaluate(level, &self.profile.name);
         let _policy_enter = policy.as_ref().map(|s| s.enter());
 
         // Decide every span first: tokenization needs fallible work that
         // `apply_anonymization` cannot perform inside its closure.
         let mut decisions: Vec<(RecognizerResult, EntityAction, Option<String>)> =
-            Vec::with_capacity(analysis.detected_entities.len());
-        for entity in analysis.detected_entities {
+            Vec::with_capacity(entities.len());
+        for entity in entities {
             let mut action = self.profile.decide(&entity.entity_type, entity.score);
             if action == EntityAction::Tokenize && self.tokenize_as_replace {
                 action = EntityAction::Replace;

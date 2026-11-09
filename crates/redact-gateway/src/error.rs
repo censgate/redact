@@ -40,6 +40,14 @@ pub enum GatewayError {
     #[error("dependency unavailable: {0}")]
     DependencyUnavailable(String),
 
+    /// A texts[] request was rejected before detection or a token-map write.
+    #[error("redact batch overloaded")]
+    Overloaded,
+
+    /// The caller deadline elapsed before detection or a token-map write finished.
+    #[error("redact deadline exceeded")]
+    Deadline,
+
     /// Detection or anonymization failed.
     #[error("redaction failed: {0}")]
     Redaction(String),
@@ -69,7 +77,8 @@ impl GatewayError {
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::PolicyBlocked(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::DependencyUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::DependencyUnavailable(_) | Self::Overloaded => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Deadline => StatusCode::GATEWAY_TIMEOUT,
             Self::Redaction(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Provider(_) => StatusCode::BAD_GATEWAY,
         }
@@ -91,6 +100,8 @@ impl GatewayError {
             Self::Forbidden(_) => "permission_error",
             Self::PolicyBlocked(_) => "policy_violation",
             Self::DependencyUnavailable(_) => "dependency_unavailable",
+            Self::Overloaded => "overload",
+            Self::Deadline => "deadline",
             Self::Redaction(_) => "redaction_error",
             Self::Provider(_) => "provider_error",
             Self::Internal(_) => "internal_error",
@@ -161,6 +172,13 @@ mod tests {
             GatewayError::DependencyUnavailable("token map".into()).status(),
             StatusCode::SERVICE_UNAVAILABLE
         );
+        assert_eq!(
+            GatewayError::Overloaded.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(GatewayError::Overloaded.error_type(), "overload");
+        assert_eq!(GatewayError::Deadline.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(GatewayError::Deadline.error_type(), "deadline");
     }
 
     #[test]

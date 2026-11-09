@@ -26,6 +26,9 @@ pub struct Metrics {
     tokenmap_operations: Counter<u64>,
     tokenmap_duration: Histogram<f64>,
     audit_dropped: Counter<u64>,
+    redact_requests: Counter<u64>,
+    redact_errors: Counter<u64>,
+    redact_duration: Histogram<f64>,
 }
 
 impl Metrics {
@@ -74,6 +77,24 @@ impl Metrics {
                 .u64_counter(semconv::REDACT_GATEWAY_AUDIT_RECORDS_DROPPED)
                 .with_description("Audit records dropped because the dispatch queue was full")
                 .with_unit("{record}")
+                .build(),
+            redact_requests: meter
+                .u64_counter(semconv::REDACT_GATEWAY_REDACT_REQUESTS)
+                .with_description("Redact requests, including those rejected before detection")
+                .with_unit("{request}")
+                .build(),
+            redact_errors: meter
+                .u64_counter(semconv::REDACT_GATEWAY_REDACT_ERRORS)
+                .with_description("Redact requests that did not complete")
+                .with_unit("{request}")
+                .build(),
+            redact_duration: meter
+                .f64_histogram(semconv::REDACT_GATEWAY_REDACT_DURATION)
+                .with_description(
+                    "Caller-visible redact duration, including time spent waiting for admission",
+                )
+                .with_unit("s")
+                .with_boundaries(semconv::REDACT_DURATION_BOUNDS.to_vec())
                 .build(),
         }
     }
@@ -204,5 +225,23 @@ impl Metrics {
     /// Increment the audit drop counter.
     pub fn record_audit_dropped(&self, count: u64) {
         self.audit_dropped.add(count, &[]);
+    }
+
+    /// Record rate, errors and duration for one `/v1/redact` call.
+    ///
+    /// `mode` is `text` or `texts`. `outcome` is `completed`, `error`,
+    /// `overload` or `deadline`. Every outcome records the request counter
+    /// and the duration. Outcomes other than `completed` also record an error.
+    /// Attributes are that closed set only: no request text, token or entity value.
+    pub fn record_redact_red(&self, mode: &'static str, outcome: &'static str, duration_secs: f64) {
+        let attrs = [
+            KeyValue::new(semconv::REDACT_MODE, mode),
+            KeyValue::new(semconv::REDACT_OUTCOME, outcome),
+        ];
+        self.redact_requests.add(1, &attrs);
+        if outcome != "completed" {
+            self.redact_errors.add(1, &attrs);
+        }
+        self.redact_duration.record(duration_secs, &attrs);
     }
 }

@@ -138,6 +138,21 @@ pub const REDACT_GATEWAY_TOKENMAP_OPERATION_DURATION: &str =
     "redact.gateway.tokenmap.operation.duration";
 /// Counter of audit records dropped because the queue was full. Unit: `{record}`.
 pub const REDACT_GATEWAY_AUDIT_RECORDS_DROPPED: &str = "redact.gateway.audit.records_dropped";
+/// Counter of `/v1/redact` requests, including rejected batches. Unit: `{request}`.
+pub const REDACT_GATEWAY_REDACT_REQUESTS: &str = "redact.gateway.redact.requests";
+/// Counter of `/v1/redact` requests that did not complete. Unit: `{request}`.
+pub const REDACT_GATEWAY_REDACT_ERRORS: &str = "redact.gateway.redact.errors";
+/// Histogram of caller-visible `/v1/redact` duration, including queue time. Unit: `s`.
+pub const REDACT_GATEWAY_REDACT_DURATION: &str = "redact.gateway.redact.duration";
+/// Closed outcome: `completed`, `error`, `overload` or `deadline`.
+pub const REDACT_OUTCOME: &str = "redact.outcome";
+/// Request shape: `text` or `texts`.
+pub const REDACT_MODE: &str = "redact.mode";
+
+/// Bucket bounds for redact duration, including sub-millisecond overload and the 30s deadline.
+pub const REDACT_DURATION_BOUNDS: &[f64] = &[
+    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
+];
 
 /// Spec-advised explicit bucket boundaries for HTTP request duration histograms.
 pub const HTTP_DURATION_BOUNDS: &[f64] = &[

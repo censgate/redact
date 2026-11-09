@@ -45,6 +45,17 @@ pub struct CapturedLog {
     pub span_id: Option<String>,
 }
 
+/// One aggregated series on a captured instrument.
+#[derive(Debug, Clone)]
+pub struct CapturedPoint {
+    /// Attribute key/value pairs. Values are the SDK display form.
+    pub attributes: Vec<(String, String)>,
+    /// Counter value, or histogram sum.
+    pub value: f64,
+    /// Histogram sample count. Counters use 1 per series.
+    pub count: u64,
+}
+
 /// Summary of a metric instrument observed during collection.
 #[derive(Debug, Clone)]
 pub struct CapturedMetric {
@@ -56,6 +67,8 @@ pub struct CapturedMetric {
     pub kind: CapturedMetricKind,
     /// Explicit histogram boundaries when present.
     pub boundaries: Vec<f64>,
+    /// Aggregated series, including attribute sets.
+    pub points: Vec<CapturedPoint>,
 }
 
 /// Instrument kind as observed after aggregation.
@@ -237,6 +250,7 @@ impl PushMetricExporter for CapturingMetricExporter {
                     unit: metric.unit().to_string(),
                     kind,
                     boundaries,
+                    points: points_of(metric.data()),
                 });
             }
         }
@@ -309,6 +323,66 @@ fn classify(data: &AggregatedMetrics) -> (CapturedMetricKind, Vec<f64>) {
             }
         }
         _ => (CapturedMetricKind::Other, Vec::new()),
+    }
+}
+
+fn attr_pairs<'a>(attributes: impl Iterator<Item = &'a KeyValue>) -> Vec<(String, String)> {
+    attributes
+        .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+        .collect()
+}
+
+fn points_of(data: &AggregatedMetrics) -> Vec<CapturedPoint> {
+    match data {
+        AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
+            .data_points()
+            .map(|point| CapturedPoint {
+                attributes: attr_pairs(point.attributes()),
+                value: point.value() as f64,
+                count: 1,
+            })
+            .collect(),
+        AggregatedMetrics::I64(MetricData::Sum(sum)) => sum
+            .data_points()
+            .map(|point| CapturedPoint {
+                attributes: attr_pairs(point.attributes()),
+                value: point.value() as f64,
+                count: 1,
+            })
+            .collect(),
+        AggregatedMetrics::F64(MetricData::Sum(sum)) => sum
+            .data_points()
+            .map(|point| CapturedPoint {
+                attributes: attr_pairs(point.attributes()),
+                value: point.value(),
+                count: 1,
+            })
+            .collect(),
+        AggregatedMetrics::F64(MetricData::Histogram(histogram)) => histogram
+            .data_points()
+            .map(|point| CapturedPoint {
+                attributes: attr_pairs(point.attributes()),
+                value: point.sum(),
+                count: point.count(),
+            })
+            .collect(),
+        AggregatedMetrics::U64(MetricData::Histogram(histogram)) => histogram
+            .data_points()
+            .map(|point| CapturedPoint {
+                attributes: attr_pairs(point.attributes()),
+                value: point.sum() as f64,
+                count: point.count(),
+            })
+            .collect(),
+        AggregatedMetrics::I64(MetricData::Histogram(histogram)) => histogram
+            .data_points()
+            .map(|point| CapturedPoint {
+                attributes: attr_pairs(point.attributes()),
+                value: point.sum() as f64,
+                count: point.count(),
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 

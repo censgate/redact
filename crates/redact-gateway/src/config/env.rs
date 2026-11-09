@@ -53,6 +53,14 @@ pub const FORWARD_CLIENT_AUTH: &str = "CENSGATE_PROVIDER_FORWARD_CLIENT_AUTHORIZ
 pub const ENABLE_TRACING: &str = "CENSGATE_ENABLE_TRACING";
 /// Serve the pull-based metrics endpoint.
 pub const METRICS_ENDPOINT: &str = "CENSGATE_METRICS_ENDPOINT";
+/// Accept field-preserving redact batches.
+pub const REDACT_BATCH_ENABLED: &str = "CENSGATE_REDACT_BATCH_ENABLED"; // pragma: allowlist secret
+/// In-flight `texts` requests.
+pub const REDACT_BATCH_INFLIGHT: &str = "CENSGATE_REDACT_BATCH_INFLIGHT"; // pragma: allowlist secret
+/// Queue wait for a `texts` permit, in milliseconds.
+pub const REDACT_BATCH_QUEUE_MS: &str = "CENSGATE_REDACT_BATCH_QUEUE_MS"; // pragma: allowlist secret
+/// Waiting `texts` requests.
+pub const REDACT_BATCH_QUEUE_DEPTH: &str = "CENSGATE_REDACT_BATCH_QUEUE_DEPTH"; // pragma: allowlist secret
 /// Connect timeout for provider requests, in seconds.
 pub const CONNECT_TIMEOUT_SECS: &str = "CENSGATE_PROVIDER_CONNECT_TIMEOUT_SECS";
 /// Overall timeout for provider requests, in seconds.
@@ -248,6 +256,18 @@ pub fn overlay_env(config: &mut ResolvedConfig) -> Result<(), ConfigError> {
     }
     if let Some(value) = first(&[METRICS_ENDPOINT]) {
         config.server.metrics_endpoint = parse_bool(METRICS_ENDPOINT, &value)?;
+    }
+    if let Some(value) = first(&[REDACT_BATCH_ENABLED]) {
+        config.server.redact_batch_enabled = parse_bool(REDACT_BATCH_ENABLED, &value)?;
+    }
+    if let Some(value) = first(&[REDACT_BATCH_INFLIGHT]) {
+        config.server.redact_batch_inflight = parse(REDACT_BATCH_INFLIGHT, &value)?;
+    }
+    if let Some(value) = first(&[REDACT_BATCH_QUEUE_MS]) {
+        config.server.redact_batch_queue_ms = parse(REDACT_BATCH_QUEUE_MS, &value)?;
+    }
+    if let Some(value) = first(&[REDACT_BATCH_QUEUE_DEPTH]) {
+        config.server.redact_batch_queue_depth = parse(REDACT_BATCH_QUEUE_DEPTH, &value)?;
     }
 
     if let Some(value) = first(&[PROVIDER_NAME]) {

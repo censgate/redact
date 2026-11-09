@@ -352,6 +352,37 @@ pub struct ServerSettings {
     pub enable_http_trace: bool,
     /// Serve a pull-based metrics endpoint at `/metrics`.
     pub metrics_endpoint: bool,
+    /// Accept field-preserving `texts` batches on `/v1/redact`.
+    ///
+    /// Off unless a config file or `CENSGATE_REDACT_BATCH_ENABLED` turns it on. // pragma: allowlist secret
+    /// Scalar `text` requests are unchanged either way. Hot-reloaded.
+    #[serde(default)]
+    pub redact_batch_enabled: bool,
+    /// How many `texts` requests may detect at once. Requires a restart.
+    #[serde(default = "default_batch_inflight")]
+    pub redact_batch_inflight: u32,
+    /// How long a `texts` request may wait for a permit, in milliseconds.
+    ///
+    /// Zero rejects immediately. The caller deadline can only shorten this.
+    /// Requires a restart.
+    #[serde(default = "default_batch_queue_ms")]
+    pub redact_batch_queue_ms: u64,
+    /// How many `texts` requests may wait. Further arrivals are overload.
+    /// Requires a restart.
+    #[serde(default = "default_batch_queue_depth")]
+    pub redact_batch_queue_depth: u32,
+}
+
+fn default_batch_inflight() -> u32 {
+    1
+}
+
+fn default_batch_queue_ms() -> u64 {
+    5_000
+}
+
+fn default_batch_queue_depth() -> u32 {
+    4
 }
 
 impl Default for ServerSettings {
@@ -361,6 +392,10 @@ impl Default for ServerSettings {
             port: 8080,
             enable_http_trace: true,
             metrics_endpoint: true,
+            redact_batch_enabled: false,
+            redact_batch_inflight: default_batch_inflight(),
+            redact_batch_queue_ms: default_batch_queue_ms(),
+            redact_batch_queue_depth: default_batch_queue_depth(),
         }
     }
 }
@@ -750,6 +785,21 @@ impl ResolvedConfig {
                 return Err(ConfigError::Invalid("indexed storage requires authentication, a durable key, a KV v2 migration source, drained legacy writers and a complete immutable shard map".into()));
             }
         }
+        if !(1..=8).contains(&self.server.redact_batch_inflight) {
+            return Err(ConfigError::Invalid(
+                "server.redact_batch_inflight must be from 1 to 8".into(),
+            ));
+        }
+        if self.server.redact_batch_queue_ms > 30_000 {
+            return Err(ConfigError::Invalid(
+                "server.redact_batch_queue_ms must be from 0 to 30000".into(),
+            ));
+        }
+        if self.server.redact_batch_queue_depth > 32 {
+            return Err(ConfigError::Invalid(
+                "server.redact_batch_queue_depth must be from 0 to 32".into(),
+            ));
+        }
         if self.vault.backend == VaultBackend::VaultKv2 && self.vault.address.is_none() {
             return Err(ConfigError::Invalid(
                 "token map backend is vault_kv2 but no address is configured".to_string(),
@@ -866,6 +916,9 @@ impl ResolvedConfig {
         next.server.host = self.server.host.clone();
         next.server.port = self.server.port;
         next.server.enable_http_trace = self.server.enable_http_trace;
+        next.server.redact_batch_inflight = self.server.redact_batch_inflight;
+        next.server.redact_batch_queue_ms = self.server.redact_batch_queue_ms;
+        next.server.redact_batch_queue_depth = self.server.redact_batch_queue_depth;
         next.provider.base_url = self.provider.base_url.clone();
         next.provider.api_key = self.provider.api_key.clone();
         next.provider.connect_timeout_secs = self.provider.connect_timeout_secs;
@@ -905,6 +958,15 @@ impl ResolvedConfig {
         }
         if self.server.enable_http_trace != next.server.enable_http_trace {
             changed.push("server.enable_http_trace");
+        }
+        if self.server.redact_batch_inflight != next.server.redact_batch_inflight {
+            changed.push("server.redact_batch_inflight");
+        }
+        if self.server.redact_batch_queue_ms != next.server.redact_batch_queue_ms {
+            changed.push("server.redact_batch_queue_ms");
+        }
+        if self.server.redact_batch_queue_depth != next.server.redact_batch_queue_depth {
+            changed.push("server.redact_batch_queue_depth");
         }
         if self.provider.base_url != next.provider.base_url {
             changed.push("provider.base_url");
@@ -1000,6 +1062,10 @@ impl ResolvedConfig {
                 "bind": self.bind_address(),
                 "http_trace": self.server.enable_http_trace,
                 "metrics_endpoint": self.server.metrics_endpoint,
+                "redact_batch_enabled": self.server.redact_batch_enabled,
+                "redact_batch_inflight": self.server.redact_batch_inflight,
+                "redact_batch_queue_ms": self.server.redact_batch_queue_ms,
+                "redact_batch_queue_depth": self.server.redact_batch_queue_depth,
             },
             "provider": {
                 "name": self.provider.name,
@@ -1224,6 +1290,25 @@ mod tests {
         hot.telemetry.operations = TraceLevel::Detailed;
         hot.server.metrics_endpoint = false;
         assert!(current.restart_required_changes(&hot).is_empty());
+
+        let mut batch_switch = ResolvedConfig::default();
+        batch_switch.server.redact_batch_enabled = true;
+        assert!(
+            current.restart_required_changes(&batch_switch).is_empty(),
+            "the batch switch is read per request"
+        );
+        let reloaded = current.effective_for_reload(batch_switch);
+        assert!(reloaded.server.redact_batch_enabled);
+        assert_eq!(reloaded.server.redact_batch_inflight, 1);
+
+        let mut batch_limit = ResolvedConfig::default();
+        batch_limit.server.redact_batch_inflight = 2;
+        assert_eq!(
+            current.restart_required_changes(&batch_limit),
+            vec!["server.redact_batch_inflight"]
+        );
+        batch_limit.server.redact_batch_inflight = 0;
+        assert!(batch_limit.validate().is_err());
 
         let mut forward = ResolvedConfig::default();
         forward.provider.forward_client_authorization = true;
