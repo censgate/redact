@@ -580,11 +580,31 @@ self_test() {
 
   run_align audit "" "$repo"
 
+  # Read the checkout's version. A release branch is already bumped, so the
+  # assertions below must not name 0.12.7 or any other fixed release.
+  current="$(
+    python3 - "$repo/Cargo.toml" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+data = tomllib.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(data["workspace"]["package"]["version"])
+PY
+  )"
+  # Not a release version, and not equal to the tree under test.
+  target="0.0.0-aligntest"
+  stale="1.2.3"
+  if [[ "$current" == "$target" || "$current" == "$stale" ]]; then
+    echo "ERROR: workspace version collided with a self-test sentinel" >&2
+    exit 1
+  fi
+
   if ! run_align check "" "$repo" >"$work/check.txt"; then
     echo "ERROR: real workspace path pins are already misaligned" >&2
     exit 1
   fi
-  grep -q "internal path pins match workspace version 0.12.7" "$work/check.txt"
+  grep -F -q "internal path pins match workspace version ${current}" "$work/check.txt"
 
   manifest_digest() {
     (
@@ -593,14 +613,17 @@ self_test() {
     )
   }
   before_digest="$(manifest_digest "$repo")"
-  run_align dry-run 0.13.0 "$repo" >"$work/dry.txt"
+  run_align dry-run "$target" "$repo" >"$work/dry.txt"
   after_digest="$(manifest_digest "$repo")"
   if [[ "$before_digest" != "$after_digest" ]]; then
     echo "ERROR: dry-run modified a manifest" >&2
     exit 1
   fi
-  grep -q "redact-token-store" "$work/dry.txt"
-  grep -q "aligned .* internal path pins to 0.13.0" "$work/dry.txt"
+  grep -F -q "crates/redact-gateway/Cargo.toml redact-token-store: ${current} -> ${target}" "$work/dry.txt"
+  grep -F -q "crates/redact-gateway/Cargo.toml redact-ner: ${current} -> ${target}" "$work/dry.txt"
+  grep -F -q "crates/redact-gateway/Cargo.toml redact-core: ${current} -> ${target}" "$work/dry.txt"
+  grep -F -q "aligned " "$work/dry.txt"
+  grep -F -q "internal path pins to ${target}" "$work/dry.txt"
 
   stage="$work/stage"
   mkdir -p "$stage"
@@ -608,39 +631,56 @@ self_test() {
     mkdir -p "$stage/$(dirname "$manifest")"
     cp "$repo/$manifest" "$stage/$manifest"
   done < <(cd "$repo" && find . -name Cargo.toml -not -path './.git/*' -not -path './target/*')
-  run_align apply 0.13.0 "$stage" >"$work/apply.txt"
-  grep -q "crates/redact-gateway/Cargo.toml redact-token-store: 0.12.7 -> 0.13.0" "$work/apply.txt"
-  grep -q "crates/redact-gateway/Cargo.toml redact-ner: 0.12.7 -> 0.13.0" "$work/apply.txt"
-  grep -q "crates/redact-gateway/Cargo.toml redact-core: 0.12.7 -> 0.13.0" "$work/apply.txt"
-  python3 - "$stage" <<'PY'
+  run_align apply "$target" "$stage" >"$work/apply.txt"
+  grep -F -q "crates/redact-gateway/Cargo.toml redact-token-store: ${current} -> ${target}" "$work/apply.txt"
+  grep -F -q "crates/redact-gateway/Cargo.toml redact-ner: ${current} -> ${target}" "$work/apply.txt"
+  grep -F -q "crates/redact-gateway/Cargo.toml redact-core: ${current} -> ${target}" "$work/apply.txt"
+  python3 - "$stage" "$repo" "$target" <<'PY'
 import sys
 from pathlib import Path
+
 stage = Path(sys.argv[1])
+source = Path(sys.argv[2])
+target = sys.argv[3]
 root = (stage / "Cargo.toml").read_text(encoding="utf-8")
+source_root = (source / "Cargo.toml").read_text(encoding="utf-8")
 gateway = (stage / "crates/redact-gateway/Cargo.toml").read_text(encoding="utf-8")
 wasm = (stage / "crates/redact-wasm/Cargo.toml").read_text(encoding="utf-8")
-assert 'version = "0.13.0"' in root
-assert 'pbkdf2 = { version = "0.13.0-rc.10"' in root
-assert ">=1.23, <1.27" in root
+source_wasm = (source / "crates/redact-wasm/Cargo.toml").read_text(encoding="utf-8")
+package = root.split("[workspace.package]", 1)[1].split("[", 1)[0]
+if f'version = "{target}"' not in package:
+    sys.exit("workspace version was not aligned")
+
+
+def line_with(text, needle):
+    for line in text.splitlines():
+        if needle in line:
+            return line
+    sys.exit(f"missing {needle}")
+
+
+for needle in ("pbkdf2 =", "uuid ="):
+    if line_with(root, needle) != line_with(source_root, needle):
+        sys.exit(f"external dependency changed: {needle}")
 for name in ("redact-core", "redact-ner", "redact-token-store"):
-    needle = f'{name} = {{ path = "../{name}", version = "0.13.0" }}'
+    needle = f'{name} = {{ path = "../{name}", version = "{target}" }}'
     if needle not in gateway:
         sys.exit(f"gateway pin not aligned: {name}")
-if 'redact-core = { path = "../redact-core" }' not in wasm:
-    sys.exit("versionless wasm path dependency was rewritten")
-if "version =" in wasm.split("redact-core", 1)[1].split("\n", 1)[0]:
-    sys.exit("wasm redact-core gained a version pin")
+if wasm != source_wasm:
+    sys.exit("versionless wasm manifest was rewritten")
 PY
   run_align check "" "$stage" >/dev/null
-  run_align apply 0.13.0 "$stage" >/dev/null
+  run_align apply "$target" "$stage" >/dev/null
 
-  python3 - "$stage" <<'PY'
+  python3 - "$stage" "$target" "$stale" <<'PY'
 from pathlib import Path
 import sys
+
 path = Path(sys.argv[1]) / "crates/redact-gateway/Cargo.toml"
+target, stale = sys.argv[2], sys.argv[3]
 text = path.read_text(encoding="utf-8")
-old = 'redact-token-store = { path = "../redact-token-store", version = "0.13.0" }'
-new = 'redact-token-store = { path = "../redact-token-store", version = "0.12.7" }'
+old = f'redact-token-store = {{ path = "../redact-token-store", version = "{target}" }}'
+new = f'redact-token-store = {{ path = "../redact-token-store", version = "{stale}" }}'
 if old not in text:
     sys.exit("aligned token-store pin was not found")
 path.write_text(text.replace(old, new, 1), encoding="utf-8")
@@ -658,12 +698,88 @@ PY
     cat "$work/stale-err.txt" >&2
     exit 1
   fi
-  grep -q "redact-token-store" "$work/stale-err.txt"
-  if grep -q "redact-core path pin" "$work/stale-err.txt"; then
+  grep -F -q "redact-token-store" "$work/stale-err.txt"
+  grep -F -q "$stale" "$work/stale-err.txt"
+  if grep -F -q "redact-core path pin" "$work/stale-err.txt"; then
     echo "ERROR: stale check blamed an aligned pin" >&2
     cat "$work/stale-err.txt" >&2
     exit 1
   fi
+
+  copy_release_tree() {
+    local dest="$1"
+    mkdir -p "$dest/scripts/ci" "$dest/.github/workflows"
+    cp "$repo/Cargo.toml" "$dest/Cargo.toml"
+    cp "$repo/.github/workflows/release.yml" "$dest/.github/workflows/release.yml"
+    cp "$repo/.github/workflows/prepare-release.yml" "$dest/.github/workflows/prepare-release.yml"
+    cp "$repo/scripts/update-version.sh" "$dest/scripts/update-version.sh"
+    cp "$repo/scripts/ci/verify-crates.sh" "$dest/scripts/ci/verify-crates.sh"
+    local manifest
+    while IFS= read -r manifest; do
+      mkdir -p "$dest/$(dirname "$manifest")"
+      cp "$repo/$manifest" "$dest/$manifest"
+    done < <(cd "$repo" && find crates -name Cargo.toml)
+  }
+
+  order="$work/order"
+  copy_release_tree "$order"
+  python3 - "$order/.github/workflows/release.yml" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+token = "-p redact-token-store"
+gateway = "-p redact-gateway"
+if text.find(token) < 0 or text.find(gateway) < 0 or text.find(token) > text.find(gateway):
+    sys.exit("fixture no longer publishes token-store before gateway")
+text = text.replace(token, "-p TOKEN_PLACEHOLDER", 1)
+text = text.replace(gateway, token, 1)
+text = text.replace("-p TOKEN_PLACEHOLDER", gateway, 1)
+path.write_text(text, encoding="utf-8")
+PY
+  set +e
+  run_align audit "" "$order" >"$work/order-out.txt" 2>"$work/order-err.txt"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "ERROR: audit accepted gateway published before its token-store dependency" >&2
+    exit 1
+  fi
+  if [[ "$status" -ne 1 ]]; then
+    echo "ERROR: publish-order audit exited $status, want 1" >&2
+    cat "$work/order-err.txt" >&2
+    exit 1
+  fi
+  grep -F -q "redact-token-store is published after redact-gateway" "$work/order-err.txt"
+
+  insecure="$work/insecure"
+  copy_release_tree "$insecure"
+  python3 - "$insecure/.github/workflows/release.yml" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = "id-token: write"
+if old not in text:
+    sys.exit("publish job has no id-token: write to remove")
+path.write_text(text.replace(old, "id-token: read", 1), encoding="utf-8")
+PY
+  set +e
+  run_align audit "" "$insecure" >"$work/insecure-out.txt" 2>"$work/insecure-err.txt"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "ERROR: audit accepted a publish job without id-token: write" >&2
+    exit 1
+  fi
+  if [[ "$status" -ne 1 ]]; then
+    echo "ERROR: trusted-publishing audit exited $status, want 1" >&2
+    cat "$work/insecure-err.txt" >&2
+    exit 1
+  fi
+  grep -F -q "publish-crates is missing id-token: write" "$work/insecure-err.txt"
 
   synth="$work/synth"
   mkdir -p "$synth/crates/alpha" "$synth/crates/beta" "$synth/crates/gamma" \
