@@ -51,12 +51,13 @@ jobs:
 
       - name: Update versions
         run: |
+          set -euo pipefail
           VERSION=${{ env.VERSION }}
-          sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" Cargo.toml
-          for f in crates/redact-ner/Cargo.toml crates/redact-api/Cargo.toml crates/redact-cli/Cargo.toml crates/redact-gateway/Cargo.toml crates/redact-scan/Cargo.toml; do
-            sed -i "s/\(redact-core = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$VERSION/" "$f"
-            sed -i "s/\(redact-ner = { path = \"[^\"]*\", version = \"\)[^\"]*/\1$VERSION/" "$f"
-          done
+          # Manifest-driven. An allowlist of crate files and dependency names
+          # left redact-token-store on the previous pin when the workspace
+          # moved (prepare-release run 42547446505). A pin that does not move
+          # fails this step; sed is not used because a missed pattern exits 0.
+          ./scripts/ci/align-internal-versions.sh "$VERSION"
           # Keep published docs in sync with the release version.
           sed -i \
             -e "s/^redact-core = \"[^\"]*\"/redact-core = \"$VERSION\"/" \

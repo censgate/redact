@@ -221,14 +221,16 @@ Preferred path (GitHub Actions):
 
 1. Update `CHANGELOG.md` release notes on a `release/vX.Y.Z` branch (or merge notes to `main` first)
 2. Bump versions via **Prepare Release** (preferred) or `./scripts/update-version.sh X.Y.Z`.
-   Both update workspace/`Cargo.toml` pins **and** documentation version pins
+   Both call `scripts/ci/align-internal-versions.sh`, which sets the workspace
+   version and every internal path dependency version. A pin that does not
+   move fails the script. They also update documentation version pins
    (`README.md` library examples, `docs/benchmarks/README.md` current-release link,
-   CHANGELOG unsupported-version upgrade hint), plus `redact-gateway` crate deps.
+   CHANGELOG unsupported-version upgrade hint).
 3. Open a PR from `release/vX.Y.Z` → `main` and wait for **CI** to pass
 4. Merge the PR — **Create Release Tag** creates `vX.Y.Z` and dispatches **Release**
 5. The **Release** workflow will:
    - Build binaries for all platforms (`redact` and `redact-gateway`)
-   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`, `redact-gateway`, `redact-scan`, `redact-verify`)
+   - Publish crates to crates.io (`redact-core`, `redact-ner`, `redact-api`, `redact-cli`, `redact-token-store`, `redact-gateway`, `redact-scan`, `redact-verify`). `redact-token-store` is published and checked on the crates.io index before `redact-gateway`.
    - Create a GitHub release
    - Build and push Docker images:
      - default (`Dockerfile`) as `:latest`, `:X.Y.Z`, etc.

@@ -400,4 +400,5 @@ jobs:
           ./scripts/ci/version-changelog.sh --self-test
           ./scripts/ci/publish-github-release.sh --self-test
           ./scripts/ci/verify-crates.sh --self-test
+          ./scripts/ci/align-internal-versions.sh --self-test
           ./scripts/ci/changelog-notes.sh 0.12.7 >/dev/null

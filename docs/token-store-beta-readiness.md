@@ -24,18 +24,39 @@ The future release workflow publishes `redact-token-store` before
 version is visible and not yanked in Cargo's sparse index. Local `cargo package`
 verification builds normalized archives; it does not upload packages.
 
-Read-only registry checks on 2026-11-08 returned HTTP 404 for both the crates.io
-`redact-token-store` API and its sparse-index entry. The name was not registered
-at that check. This does not prove who can register it or that publishing is
-configured. Before an explicitly authorized release, the release owner must:
+Read-only checks on 2026-11-09 still return HTTP 404 for
+`https://crates.io/api/v1/crates/redact-token-store` and
+`https://index.crates.io/re/da/redact-token-store`. The name is not registered.
+crates.io's trusted-publishing documentation requires the crate to exist before
+a publisher can be saved, and the publish API rejects a trusted-publishing
+token for a new crate ("Trusted Publishing tokens do not support creating new
+crates"). This repository does not contain a trusted-publisher record, and
+none can be attached to a name that does not exist. Crate settings were not
+readable from this checkout. Nothing here is a claim that a publisher is
+configured for this crate or for the crates that already exist.
 
-1. Verify namespace/owner access and the repository/workflow/environment identity
-   accepted by crates.io trusted publishing. Arrange any first-publication
-   credential through the registry's approved process; never put it in a PR.
-2. Confirm the release version and dependency versions agree. Existing immutable
-   versions must not be overwritten. Review the exact release workflow revision.
-3. Run the workflow only after approval. Retain its package verification and
-   sparse-index results, image provenance and immutable digests in the release record.
+Before an explicitly authorized release, a crates.io owner has to do the
+following outside any pull request. Do not put an API token in the repository,
+a workflow, or a pull request.
+
+1. Publish the first `redact-token-store` version with an API token. Trusted
+   publishing cannot create the crate. The release job
+   (`.github/workflows/release.yml`, job `publish-crates`) has no token
+   fallback. It exchanges a GitHub OIDC token with
+   `rust-lang/crates-io-auth-action` v1.0.6
+   (`3268eb413133e2960fa4ae0e963ca76380c54cd9`). That job sets
+   `id-token: write` and does not set `environment:`.
+2. After the crate exists, add a GitHub trusted publisher on the crate's
+   crates.io settings (Settings → Trusted Publishing → Add → GitHub):
+   repository owner and repository name of the GitHub repository that runs
+   this workflow, workflow filename `release.yml` (the bare filename, not a
+   path), and no environment. An environment value would not match this job.
+3. Confirm the release version and dependency versions agree. Existing
+   immutable versions must not be overwritten. Review the exact release
+   workflow revision.
+4. Run the workflow only after approval. Retain its package verification and
+   sparse-index results, image provenance and immutable digests in the release
+   record.
 
 No authenticated registry-owner settings were available for verification here.
 The 404 is an outstanding release prerequisite, not a failed local package test.
