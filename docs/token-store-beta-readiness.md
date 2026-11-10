@@ -154,6 +154,28 @@ limits, counts and error category. Alert on failed runs, rising backlog or pass
 age, and sustained retries. The scheduler, its owner and the inventory export are
 deployment-specific and remain activation gates.
 
+### Request-path RED metrics and proposed objectives
+
+Every indexed-store operation on the request path (`intern`, `resolve`, and
+`erase` through `DELETE /v1/vault/context`) is recorded on the existing
+`redact.gateway.tokenmap.operations` counter and
+`redact.gateway.tokenmap.operation.duration` histogram with
+`redact.tokenmap.backend="indexed"`, the fixed `redact.tokenmap.operation`, and,
+on failure, a typed `error.type`: `invalid`, `retired`, `unavailable`, `busy`,
+`capacity`, `integrity` or `dependency`. No identifier, label, scope or backend
+diagnostic is ever an attribute. `retired` is the expected terminal answer for
+an erased context; keep it out of the error rate and alert on its rate
+separately. `busy`/`capacity` are overload, `unavailable` is dependency loss,
+`integrity` must never occur in steady state.
+
+Proposed objectives, for the owner to confirm (not approved SLOs): a rolling
+success rate and p95/p99 duration per operation, evaluated from these series for
+each replica count and for a hot principal, so the objective is the steady-state
+rate, error and duration, not one large pass or a longer timeout. Alert when the
+error rate (everything except `retired`) or p99 duration exceeds budget over a
+five-minute window, or when `integrity` is non-zero. Choose the budgets before
+the beta run, as the load matrix above requires.
+
 ## Candidate preflight and activation
 
 Prepare the complete candidate configuration using the settings documented in the

@@ -431,3 +431,71 @@ fn assert_attr_i64(span: &opentelemetry_sdk::trace::SpanData, key: &str, expecte
     };
     assert_eq!(actual, expected, "attribute {key}");
 }
+
+#[test]
+fn indexed_token_store_operations_are_red_measured_with_typed_errors() {
+    use redact_gateway::vault::{indexed, TokenMapError};
+    use redact_token_store::Error;
+    use std::time::Instant;
+
+    let _guard = env_lock();
+    let tt = init_test(&test_settings(TraceLevel::Basic)).expect("init");
+    let metrics = tt.telemetry.metrics();
+
+    let ok: Result<(), TokenMapError> = Ok(());
+    indexed::record_operation(metrics, "intern", Instant::now(), &ok);
+    for (error, label) in [
+        (Error::Invalid, "invalid"),
+        (Error::Retired, "retired"),
+        (Error::Unavailable, "unavailable"),
+        (Error::Busy, "busy"),
+        (Error::Capacity, "capacity"),
+        (Error::Integrity, "integrity"),
+    ] {
+        let failed: Result<(), TokenMapError> = Err(TokenMapError::Indexed(error));
+        assert_eq!(indexed::error_type(failed.as_ref().unwrap_err()), label);
+        indexed::record_operation(metrics, "resolve", Instant::now(), &failed);
+    }
+    // Backend diagnostics from a legacy source never become a label.
+    let legacy: Result<(), TokenMapError> =
+        Err(TokenMapError::Backend("path secret/data/tenant/ctx".into()));
+    indexed::record_operation(metrics, "erase", Instant::now(), &legacy);
+
+    let captured = tt.collect_metrics();
+    let ops = captured
+        .iter()
+        .find(|m| m.name == semconv::REDACT_GATEWAY_TOKENMAP_OPERATIONS)
+        .expect("operations counter");
+    let duration = captured
+        .iter()
+        .find(|m| m.name == semconv::REDACT_GATEWAY_TOKENMAP_OPERATION_DURATION)
+        .expect("duration histogram");
+    for needle in [
+        "indexed",
+        "intern",
+        "resolve",
+        "erase",
+        "invalid",
+        "retired",
+        "unavailable",
+        "busy",
+        "capacity",
+        "integrity",
+        "dependency",
+    ] {
+        assert!(
+            ops.data_debug.contains(needle),
+            "{needle} missing: {}",
+            ops.data_debug
+        );
+        assert!(
+            duration.data_debug.contains(needle),
+            "{needle} missing from duration"
+        );
+    }
+    // Content-free: no identifier or backend diagnostic reaches a series.
+    for series in [&ops.data_debug, &duration.data_debug] {
+        assert!(!series.contains("secret/data"), "backend path leaked");
+        assert!(!series.contains("tenant/ctx"), "scope leaked");
+    }
+}

@@ -402,16 +402,30 @@ impl RequestScope {
     ) -> Result<(), GatewayError> {
         let minted = self.session.take_new_mappings();
         if let Some(indexed) = state.tokens.indexed() {
-            let replacements = indexed
+            let started = Instant::now();
+            let committed = indexed
                 .commit(&self.tenant, &self.token_map_session, &minted)
-                .await
-                .map_err(GatewayError::from)?;
+                .await;
+            crate::vault::indexed::record_operation(
+                state.telemetry.metrics(),
+                "intern",
+                started,
+                &committed,
+            );
+            let replacements = committed.map_err(GatewayError::from)?;
             crate::vault::indexed::replace_payload(payload, &replacements);
             if self.profile.restore_responses {
-                self.indexed_lookup = indexed
+                let started = Instant::now();
+                let looked_up = indexed
                     .lookup(&self.tenant, &self.token_map_session, &payload.to_string())
-                    .await
-                    .map_err(GatewayError::from)?;
+                    .await;
+                crate::vault::indexed::record_operation(
+                    state.telemetry.metrics(),
+                    "resolve",
+                    started,
+                    &looked_up,
+                );
+                self.indexed_lookup = looked_up.map_err(GatewayError::from)?;
             }
             return Ok(());
         }
@@ -1491,10 +1505,17 @@ async fn redact_endpoint(
 
         let minted = session.take_new_mappings();
         if let Some(indexed) = state.tokens.indexed() {
-            let replacements = match indexed
+            let started = Instant::now();
+            let committed = indexed
                 .commit(&auth.tenant, &token_map_session, &minted)
-                .await
-            {
+                .await;
+            crate::vault::indexed::record_operation(
+                state.telemetry.metrics(),
+                "intern",
+                started,
+                &committed,
+            );
+            let replacements = match committed {
                 Ok(replacements) => replacements,
                 Err(err) => return GatewayError::from(err).into_response(),
             };
@@ -1618,10 +1639,16 @@ async fn restore_endpoint(
 
     if let Some(indexed) = state.tokens.indexed() {
         let started = Instant::now();
-        let lookup = match indexed
+        let looked_up = indexed
             .lookup(&auth.tenant, &token_map_session, &request.text)
-            .await
-        {
+            .await;
+        crate::vault::indexed::record_operation(
+            state.telemetry.metrics(),
+            "resolve",
+            started,
+            &looked_up,
+        );
+        let lookup = match looked_up {
             Ok(lookup) => lookup,
             Err(err) => return GatewayError::from(err).into_response(),
         };
@@ -1845,7 +1872,17 @@ async fn erase_vault_context(
     };
     for subject in &subjects {
         let key = subject_bound_session_key(&context_id, subject);
-        if let Err(err) = state.tokens.purge(&auth.tenant, &key).await {
+        let started = Instant::now();
+        let purged = state.tokens.purge(&auth.tenant, &key).await;
+        if state.tokens.indexed().is_some() {
+            crate::vault::indexed::record_operation(
+                state.telemetry.metrics(),
+                "erase",
+                started,
+                &purged,
+            );
+        }
+        if let Err(err) = purged {
             return token_map_unavailable(err).into_response();
         }
     }

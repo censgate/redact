@@ -1061,209 +1061,325 @@ async fn expiry_maintenance_clears_only_expired_imported_ciphertext() {
     assert!(!raw.contains(&tenant) && !raw.contains(&live));
 }
 
-/// Erasing a legacy context whose KV v2 history was pruned by the mount's
-/// default `max_versions` (10) must still fence it, destroy every retained
-/// ciphertext version, retire the indexed context and touch nothing else.
-/// Regression guard for the pruned-history reset path (ENG-226).
+/// Fault injection in front of a real token store. `Down` fails before the
+/// backend is reached; `LoseReply` commits and then reports `Unavailable`, the
+/// case the store contract calls "a failed commit may have succeeded".
+const FAULT_NONE: u8 = 0;
+const FAULT_DOWN: u8 = 1;
+const FAULT_LOSE_REPLY: u8 = 2;
+
+struct FaultyStore {
+    inner: Arc<dyn TokenStore>,
+    fault: std::sync::atomic::AtomicU8,
+}
+impl FaultyStore {
+    fn set(&self, fault: u8) {
+        self.fault.store(fault, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn mode(&self) -> u8 {
+        self.fault.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn before(&self) -> Result<(), redact_token_store::Error> {
+        if self.mode() == FAULT_DOWN {
+            return Err(redact_token_store::Error::Unavailable);
+        }
+        Ok(())
+    }
+    fn after<T>(&self, value: T) -> Result<T, redact_token_store::Error> {
+        if self.mode() == FAULT_LOSE_REPLY {
+            return Err(redact_token_store::Error::Unavailable);
+        }
+        Ok(value)
+    }
+}
+#[async_trait::async_trait]
+impl TokenStore for FaultyStore {
+    fn backend(&self) -> &'static str {
+        "fault_injection"
+    }
+    async fn health(&self) -> Result<(), redact_token_store::Error> {
+        self.before()?;
+        self.inner.health().await
+    }
+    async fn intern(
+        &self,
+        scope: &redact_token_store::Scope,
+        candidates: &[redact_token_store::Entry],
+    ) -> Result<Vec<redact_token_store::Entry>, redact_token_store::Error> {
+        self.before()?;
+        let out = self.inner.intern(scope, candidates).await?;
+        self.after(out)
+    }
+    async fn intern_with_aliases(
+        &self,
+        scope: &redact_token_store::Scope,
+        candidates: &[redact_token_store::Entry],
+        aliases: &[Vec<String>],
+    ) -> Result<Vec<redact_token_store::Entry>, redact_token_store::Error> {
+        self.before()?;
+        let out = self
+            .inner
+            .intern_with_aliases(scope, candidates, aliases)
+            .await?;
+        self.after(out)
+    }
+    async fn resolve(
+        &self,
+        scope: &redact_token_store::Scope,
+        tokens: &[String],
+    ) -> Result<Vec<Option<redact_token_store::Entry>>, redact_token_store::Error> {
+        self.before()?;
+        self.inner.resolve(scope, tokens).await
+    }
+    async fn retire(
+        &self,
+        scope: &redact_token_store::Scope,
+    ) -> Result<(), redact_token_store::Error> {
+        self.before()?;
+        self.inner.retire(scope).await
+    }
+    async fn purge_expired(
+        &self,
+        scope: &redact_token_store::Scope,
+        limit: usize,
+    ) -> Result<usize, redact_token_store::Error> {
+        self.before()?;
+        self.inner.purge_expired(scope, limit).await
+    }
+    async fn context_state(
+        &self,
+        scope: &redact_token_store::Scope,
+    ) -> Result<redact_token_store::ContextState, redact_token_store::Error> {
+        self.before()?;
+        self.inner.context_state(scope).await
+    }
+    async fn import_legacy(
+        &self,
+        scope: &redact_token_store::Scope,
+        snapshot: &redact_token_store::LegacyImport,
+    ) -> Result<(), redact_token_store::Error> {
+        self.before()?;
+        self.inner.import_legacy(scope, snapshot).await
+    }
+    async fn complete_legacy_cleanup(
+        &self,
+        scope: &redact_token_store::Scope,
+        source: &str,
+    ) -> Result<(), redact_token_store::Error> {
+        self.before()?;
+        self.inner.complete_legacy_cleanup(scope, source).await
+    }
+}
+
+/// The indexed store, through its real HTTP surface, must be correct
+/// (stable identity per scope, isolation between contexts and subjects),
+/// terminal when a context is retired (typed 410, nothing resurrected, the
+/// fence survives) and resilient (an unavailable or reply-losing backend fails
+/// closed with a typed 503 and the same request converges on one identity when
+/// the backend returns). Synthetic data only.
 #[tokio::test]
 #[ignore = "requires isolated token-store PostgreSQL and OpenBao source"]
-async fn erase_fences_and_destroys_a_context_with_pruned_kv_history() {
+async fn retire_is_terminal_isolated_and_resilient_over_http() {
     use redact_gateway::{
-        redact::token::{Dek, TokenMapping},
-        vault::{session_path, Kv2Store, TokenMapStore},
+        redact::token::{subject_bound_session_key, TokenMapping},
+        vault::{Kv2Store, TokenMapStore},
     };
-    const WRITES: u32 = 25;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(4)
         .connect(&std::env::var("TOKEN_STORE_PG_URL").unwrap())
         .await
         .unwrap();
-    let target: Arc<dyn TokenStore> = Arc::new(Postgres::new(pool).await.unwrap());
+    let faulty = Arc::new(FaultyStore {
+        inner: Arc::new(Postgres::new(pool).await.unwrap()),
+        fault: std::sync::atomic::AtomicU8::new(FAULT_NONE),
+    });
+    let upstream = mock_json_upstream(chat_response("ok")).await;
+    let mut config = config_for(&upstream);
+    config.vault.backend = redact_gateway::config::VaultBackend::Memory;
+    config.auth.mode = AuthMode::ApiKey;
+    config.auth.api_keys = vec!["synthetic-owner-a".into(), "synthetic-owner-b".into()];
+    config.policy = Arc::new(policy_with(tokenize_profile(false)));
+    let mut state = state_for(config).await;
     let credential =
         std::fs::read_to_string(std::env::var("TOKEN_STORE_BAO_TOKEN_FILE").unwrap()).unwrap();
-    let address = std::env::var("TOKEN_STORE_BAO_ADDR").unwrap();
-    let prefix = format!("pruned-erase-{}", uuid::Uuid::new_v4());
     let source = Arc::new(
         Kv2Store::from_settings(&redact_gateway::config::VaultSettings {
             backend: redact_gateway::config::VaultBackend::VaultKv2,
-            address: Some(address.clone()),
+            address: Some(std::env::var("TOKEN_STORE_BAO_ADDR").unwrap()),
             token: Some(credential.trim().into()),
-            path_prefix: prefix.clone(),
+            path_prefix: format!("retire-{}", uuid::Uuid::new_v4()),
             ..Default::default()
         })
         .unwrap(),
     );
-    let key = Arc::new(Dek::from_bytes([13; 32]));
-    let mapping = |token: &str, original: &str| TokenMapping {
-        token: token.into(),
+    state.tokens = Arc::new(
+        IndexedStore::new(
+            faulty.clone(),
+            source.clone(),
+            state.dek.clone(),
+            Duration::from_secs(3600),
+        )
+        .unwrap(),
+    );
+    let router = create_router(state.clone());
+    let a = [("authorization", "Bearer synthetic-owner-a")];
+    let b = [("authorization", "Bearer synthetic-owner-b")];
+    let mut a_auth = axum::http::HeaderMap::new();
+    a_auth.insert("authorization", "Bearer synthetic-owner-a".parse().unwrap());
+    let a_auth = state.auth.authenticate(&a_auth).await.unwrap();
+
+    let doomed = uuid::Uuid::new_v4().to_string();
+    let neighbour = uuid::Uuid::new_v4().to_string();
+    let redact = |headers: &'static [(&'static str, &'static str)], context: &str, text: &str| {
+        let router = router.clone();
+        let body = json!({"text": text, "session_id": context});
+        async move { post_json_with_headers(router, "/v1/redact", body, headers).await }
+    };
+    let restore = |headers: &'static [(&'static str, &'static str)], context: &str, text: &str| {
+        let router = router.clone();
+        let body = json!({"text": text, "session_id": context});
+        async move { post_json_with_headers(router, "/v1/restore", body, headers).await }
+    };
+    let a: &'static [(&str, &str)] = Box::leak(Box::new(a));
+    let b: &'static [(&str, &str)] = Box::leak(Box::new(b));
+
+    // Correctness: one stable identity per scope, restorable by its owner only.
+    let first = redact(a, &doomed, "mail alpha@example.invalid").await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+    let doomed_text = first.json()["text"].as_str().unwrap().to_string();
+    assert!(!doomed_text.contains("alpha@example.invalid"));
+    let again = redact(a, &doomed, "mail alpha@example.invalid").await;
+    assert_eq!(again.json()["text"], doomed_text, "identity must be stable");
+    let near = redact(a, &neighbour, "mail beta@example.invalid").await;
+    assert_eq!(near.status, StatusCode::OK, "{}", near.body);
+    let near_text = near.json()["text"].as_str().unwrap().to_string();
+    let other = redact(b, &doomed, "mail gamma@example.invalid").await;
+    assert_eq!(other.status, StatusCode::OK, "{}", other.body);
+    let other_text = other.json()["text"].as_str().unwrap().to_string();
+    for (headers, context, text, original) in [
+        (a, &doomed, &doomed_text, "mail alpha@example.invalid"),
+        (a, &neighbour, &near_text, "mail beta@example.invalid"),
+        (b, &doomed, &other_text, "mail gamma@example.invalid"),
+    ] {
+        let restored = restore(headers, context, text).await;
+        assert_eq!(restored.status, StatusCode::OK, "{}", restored.body);
+        assert_eq!(restored.json()["text"], original);
+    }
+
+    // Resilience: an unavailable backend fails closed with a typed 503, never a
+    // raw value, and the readiness probe reports it.
+    faulty.set(FAULT_DOWN);
+    let down = redact(a, &neighbour, "mail delta@example.invalid").await;
+    assert_eq!(
+        down.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        down.body
+    );
+    assert_eq!(down.json()["error"]["type"], "token_store_unavailable");
+    assert!(!down.body.contains("delta@example.invalid"));
+    let down_restore = restore(a, &neighbour, &near_text).await;
+    assert_eq!(down_restore.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(!down_restore.body.contains("beta@example.invalid"));
+    assert!(!get_path(router.clone(), "/readyz")
+        .await
+        .status
+        .is_success());
+
+    // A reply lost after the backend committed: the caller sees 503, and the
+    // identical retry converges on one identity (no rebinding, no second label).
+    faulty.set(FAULT_LOSE_REPLY);
+    let lost = redact(a, &neighbour, "mail delta@example.invalid").await;
+    assert_eq!(
+        lost.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "{}",
+        lost.body
+    );
+    faulty.set(FAULT_NONE);
+    assert!(get_path(router.clone(), "/readyz")
+        .await
+        .status
+        .is_success());
+    let retry = redact(a, &neighbour, "mail delta@example.invalid").await;
+    assert_eq!(retry.status, StatusCode::OK, "{}", retry.body);
+    let retry_text = retry.json()["text"].as_str().unwrap().to_string();
+    let retry_again = redact(a, &neighbour, "mail delta@example.invalid").await;
+    assert_eq!(retry_again.json()["text"], retry_text);
+    let restored = restore(a, &neighbour, &retry_text).await;
+    assert_eq!(restored.json()["text"], "mail delta@example.invalid");
+
+    // Terminal retirement through the real HTTP handler, idempotent.
+    for _ in 0..2 {
+        let erased = delete_json_with_headers(
+            router.clone(),
+            "/v1/vault/context",
+            json!({"vault":{"context_id":doomed}}),
+            &a,
+        )
+        .await;
+        assert_eq!(erased.status, StatusCode::OK, "{}", erased.body);
+        assert_eq!(erased.json()["state"], "absent");
+    }
+    let verified = post_json_with_headers(
+        router.clone(),
+        "/v1/vault/context/verify",
+        json!({"vault":{"context_id":doomed}}),
+        &a,
+    )
+    .await;
+    assert_eq!(verified.json()["state"], "absent");
+    assert_eq!(verified.json()["verified"], true);
+
+    // The retired context is typed 410 for every new write, repeatedly, and its
+    // identities are never released again or reallocated.
+    for text in ["mail alpha@example.invalid", "mail epsilon@example.invalid"] {
+        for _ in 0..2 {
+            let gone = redact(a, &doomed, text).await;
+            assert_eq!(gone.status, StatusCode::GONE, "{}", gone.body);
+            assert_eq!(gone.json()["error"]["type"], "token_store_retired");
+            assert!(!gone.body.contains("example.invalid"));
+        }
+    }
+    let withheld = restore(a, &doomed, &doomed_text).await;
+    assert_eq!(withheld.status, StatusCode::OK);
+    assert_eq!(
+        withheld.json()["text"],
+        doomed_text,
+        "retired identity restored"
+    );
+    assert!(!withheld.body.contains("alpha@example.invalid"));
+    let key = subject_bound_session_key(&doomed, a_auth.subject.as_deref().unwrap());
+    let probe = TokenMapping {
+        token: "[EMAIL_ADDRESS_1]".into(),
         entity_type: "EMAIL_ADDRESS".into(),
-        sealed_value: key.seal(original).unwrap(),
+        sealed_value: state.dek.seal("late@example.invalid").unwrap(),
         created_at: chrono::Utc::now(),
     };
-    let tenant = format!("synthetic-prune-tenant-{}", uuid::Uuid::new_v4());
-    let pruned = "vault:synthetic:principal".to_string();
-    let unborn_shard = format!("{pruned}:kvshard:1");
-    let control = "vault:synthetic:control".to_string();
-    // The mount default keeps 10 versions: 25 cumulative writes leave 16..=25.
-    for n in 1..=WRITES {
-        source
-            .put(
-                &tenant,
-                &pruned,
-                &[mapping(
-                    &format!("[EMAIL_ADDRESS_{n}]"),
-                    &format!("legacy{n}@example.invalid"),
-                )],
-            )
-            .await
-            .unwrap();
-    }
-    source
-        .put(
-            &tenant,
-            &control,
-            &[mapping("[EMAIL_ADDRESS_1]", "control@example.invalid")],
-        )
-        .await
-        .unwrap();
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
-    let get = |operation: &'static str, context: String| {
-        let client = client.clone();
-        let token = credential.trim().to_string();
-        let path = session_path(&prefix, &tenant, &context);
-        let address = address.clone();
-        async move {
-            // The gateway stores the percent-escaped segment literally, so a
-            // raw request would decode %3A to ':' and miss it. Escape the '%'
-            // first and fall back to the raw form (ids without specials).
-            let mut last = String::new();
-            for candidate in [path.replace('%', "%25"), path.clone()] {
-                let response = client
-                    .get(format!("{address}/v1/secret/{operation}/{candidate}"))
-                    .header("X-Vault-Token", &token)
-                    .send()
-                    .await
-                    .unwrap();
-                let status = response.status();
-                let body = response.text().await.unwrap();
-                if status.is_success() {
-                    return serde_json::from_str::<serde_json::Value>(&body).unwrap();
-                }
-                last = format!("{status} {body}");
-            }
-            panic!("GET {operation} for {context}: {last}");
-        }
-    };
-    let metadata = get("metadata", pruned.clone()).await;
-    assert_eq!(metadata["data"]["current_version"], WRITES);
     assert!(
-        metadata["data"]["oldest_version"].as_u64().unwrap() > 1,
-        "fixture must be pruned: {metadata}"
+        source.put(&a_auth.tenant, &key, &[probe]).await.is_err(),
+        "the retirement fence must outlive the erase"
     );
-    assert_eq!(metadata["data"]["versions"].as_object().unwrap().len(), 10);
 
-    let store = IndexedStore::new(
-        target,
-        source.clone(),
-        key.clone(),
-        Duration::from_secs(3600),
-    )
-    .unwrap();
-    // The incident: first access of a pruned context fails closed and writes nothing.
-    assert!(store
-        .commit(
-            &tenant,
-            &pruned,
-            &[mapping("[EMAIL_ADDRESS_26]", "new@example.invalid")],
-        )
-        .await
-        .is_err());
-    let unchanged = get("metadata", pruned.clone()).await;
-    assert_eq!(unchanged["data"]["current_version"], WRITES);
-
-    // Erase = the DELETE /v1/vault/context path (IndexedStore::purge).
-    TokenMapStore::purge(&store, &tenant, &pruned)
-        .await
-        .unwrap();
-    let after = get("metadata", pruned.clone()).await;
-    let fenced_version = after["data"]["current_version"].as_u64().unwrap();
-    assert!(fenced_version > u64::from(WRITES), "no fence was written");
-    for (version, details) in after["data"]["versions"].as_object().unwrap() {
-        if version.parse::<u32>().unwrap() <= WRITES {
-            assert_eq!(
-                details["destroyed"], true,
-                "retained legacy version {version} survived erasure"
-            );
-        }
-        assert!(
-            details["deletion_time"]
-                .as_str()
-                .unwrap_or_default()
-                .is_empty(),
-            "erasure must destroy, not soft-delete: {version}"
-        );
-    }
-    let latest = get("data", pruned.clone()).await;
-    let data = &latest["data"]["data"];
-    assert_eq!(data["frozen"], true);
-    assert_eq!(data["mappings"].as_array().unwrap().len(), 0);
-    assert_eq!(data["cleanup_through"], WRITES);
-    assert_eq!(data["destroyed_through"], WRITES);
-
-    // The old identity is permanently dead: indexed context retired, source fenced.
-    assert!(!TokenMapStore::exists(&store, &tenant, &pruned)
-        .await
-        .unwrap());
-    assert!(store
-        .commit(
-            &tenant,
-            &pruned,
-            &[mapping("[EMAIL_ADDRESS_1]", "legacy1@example.invalid")],
-        )
-        .await
-        .is_err());
-    assert!(source
-        .put(
-            &tenant,
-            &pruned,
-            &[mapping("[EMAIL_ADDRESS_1]", "legacy1@example.invalid")],
-        )
-        .await
-        .is_err());
-
-    // Idempotent: a repeat erase changes nothing.
-    TokenMapStore::purge(&store, &tenant, &pruned)
-        .await
-        .unwrap();
-    let again = get("metadata", pruned.clone()).await;
+    // Isolation: the neighbour context, the same context id under another
+    // subject, and a brand-new context are unaffected and still writable.
+    let neighbour_restored = restore(a, &neighbour, &retry_text).await;
     assert_eq!(
-        again["data"]["current_version"],
-        after["data"]["current_version"]
+        neighbour_restored.json()["text"],
+        "mail delta@example.invalid"
     );
-
-    // An unborn shard document of the same family is fenced, not left open.
-    TokenMapStore::purge(&store, &tenant, &unborn_shard)
-        .await
-        .unwrap();
-    let shard = get("data", unborn_shard.clone()).await;
-    assert_eq!(shard["data"]["data"]["frozen"], true);
-    assert!(source
-        .put(
-            &tenant,
-            &unborn_shard,
-            &[mapping("[EMAIL_ADDRESS_1]", "late@example.invalid")],
-        )
-        .await
-        .is_err());
-
-    // Neighbours are untouched.
-    let control_meta = get("metadata", control.clone()).await;
-    assert_eq!(control_meta["data"]["current_version"], 1);
-    let remaining = source.get(&tenant, &control).await.unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].token, "[EMAIL_ADDRESS_1]");
+    let other_restored = restore(b, &doomed, &other_text).await;
+    assert_eq!(other_restored.json()["text"], "mail gamma@example.invalid");
+    let other_write = redact(b, &doomed, "mail zeta@example.invalid").await;
+    assert_eq!(other_write.status, StatusCode::OK, "{}", other_write.body);
+    let neighbour_write = redact(a, &neighbour, "mail eta@example.invalid").await;
+    assert_eq!(
+        neighbour_write.status,
+        StatusCode::OK,
+        "{}",
+        neighbour_write.body
+    );
+    let fresh = uuid::Uuid::new_v4().to_string();
+    let fresh_write = redact(a, &fresh, "mail theta@example.invalid").await;
+    assert_eq!(fresh_write.status, StatusCode::OK, "{}", fresh_write.body);
 }
