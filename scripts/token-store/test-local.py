@@ -87,6 +87,8 @@ def main():
             preflight_contract(root, work, env, fixture_sql)
             run(['cargo', 'test', '-p', 'redact-token-store', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
             run(['cargo', 'test', '-p', 'redact-gateway', '--test', 'indexed_tokens', '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
+            for suite in ['legacy_pruned_history', 'legacy_pruned_telemetry']:
+                run(['cargo', 'test', '-p', 'redact-gateway', '--test', suite, '--', '--include-ignored', '--nocapture'], cwd=root, env=env)
             if os.environ.get('TOKEN_STORE_RUN_BETA_ACCEPTANCE') == '1':
                 from beta_acceptance import exercise as beta_acceptance
                 beta_acceptance(root, work, env, fixture_sql)

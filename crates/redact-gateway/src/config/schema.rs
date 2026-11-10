@@ -134,6 +134,8 @@ pub struct NerDocument {
 pub struct VaultDocument {
     /// Indexed target and explicit migration barrier; startup-only.
     pub indexed: Option<super::IndexedTokenSettings>,
+    /// Digest-pinned evidence for pruned legacy imports; startup-only.
+    pub legacy_pruned_history: Option<super::LegacyPrunedHistorySettings>,
     /// `off`, `memory` or `vault_kv2`.
     pub backend: Option<VaultBackend>,
     /// Base address of the KV v2 server.
@@ -320,6 +322,10 @@ impl GatewayDocument {
         if let Some(vault) = self.vault {
             if vault.indexed.is_some() {
                 config.vault.indexed = vault.indexed;
+            }
+            if let Some(mut settings) = vault.legacy_pruned_history {
+                settings.evidence_file = resolve_path(base_dir, settings.evidence_file);
+                config.vault.legacy_pruned_history = Some(settings);
             }
             apply_opt(&mut config.vault.backend, vault.backend);
             if vault.address.is_some() {
@@ -509,6 +515,36 @@ telemetry:
         let mut config = ResolvedConfig::default();
         doc.apply(&mut config, None).unwrap();
         assert_eq!(config.vault.backend, VaultBackend::Off);
+    }
+
+    #[test]
+    fn pruned_evidence_settings_resolve_paths_and_require_restart() {
+        let yaml = "vault:\n  legacy_pruned_history:\n    evidence_file: evidence.json\n    evidence_sha256: abcdef\n";
+        let doc = GatewayDocument::from_yaml(yaml, "test").unwrap();
+        let original = ResolvedConfig::default();
+        assert!(original.vault.legacy_pruned_history.is_none());
+        let mut config = original.clone();
+        doc.apply(&mut config, Some(Path::new("/run/config")))
+            .unwrap();
+        let settings = config.vault.legacy_pruned_history.as_ref().unwrap();
+        let expected_file = Path::new("/run/config").join("evidence.json");
+        assert_eq!(settings.evidence_file, expected_file);
+        assert_eq!(settings.evidence_sha256, "abcdef");
+        assert!(original
+            .restart_required_changes(&config)
+            .contains(&"vault.*"));
+        let effective = original.effective_for_reload(config.clone());
+        assert!(effective.vault.legacy_pruned_history.is_none());
+        let expected = serde_json::json!({
+            "evidence_file": expected_file, "evidence_sha256": "abcdef"
+        });
+        assert_eq!(config.summary()["vault"]["legacy_pruned_history"], expected);
+        assert_eq!(
+            serde_json::to_value(&config).unwrap()["vault"]["legacy_pruned_history"],
+            expected
+        );
+        let unknown = format!("{yaml}    entries: {{}}\n");
+        assert!(GatewayDocument::from_yaml(&unknown, "test").is_err());
     }
 
     #[test]

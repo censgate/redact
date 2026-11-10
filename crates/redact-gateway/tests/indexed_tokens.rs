@@ -473,7 +473,8 @@ async fn erasure_contract(target: Arc<dyn TokenStore>) {
         .build()
         .unwrap();
     for (case, stage) in [
-        ("pruned", 0),
+        // A pruned but cumulative history is importable; see
+        // tests/legacy_pruned_history.rs. Only unsafe sources stay here.
         ("rebound", 1),
         ("destroyed", 2),
         ("deleted_latest", 0),
@@ -488,17 +489,6 @@ async fn erasure_contract(target: Arc<dyn TokenStore>) {
                 settings.address.as_ref().unwrap()
             )
         };
-        if case == "pruned" {
-            client
-                .post(url("metadata"))
-                .header("X-Vault-Token", credential.trim())
-                .json(&json!({"max_versions":1}))
-                .send()
-                .await
-                .unwrap()
-                .error_for_status()
-                .unwrap();
-        }
         let mapping = TokenMapping {
             token: "[PERSON_1]".into(),
             entity_type: "PERSON".into(),

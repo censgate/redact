@@ -117,9 +117,20 @@ The indexed backend does not replace the predecessor graph; erasure still walks 
 5. Verify authorized restore parity, foreign-scope denial, concurrent reuse, expiry,
    erasure and provider tokenization before considering rollout complete.
 
-Automatic import intentionally rejects pruned/deleted/unreadable history, more than
-2,048 source versions, historical label drops/rebinding, conflicting imports and
-oversized snapshots (16,384 entries/16 MiB). These require offline identity recovery
+Automatic import intentionally rejects deleted/unreadable history, a retained
+suffix that is gapped, destroyed or not a subset of the latest version, more than
+2,048 retained source versions, historical label drops/rebinding, conflicting
+imports and oversized snapshots (16,384 entries/16 MiB). History pruned by the
+mount's `max_versions` is rejected by default: a cumulative tail cannot rule out
+an expiry reset and label reuse in missing versions. Opt-in import requires a
+scoped, expiring, digest-pinned evidence file, an exact live metadata fingerprint,
+a key generation since the attested identity epoch (which also rejects complete
+history created before the epoch whenever evidence is configured), every retained TTL covering
+the full key exposure window, non-decreasing version times and retained gaps
+strictly below TTL, alongside all structural checks. Writer/TTL history and absence
+of storage rollback remain explicit operator attestations (see
+[Pruned legacy history](../../docs/token-store-beta-readiness.md#pruned-legacy-history)).
+The rejected shapes require offline identity recovery
 from authoritative history/backups. If history was destroyed, the importer cannot
 prove identities; do not invent replacements or silently start a fresh namespace.
 The task did not inspect production history, so compatibility of actual existing

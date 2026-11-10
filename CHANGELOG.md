@@ -15,6 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migrates never-imported contexts, persists an identifier-free durable cursor,
   fails closed on non-retryable errors and emits RED metrics and spans.
 
+### Fixed
+
+- `redact-gateway` indexed token storage rejects pruned legacy history by
+  default. Opt-in import requires scoped, expiring, SHA-256-pinned operator
+  evidence plus exact live metadata, epoch, exposure-window TTL and retained-gap
+  checks. This prevents accepting a cumulative tail after an expiry reset reused
+  a token label. Proven imports retain the counts-only import event/counter;
+  rejected proofs emit a bounded rejection reason event/counter. The 2,048-version
+  work bound applies to retained history; cleanup skips already-pruned versions.
+  Writer-history and rollback attestation remain operator requirements: see
+  `docs/token-store-beta-readiness.md`.
+- With evidence configured, an indexed-store import also fails closed on any
+  context whose key was created before the evidence `identity_epoch`, including
+  complete (unpruned) history, with the bounded rejection reason
+  `pre_epoch_context`. Without evidence there is no epoch and behavior is
+  unchanged. The documented beta epoch is `2026-09-26T18:14:16Z`, the first write
+  on the migrated store; earlier keys may be missing labels written to a separate
+  store that was not migrated.
+
 ### Changed
 
 - `IndexedStore::purge_expired` no longer runs request-path migration; it

@@ -83,7 +83,7 @@ been frozen/imported, ordinary compatible-binary rollback remains possible.
 | Isolation | Login/effective identities and their entire direct/indirect role-membership closure have no ownership, SUPERUSER/BYPASSRLS/CREATEROLE/REPLICATION, predefined server-file/program roles, schema CREATE, parent TRUNCATE, child-partition access or configuration writes (including column grants). Non-inheriting and SET-only memberships are checked; SET FALSE edges are conservatively included. Parent RLS/policies and required grants match v1. |
 | Key and routing | Existing durable root DEK preserved; ordered shard IDs, matching runtime connection environment names and all 256 ownership entries identical across replicas. Operator-installed commitment and logical ID match each database. |
 | Network and secrets | Reviewed GitOps config mount, secret references and PG egress; source OpenBao/Kubernetes auth, lineage access, write/metadata/destruction privileges and TLS remain available. No connection strings or key material in Git. |
-| Source history | Authorized inventory of existing principal contexts and predecessor/shard contexts. Recover pruned, rebound, unreadable or over-limit history offline; automatic import must reject evidence gaps. |
+| Source history | **Hard gate: Source history inventory** (see [Pruned legacy history](#pruned-legacy-history)). Authorized, identifier-free inventory of every existing principal and predecessor/shard context, run immediately before activation and again after the writer drain: `current_version`, `oldest_version`, retained count, deleted/destroyed flags, frozen flag and mapping count, with every sealed value opened. Include key/version creation times, updated time and retained TTLs. Classify complete, proven-pruned or blocked/unproven; pruned contexts need pinned fingerprints plus writer/TTL/rollback attestations. Recover blocked history offline or obtain an explicit deletion/reset decision. Zero unresolved blocked contexts before `legacy_writers_drained` is set. Activation without a recorded inventory is not allowed. |
 | Writer barrier | All old binaries and in-flight legacy mutations drained, old credentials restricted, no legacy erase/write path active. Record who verified this before setting `legacy_writers_drained`. |
 | Lifecycle | Named owner and authorized context inventory for repeated bounded expiry cleanup; durable retry of incomplete erasure. A scheduler is not installed by this PR. Define retention for WAL, replicas, snapshots and backups. |
 | Recovery | Restore rehearsal preserves mappings, equality reservations, aliases, retirement fences, configuration, source fences/lineage and the backed-up key/map together. Replay erasures after any older snapshot before serving. |
@@ -96,6 +96,150 @@ validates even currently unassigned configured shards. Request admission
 is bounded to 64 operations per replica. Request batches are at most 256 mappings
 or references, with independent byte limits. A 413 is terminal; do not turn it
 into an unbounded retry loop. There is no promise of linear throughput.
+
+## Pruned legacy history
+
+**Strict by default.** Any source whose oldest retained version is greater than
+1 fails with `Integrity` (`409 token integrity check failed`). A contiguous,
+cumulative tail cannot prove identity across missing history: after TTL expiry,
+legacy `put` resets mappings and can reuse `[PERSON_1]` for a different value.
+Pruning can remove the version that would reveal this rebinding. Complete history
+still verifies every version from 1, with no operator evidence required.
+
+Pruned import is an explicit opt-in, requiring both a reviewed, digest-pinned
+operator evidence artifact and these checks on every first freeze:
+
+- Retained versions are contiguous through the current version, live, readable,
+  not deleted/destroyed/frozen/malformed, and every retained mapping reappears
+  unchanged in the latest. At most 2,048 retained versions are checked; the
+  lifetime counter may be larger.
+- The evidence has not expired and lists this exact path digest. Its fingerprint
+  matches the live `current_version`, reported `oldest_version`, key
+  `created_time` and `updated_time` exactly, including timestamp strings. A new
+  write, fence or generation change invalidates the entry.
+- The key's RFC3339 creation time is at or after the attested `identity_epoch`.
+  Pre-epoch generations are ineligible (see [Identity epoch](#identity-epoch)).
+- Let W be the latest version's creation time minus the key's creation time.
+  Every retained payload, including the latest, has
+  `expires_at - version.created_time >= W`. This excludes the expiry-reset
+  mechanism under the attested writer/TTL history; a self-consistent tail alone
+  does not.
+- Retained creation times are non-decreasing, and each consecutive gap is
+  strictly less than the earlier version's TTL. Unparseable times reject.
+- `IndexedStore::prepare` requires the target context to be Absent before import.
+  CAS protects the verified source snapshot; a racing put is either included in
+  the frozen snapshot or invalidates the proof, never silently discarded.
+
+The operator artifact's JSON schema is `redact-legacy-pruned-evidence-v1`, with
+`evidence_id`, RFC3339 `generated_at`, `not_after`, `identity_epoch`, and `entries`.
+Each entry key is lowercase hex SHA-256 of `b"redact-legacy-pruned-v1\0"` followed
+by the KV path (without the mount). Each entry contains `current_version`,
+`oldest_version`, `key_created_time` and `updated_time`; preserve the metadata's
+exact strings. It contains no mappings. Unknown fields are rejected. The loader
+verifies the file's pinned SHA-256, schema, expiry, generation time (at most five
+minutes ahead), epoch (not after generation or in the future), at most 100,000
+entries and 64-hex entry keys. Missing, malformed, expired or digest-mismatched
+evidence fails startup, without logging identifiers or file contents.
+
+Configure the source under `vault` (alongside `indexed`):
+
+```yaml
+vault:
+  legacy_pruned_history:
+    evidence_file: legacy-pruned-evidence.json
+    evidence_sha256: "<SHA-256 of the exact reviewed file bytes>"
+```
+
+Relative paths resolve against the YAML document directory, like `jwt_path`.
+Only the file path and digest appear in configuration summaries/JSON. This is a
+restart-required setting; absence keeps strict rejection. Programmatic callers
+use `LegacyHistoryPolicy { pruned: PrunedHistoryPolicy::Proven(PrunedProof {
+evidence }), max_retained_versions: 2048 }`. There is no allowlist-only bypass of
+the live proof. Already-frozen snapshots remain idempotent and are not re-proven.
+Scope is exactly the inventoried entries until `not_after`; re-inventory to
+re-issue evidence after source drift.
+
+### Identity epoch
+
+When evidence is configured, `identity_epoch` is the instant from which the
+history of every legacy context is trusted. It applies to **every** first freeze,
+not only pruned ones: a key whose KV v2 `created_time` is before the epoch is
+rejected with `Integrity` (409) even when its history is complete from version 1.
+A complete history proves the retained versions are consistent with each other;
+it cannot show that labels were not minted elsewhere before the migration.
+Deployments with no evidence configured have no epoch and behave exactly as
+before (complete history verified from version 1, pruned history rejected).
+Already-frozen snapshots and contexts with no source key are unaffected.
+
+**Beta: `identity_epoch = 2026-09-26T18:14:16Z`**, the first write on
+the migrated OpenBao store (`BETA_MIGRATION_IDENTITY_EPOCH`; the enforced value is
+always the one in the reviewed, digest-pinned evidence file). Why:
+
+- The OpenBao data was copied at the storage layer on 2026-09-26. The previous
+  gateway moved to a separate Raft store (`openbao-tokens`, mount `tokens/`,
+  `max_versions=1`) on 2026-09-10 01:17Z, and that store was not carried over.
+  The migrated KV v2 store has no creates or updates between 2026-09-10 01:17:08Z
+  and 2026-09-26 18:14:16Z.
+- Any context whose key was created before the epoch may have received labels
+  during that window only in the Raft store. Importing it would risk reusing a
+  label for a different value, so it fails closed. The supporting evidence is a values-free metadata
+  inventory plus deployment and git history, kept with the reviewed operator
+  evidence.
+- Consequence for beta: contexts created before the epoch (about 80 paths dated
+  2026-09-03 to 2026-09-10 in the inventory) remain 409 until they are reset or
+  recovered offline under the tenant/principal reset decision below. Contexts
+  created at or after the epoch import normally.
+- Telemetry: `pre_epoch_context` (complete history) and `before_epoch` (pruned
+  history) are distinct from every other rejection reason.
+
+The epoch can only be moved earlier by new evidence; never to make a rejected
+context pass without that evidence.
+
+**Accepted residual risk: writer-history and rollback attestation.** Since
+`identity_epoch`, every writer must have used cumulative CAS merge with a lifetime
+TTL sufficient for W, the write role must have been gateway-only, no manual or
+foreign writer may have changed the data, and no Raft snapshot restore may have
+rewound storage. Gateway writer provenance (cumulative CAS merge since `db77542`)
+and deployed TTL/config history support that review. KV metadata cannot establish
+writer history or absence of rollback; without an audit device these are explicit
+operator attestations backed by policy/deployment evidence. They are never
+inferred from a cumulative tail, an allowlist or telemetry. Without those
+attestations, pruned contexts stay rejected.
+
+**Telemetry.** Only the replica winning a proven pruned freeze emits
+`token_store_legacy_pruned_import` and increments
+`redact.gateway.tokenstore.legacy.pruned_imports`, with version counts only.
+Rejected proofs emit `token_store_legacy_pruned_rejected` and increment
+`redact.gateway.tokenstore.legacy.pruned_rejections` with a bounded `reason`:
+`evidence_expired`, `no_entry`, `fingerprint_mismatch`, `before_epoch`,
+`pre_epoch_context` (complete history created before the epoch),
+`bad_timestamp`, `ttl_below_exposure`, `non_monotonic_versions`,
+`retained_gap_exceeds_ttl`, or `invalid_history` for structural failures.
+Neither event/counter includes path, tenant, principal, token or value. Unexpected
+imports, proof rejections or integrity errors are stop signals.
+
+**Operator requirements.**
+
+1. **Source history inventory is a hard gate.** Run an authorized inventory of
+   every existing principal and predecessor/shard context immediately before
+   activation and again after writer drain. Record values-free key/version
+   metadata, TTLs and structural checks; separately verify every sealed value
+   can be opened without placing values in the artifact. Classify complete,
+   proven-pruned and blocked/unproven contexts. Pin exact fingerprints and
+   record writer/TTL/rollback attestations. Zero unresolved blocked contexts
+   before `legacy_writers_drained`; no activation without the recorded inventory.
+2. Set `max_versions` explicitly on the KV v2 engine with
+   `bao write secret/config max_versions=<n>` and read `secret/config` back to
+   record it. `sys/mounts/<mount>/tune` does not set it and leaves the default 10.
+   Per-key metadata can override retention and must also be inventoried. Raising
+   retention never recovers versions already pruned.
+3. If identities cannot be proven or recovered offline, a tenant/principal reset
+   needs **Mark's explicit deletion decision**, including scope and approval
+   time. Platform must issue a new durable context generation, delete or rewrite
+   old dependent token references to unrecoverable markers, and preserve an empty
+   erasure fence on the old source with bounded destruction. Do not purge the
+   old path or re-mint old labels. Record values-free before/after evidence.
+   Reset/deletion is an operator decision, outside this code change.
 
 ## Expiry maintenance
 

@@ -462,6 +462,9 @@ pub struct VaultSettings {
     /// Optional indexed target; legacy backend remains the migration/lineage source.
     #[serde(default)]
     pub indexed: Option<IndexedTokenSettings>,
+    /// Startup-only, digest-pinned evidence for opt-in pruned legacy imports.
+    #[serde(default)]
+    pub legacy_pruned_history: Option<LegacyPrunedHistorySettings>,
     /// Selected backend.
     pub backend: VaultBackend,
     /// Base address of the KV v2 server.
@@ -494,6 +497,7 @@ impl Default for VaultSettings {
     fn default() -> Self {
         Self {
             indexed: None,
+            legacy_pruned_history: None,
             backend: VaultBackend::Off,
             address: None,
             token: None,
@@ -508,6 +512,16 @@ impl Default for VaultSettings {
             data_encryption_key: None,
         }
     }
+}
+
+/// Reviewed evidence artifact for pruned legacy history; absence means strict rejection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyPrunedHistorySettings {
+    /// Evidence JSON file, resolved relative to the configuration document.
+    pub evidence_file: PathBuf,
+    /// SHA-256 of the exact evidence file bytes, pinned in reviewed configuration.
+    pub evidence_sha256: String,
 }
 
 /// Explicit startup-only indexed-token migration configuration. Connection
@@ -950,6 +964,7 @@ impl ResolvedConfig {
             || self.vault.path_prefix != next.vault.path_prefix
             || self.vault.namespace != next.vault.namespace
             || self.vault.ttl_secs != next.vault.ttl_secs
+            || self.vault.legacy_pruned_history != next.vault.legacy_pruned_history
         {
             changed.push("vault.*");
         }
@@ -1037,6 +1052,7 @@ impl ResolvedConfig {
                 "mount": self.vault.mount,
                 "path_prefix": self.vault.path_prefix,
                 "ttl_secs": self.vault.ttl_secs,
+                "legacy_pruned_history": self.vault.legacy_pruned_history,
                 "token": self.vault.token.as_ref().map(|_| "<set>"),
                 "data_encryption_key": self.vault.data_encryption_key.as_ref().map(|_| "<set>"),
             },

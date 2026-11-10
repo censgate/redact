@@ -14,6 +14,9 @@ pub mod memory;
 #[cfg(feature = "vault")]
 pub mod kv2;
 
+#[cfg(feature = "vault")]
+mod pruned;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -26,7 +29,12 @@ use crate::redact::token::TokenMapping;
 pub use memory::MemoryStore;
 
 #[cfg(feature = "vault")]
-pub use kv2::Kv2Store;
+pub use kv2::{
+    check_context_epoch, prove_pruned_identity, pruned_evidence_digest, Kv2Store,
+    LegacyHistoryPolicy, PathFingerprint, PrunedEvidence, PrunedHistoryPolicy, PrunedProof,
+    PrunedRejection, PrunedVersion, BETA_MIGRATION_IDENTITY_EPOCH, PRUNED_IMPORT_EVENT,
+    PRUNED_IMPORT_METRIC, PRUNED_REJECTION_EVENT, PRUNED_REJECTION_METRIC,
+};
 
 /// Failures from a [`TokenMapStore`] backend.
 #[derive(Debug, thiserror::Error)]
