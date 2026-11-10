@@ -1139,17 +1139,19 @@ async fn erase_fences_and_destroys_a_context_with_pruned_kv_history() {
             session_path(&prefix, &tenant, &context)
         );
         async move {
-            client
+            let response = client
                 .get(url)
                 .header("X-Vault-Token", token)
                 .send()
                 .await
-                .unwrap()
-                .error_for_status()
-                .unwrap()
-                .json::<serde_json::Value>()
-                .await
-                .unwrap()
+                .unwrap();
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert!(
+                status.is_success(),
+                "GET {operation} for {context}: {status} {body}"
+            );
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()
         }
     };
     let metadata = get("metadata", pruned.clone()).await;
