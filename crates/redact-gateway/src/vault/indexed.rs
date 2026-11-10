@@ -83,6 +83,40 @@ impl std::fmt::Debug for IndexedStore {
             .finish_non_exhaustive()
     }
 }
+/// Content-free `error.type` label for an indexed-store outcome. Typed so a
+/// dashboard can separate overload (`busy`, `capacity`) and dependency loss
+/// (`unavailable`) from the terminal, expected `retired` and from integrity
+/// failures. Never carries identifiers, labels or backend diagnostics.
+pub fn error_type(error: &TokenMapError) -> &'static str {
+    match error {
+        TokenMapError::Indexed(Error::Invalid) => "invalid",
+        TokenMapError::Indexed(Error::Retired) => "retired",
+        TokenMapError::Indexed(Error::Unavailable) => "unavailable",
+        TokenMapError::Indexed(Error::Busy) => "busy",
+        TokenMapError::Indexed(Error::Capacity) => "capacity",
+        TokenMapError::Indexed(Error::Integrity) => "integrity",
+        _ => "dependency",
+    }
+}
+
+/// Record one indexed token-store operation as RED: rate and errors through the
+/// operation counter and duration through the histogram, with
+/// `redact.tokenmap.backend="indexed"`, a fixed `operation` (`intern`,
+/// `resolve`, `erase`) and, on failure, the typed `error.type`.
+pub fn record_operation<T>(
+    metrics: &crate::telemetry::Metrics,
+    operation: &str,
+    started: std::time::Instant,
+    result: &Result<T, TokenMapError>,
+) {
+    metrics.record_tokenmap_operation(
+        "indexed",
+        operation,
+        started.elapsed().as_secs_f64(),
+        result.as_ref().err().map(error_type),
+    );
+}
+
 fn failure(error: Error) -> TokenMapError {
     TokenMapError::Indexed(error)
 }

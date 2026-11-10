@@ -154,6 +154,33 @@ limits, counts and error category. Alert on failed runs, rising backlog or pass
 age, and sustained retries. The scheduler, its owner and the inventory export are
 deployment-specific and remain activation gates.
 
+### Request-path RED metrics and baseline targets
+
+Every indexed-store operation on the request path (`intern`, `resolve`, and
+`erase` through `DELETE /v1/vault/context`) is recorded on the existing
+`redact.gateway.tokenmap.operations` counter and
+`redact.gateway.tokenmap.operation.duration` histogram with
+`redact.tokenmap.backend="indexed"`, the fixed `redact.tokenmap.operation`, and,
+on failure, a typed `error.type`: `invalid`, `retired`, `unavailable`, `busy`,
+`capacity`, `integrity` or `dependency`. No identifier, label, scope or backend
+diagnostic is ever an attribute. `retired` is the expected terminal answer for
+an erased context; keep it out of the error rate and alert on its rate
+separately. `busy`/`capacity` are overload, `unavailable` is dependency loss,
+`integrity` must never occur in steady state.
+
+Baseline targets, measured from these series over a rolling five-minute window
+for each replica count and for a single hot principal (the objective is the
+steady-state rate, error and duration, not one large pass or a longer timeout):
+
+| Operation | Success rate (all outcomes except `retired`) | p95 | p99 |
+|---|---|---|---|
+| `intern`, `resolve` (warm context) | at least 99.9% | at most 100 ms | at most 250 ms |
+| first access of a context that imports legacy data | at least 99.9% | not set | at most 2.5 s |
+
+`integrity` must stay at zero. Alert when the success rate or p99 breaches its
+target over the window, or when `integrity` is non-zero. Revisit the numbers
+after the first load matrix below.
+
 ## Candidate preflight and activation
 
 Prepare the complete candidate configuration using the settings documented in the
