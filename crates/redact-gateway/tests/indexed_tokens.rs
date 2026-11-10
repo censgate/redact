@@ -1060,3 +1060,210 @@ async fn expiry_maintenance_clears_only_expired_imported_ciphertext() {
     let raw = std::fs::read_to_string(&checkpoint).unwrap();
     assert!(!raw.contains(&tenant) && !raw.contains(&live));
 }
+
+/// Erasing a legacy context whose KV v2 history was pruned by the mount's
+/// default `max_versions` (10) must still fence it, destroy every retained
+/// ciphertext version, retire the indexed context and touch nothing else.
+/// Regression guard for the pruned-history reset path (ENG-226).
+#[tokio::test]
+#[ignore = "requires isolated token-store PostgreSQL and OpenBao source"]
+async fn erase_fences_and_destroys_a_context_with_pruned_kv_history() {
+    use redact_gateway::{
+        redact::token::{Dek, TokenMapping},
+        vault::{session_path, Kv2Store, TokenMapStore},
+    };
+    const WRITES: u32 = 25;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&std::env::var("TOKEN_STORE_PG_URL").unwrap())
+        .await
+        .unwrap();
+    let target: Arc<dyn TokenStore> = Arc::new(Postgres::new(pool).await.unwrap());
+    let credential =
+        std::fs::read_to_string(std::env::var("TOKEN_STORE_BAO_TOKEN_FILE").unwrap()).unwrap();
+    let address = std::env::var("TOKEN_STORE_BAO_ADDR").unwrap();
+    let prefix = format!("pruned-erase-{}", uuid::Uuid::new_v4());
+    let source = Arc::new(
+        Kv2Store::from_settings(&redact_gateway::config::VaultSettings {
+            backend: redact_gateway::config::VaultBackend::VaultKv2,
+            address: Some(address.clone()),
+            token: Some(credential.trim().into()),
+            path_prefix: prefix.clone(),
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let key = Arc::new(Dek::from_bytes([13; 32]));
+    let mapping = |token: &str, original: &str| TokenMapping {
+        token: token.into(),
+        entity_type: "EMAIL_ADDRESS".into(),
+        sealed_value: key.seal(original).unwrap(),
+        created_at: chrono::Utc::now(),
+    };
+    let tenant = format!("synthetic-prune-tenant-{}", uuid::Uuid::new_v4());
+    let pruned = "vault:synthetic:principal".to_string();
+    let unborn_shard = format!("{pruned}:kvshard:1");
+    let control = "vault:synthetic:control".to_string();
+    // The mount default keeps 10 versions: 25 cumulative writes leave 16..=25.
+    for n in 1..=WRITES {
+        source
+            .put(
+                &tenant,
+                &pruned,
+                &[mapping(
+                    &format!("[EMAIL_ADDRESS_{n}]"),
+                    &format!("legacy{n}@example.invalid"),
+                )],
+            )
+            .await
+            .unwrap();
+    }
+    source
+        .put(
+            &tenant,
+            &control,
+            &[mapping("[EMAIL_ADDRESS_1]", "control@example.invalid")],
+        )
+        .await
+        .unwrap();
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let get = |operation: &'static str, context: String| {
+        let client = client.clone();
+        let token = credential.trim().to_string();
+        let path = session_path(&prefix, &tenant, &context);
+        let address = address.clone();
+        async move {
+            // The gateway stores the percent-escaped segment literally, so a
+            // raw request would decode %3A to ':' and miss it. Escape the '%'
+            // first and fall back to the raw form (ids without specials).
+            let mut last = String::new();
+            for candidate in [path.replace('%', "%25"), path.clone()] {
+                let response = client
+                    .get(format!("{address}/v1/secret/{operation}/{candidate}"))
+                    .header("X-Vault-Token", &token)
+                    .send()
+                    .await
+                    .unwrap();
+                let status = response.status();
+                let body = response.text().await.unwrap();
+                if status.is_success() {
+                    return serde_json::from_str::<serde_json::Value>(&body).unwrap();
+                }
+                last = format!("{status} {body}");
+            }
+            panic!("GET {operation} for {context}: {last}");
+        }
+    };
+    let metadata = get("metadata", pruned.clone()).await;
+    assert_eq!(metadata["data"]["current_version"], WRITES);
+    assert!(
+        metadata["data"]["oldest_version"].as_u64().unwrap() > 1,
+        "fixture must be pruned: {metadata}"
+    );
+    assert_eq!(metadata["data"]["versions"].as_object().unwrap().len(), 10);
+
+    let store = IndexedStore::new(
+        target,
+        source.clone(),
+        key.clone(),
+        Duration::from_secs(3600),
+    )
+    .unwrap();
+    // The incident: first access of a pruned context fails closed and writes nothing.
+    assert!(store
+        .commit(
+            &tenant,
+            &pruned,
+            &[mapping("[EMAIL_ADDRESS_26]", "new@example.invalid")],
+        )
+        .await
+        .is_err());
+    let unchanged = get("metadata", pruned.clone()).await;
+    assert_eq!(unchanged["data"]["current_version"], WRITES);
+
+    // Erase = the DELETE /v1/vault/context path (IndexedStore::purge).
+    TokenMapStore::purge(&store, &tenant, &pruned)
+        .await
+        .unwrap();
+    let after = get("metadata", pruned.clone()).await;
+    let fenced_version = after["data"]["current_version"].as_u64().unwrap();
+    assert!(fenced_version > u64::from(WRITES), "no fence was written");
+    for (version, details) in after["data"]["versions"].as_object().unwrap() {
+        if version.parse::<u32>().unwrap() <= WRITES {
+            assert_eq!(
+                details["destroyed"], true,
+                "retained legacy version {version} survived erasure"
+            );
+        }
+        assert!(
+            details["deletion_time"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty(),
+            "erasure must destroy, not soft-delete: {version}"
+        );
+    }
+    let latest = get("data", pruned.clone()).await;
+    let data = &latest["data"]["data"];
+    assert_eq!(data["frozen"], true);
+    assert_eq!(data["mappings"].as_array().unwrap().len(), 0);
+    assert_eq!(data["cleanup_through"], WRITES);
+    assert_eq!(data["destroyed_through"], WRITES);
+
+    // The old identity is permanently dead: indexed context retired, source fenced.
+    assert!(!TokenMapStore::exists(&store, &tenant, &pruned)
+        .await
+        .unwrap());
+    assert!(store
+        .commit(
+            &tenant,
+            &pruned,
+            &[mapping("[EMAIL_ADDRESS_1]", "legacy1@example.invalid")],
+        )
+        .await
+        .is_err());
+    assert!(source
+        .put(
+            &tenant,
+            &pruned,
+            &[mapping("[EMAIL_ADDRESS_1]", "legacy1@example.invalid")],
+        )
+        .await
+        .is_err());
+
+    // Idempotent: a repeat erase changes nothing.
+    TokenMapStore::purge(&store, &tenant, &pruned)
+        .await
+        .unwrap();
+    let again = get("metadata", pruned.clone()).await;
+    assert_eq!(
+        again["data"]["current_version"],
+        after["data"]["current_version"]
+    );
+
+    // An unborn shard document of the same family is fenced, not left open.
+    TokenMapStore::purge(&store, &tenant, &unborn_shard)
+        .await
+        .unwrap();
+    let shard = get("data", unborn_shard.clone()).await;
+    assert_eq!(shard["data"]["data"]["frozen"], true);
+    assert!(source
+        .put(
+            &tenant,
+            &unborn_shard,
+            &[mapping("[EMAIL_ADDRESS_1]", "late@example.invalid")],
+        )
+        .await
+        .is_err());
+
+    // Neighbours are untouched.
+    let control_meta = get("metadata", control.clone()).await;
+    assert_eq!(control_meta["data"]["current_version"], 1);
+    let remaining = source.get(&tenant, &control).await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].token, "[EMAIL_ADDRESS_1]");
+}
