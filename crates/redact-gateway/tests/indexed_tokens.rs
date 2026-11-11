@@ -654,9 +654,9 @@ async fn erasure_contract(target: Arc<dyn TokenStore>) {
     }
 }
 
-// Optional cross-repository check uses Platform's real Go client against both
-// real HTTP surfaces. Ordinary CI still exercises every backend/migration test;
-// the private Platform checkout is supplied explicitly by the caller.
+// Optional cross-repository check uses a consuming application's client against
+// both real HTTP surfaces. Ordinary CI still exercises every backend/migration
+// test; the extra checkout is supplied explicitly by the caller.
 async fn platform_client_contract(legacy: axum::Router, indexed: axum::Router) {
     let Ok(directory) = std::env::var("TOKEN_STORE_PLATFORM_TEST_DIR") else {
         return;
@@ -686,15 +686,15 @@ async fn platform_client_contract(legacy: axum::Router, indexed: axum::Router) {
     legacy_server.abort();
     indexed_server.abort();
     let output = result
-        .expect("Platform client contract deadline")
-        .expect("run Platform Go client");
+        .expect("optional client contract deadline")
+        .expect("run optional consuming-application client");
     assert!(
         output.status.success(),
-        "Platform client contract failed: {}{}",
+        "optional client contract failed: {}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    println!("Platform live mixed-shard client contract passed");
+    println!("optional mixed-shard client contract passed");
 }
 
 #[tokio::test]

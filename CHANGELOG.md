@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migrates never-imported contexts, persists an identifier-free durable cursor,
   fails closed on non-retryable errors and emits RED metrics and spans.
 
+### Documentation
+
+- Kubernetes and operator examples use generic token-map service names and
+  secret paths.
+
 ### Changed
 
 - `IndexedStore::purge_expired` no longer runs request-path migration; it
@@ -215,16 +220,16 @@ that patch). This heading unblocks `scripts/ci/changelog-notes.sh`.
 ### Added
 
 - `vault_kv2` Kubernetes auth (`CENSGATE_VAULT_AUTH=kubernetes`) against
-  `openbao-tokens`, with in-process token cache/renew. Static
+  a dedicated KV v2 token-map service, with in-process token cache/renew. Static
   `CENSGATE_VAULT_TOKEN` is local-dev only. Role `external-secrets` is
   refused. CAS retries are jittered (8 attempts); empty puts are skipped;
   `/readyz` caches OpenBao health for 2s. Kubernetes-auth KV calls share a
   read lock so login refresh does not serialize every OpenBao request.
 - Sample `deploy/kubernetes/redact-gateway.yaml`: min 2 replicas, HPA,
   PDB, startupProbe, ServiceAccount, Guaranteed 2 CPU / 4Gi, NetworkPolicy
-  to `openbao-tokens`. ESO ExternalSecret owns `redact-gateway-dek`; API
+  to the token-map service. ESO ExternalSecret owns `redact-gateway-dek`; API
   keys live in a separately provisioned Secret this manifest never applies.
-- `scripts/bench-gateway-ner.sh` and `docs/gateway/openbao-tokens-spike.md`
+- `scripts/bench-gateway-ner.sh`
   (do not quote the 32× Presidio redact-api number on the NER gateway).
 - `scripts/validate-distilbert-ner.sh` (gated; default model unchanged).
 - `export_ner_model.py --quantize` now runs dynamic INT8.

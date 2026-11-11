@@ -6,9 +6,9 @@
 //!
 //! This backend speaks the HashiCorp Vault KV v2 HTTP API and therefore works
 //! with both HashiCorp Vault and OpenBao. Auth is either a static bearer token
-//! (`X-Vault-Token`, local-dev) or Kubernetes auth against `openbao-tokens`
-//! (required for n-replica HPA). The ESO `external-secrets` role must never be
-//! used here.
+//! (`X-Vault-Token`, local-dev) or Kubernetes auth against a dedicated
+//! token-map service (required for n-replica HPA). The ESO `external-secrets`
+//! role must never be used here.
 //!
 //! Concurrent `put` calls use KV v2 compare-and-set (`options.cas`) with a
 //! bounded, jittered retry loop so two writers merging into the same session
@@ -110,7 +110,7 @@ impl Kv2Store {
                 if role == "external-secrets" {
                     return Err(TokenMapError::Unavailable(
                         "refusing Kubernetes auth role `external-secrets`; \
-                         bind a dedicated redact-gateway role on openbao-tokens"
+                         bind a dedicated redact-gateway role on the token-map service"
                             .to_string(),
                     ));
                 }

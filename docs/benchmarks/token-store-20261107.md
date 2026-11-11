@@ -78,7 +78,7 @@ and the exact dependency versions above. Raw rows:
 [worker 0](token-store-20261107-worker-0.csv),
 [worker 1](token-store-20261107-worker-1.csv).
 
-Remaining benchmark work: end-to-end gateway integration, actual Platform traces,
+Remaining benchmark work: end-to-end gateway integration, actual application traces,
 many tenant/principal distributions and skew, same-context multi-process races,
 multiple database shards, cold/warm repetition, resource/bytes/SQL-operation metrics,
 error categorization, backend outage/restart/failover, cancellation and key rotation.

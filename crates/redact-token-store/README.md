@@ -6,11 +6,11 @@ adapter. The gateway has an opt-in PostgreSQL integration. No existing settings
 select it automatically; this draft must not be deployed before its migration
 and release gates are reviewed.
 
-The [coordinated review and beta runbook](../../docs/token-store-beta-readiness.md)
-defines registry prerequisites, the two-phase rollout, preflight checks, acceptance
-evidence and the irreversible source-fence rollback boundary.
+Review registry prerequisites, rollout, preflight checks and the irreversible
+source-fence rollback boundary before enabling this integration in a live
+environment.
 
-## Contract and Platform access patterns
+## Contract and access patterns
 
 `Vault::intern` accepts up to 256 `(entity type, original value)` pairs and commits
 atomically. Concurrent replicas reuse the winning identity; retrying after a lost
@@ -23,9 +23,9 @@ uses a bounded semaphore and returns `Busy` without an unbounded queue.
 
 Scope derives from authenticated tenant, principal and caller context. Gateway
 integration preserves the existing subject-bound context derivation, including
-Platform's principal-wide context shared across chats. Tokens do not authorize
-reads. Platform selects complete owner-message pages, validated branches and useful
-recall candidates before restoration; model/tool/MCP/A2A data stays tokenized.
+a principal-wide context that a consuming application may share across
+conversations. Tokens do not authorize reads. A consuming application selects
+which values to restore; model, tool and agent data can stay tokenized.
 
 The gateway builds request-local random placeholders, atomically interns only new
 values, and replaces placeholders before provider or owner release. Proxy restoration
@@ -154,8 +154,8 @@ versions. Retry until zero. An authorized maintenance worker must supply subject
 contexts from its inventory; no global tenant-enumerating API or automatic scheduler
 is installed here. The gateway's `maintain-token-store` command is that worker: it
 purges only already imported contexts listed in an operator-supplied inventory,
-with a durable cursor, bounded batches/retries and RED telemetry (see
-[the readiness runbook](../../docs/token-store-beta-readiness.md#expiry-maintenance)). Backups, WAL, replicas and storage-level remnants require their
+with a durable cursor, bounded batches/retries and RED telemetry.
+Backups, WAL, replicas and storage-level remnants require their
 own retention/erasure procedures; row updates are not physical-media zeroization.
 
 On uncertain commit, retry the same operation. On interrupted migration, retain both
@@ -182,16 +182,14 @@ Gateway errors preserve typed storage outcomes: invalid requests return 400,
 integrity failures 409, retired identities 410, capacity limits 413, contention or
 admission exhaustion 429, and unavailable dependencies 503. Bodies expose only
 static error categories. The 256-reference/mapping limit is a terminal response;
-the gateway does not partially release a request or retry it as an outage. Platform
-tests ensure terminal statuses do not retry or advance legacy shards. OpenBao's
+the gateway does not partially release a request or retry it as an outage.
+Integration tests ensure terminal statuses do not retry or advance legacy shards. OpenBao's
 non-CAS HTTP 400 rejection is terminal; HTTP 413 and 429 retain capacity/busy semantics.
 
-Platform must be upgraded with #445 before indexed writes. Native UUID-u128 numeric
-labels are not machine-sized counters. For a retained legacy shard N, Platform
-stores the routing envelope `N * 2^128 + native_label`, then strips it before restore.
-Small legacy labels keep their existing `N * 10000 + label` encoding. Mixed native,
-legacy and enveloped labels must restore through the matching context after restart.
-This changes routing, never the target's token identity or principal-wide scope.
+Native UUID-u128 numeric labels are not machine-sized counters. Consuming
+applications that retain mixed native, legacy and enveloped labels must restore
+through the matching context after restart. Application-level routing envelopes
+must not change the target's token identity or principal-wide scope.
 
 Contract tests cover concurrency, lost acknowledgements, principal/tenant isolation,
 legacy alias preservation, expiry reservations, ciphertext integrity, response/crypto
@@ -228,12 +226,12 @@ TOKEN_STORE_BAO_BIN=/path/to/bao \
 python3 scripts/token-store/test-local.py
 ```
 
-For the cross-repository mixed-shard migration contract, also set
-`TOKEN_STORE_PLATFORM_TEST_DIR` to the companion Platform #445 checkout and put
-Go 1.26 on `PATH`. The gateway integration tests start disposable legacy/indexed
-loopback HTTP routers and run Platform's actual Go client against both backends.
-This optional private-checkout check passed locally; public Redact CI runs the
-backend and HTTP migration contracts without requiring private repository access.
+For an optional cross-repository mixed-shard client contract, also set
+`TOKEN_STORE_PLATFORM_TEST_DIR` to a consuming application's checkout that
+provides a compatible client, and put Go 1.26 on `PATH`. The gateway integration
+tests start disposable legacy/indexed loopback HTTP routers and run that client
+against both backends. CI in this repository runs the backend and HTTP migration
+contracts without that extra checkout.
 
 For benchmarks build `cargo build --release -p redact-token-store --example compare`
 and add `TOKEN_STORE_RUN_BENCH=1`, `TOKEN_STORE_BENCH_OUTPUT=/tmp/token-store-results`
