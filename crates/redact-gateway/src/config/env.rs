@@ -87,7 +87,7 @@ pub const VAULT_ADDR: &str = "CENSGATE_VAULT_ADDR";
 pub const VAULT_TOKEN: &str = "CENSGATE_VAULT_TOKEN";
 /// KV v2 auth method: `token` (local-dev) or `kubernetes` (HPA).
 pub const VAULT_AUTH: &str = "CENSGATE_VAULT_AUTH";
-/// Kubernetes auth role on openbao-tokens (never `external-secrets`).
+/// Kubernetes auth role on the token-map service (never `external-secrets`).
 pub const VAULT_K8S_ROLE: &str = "CENSGATE_VAULT_K8S_ROLE";
 /// Kubernetes auth mount (default `kubernetes`).
 pub const VAULT_K8S_MOUNT: &str = "CENSGATE_VAULT_K8S_MOUNT";

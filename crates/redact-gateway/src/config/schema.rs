@@ -140,7 +140,7 @@ pub struct VaultDocument {
     pub address: Option<String>,
     /// Authentication token.
     pub token: Option<String>,
-    /// `token` (local-dev) or `kubernetes` (HPA / openbao-tokens).
+    /// `token` (local-dev) or `kubernetes` (HPA / dedicated token-map service).
     pub auth: Option<VaultAuthMethod>,
     /// Kubernetes auth role. Never `external-secrets`.
     pub kubernetes_role: Option<String>,

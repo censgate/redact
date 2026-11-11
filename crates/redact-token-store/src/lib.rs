@@ -228,8 +228,8 @@ impl Vault {
         })
     }
 
-    /// Bind caller context to verified tenant and principal. Context retains
-    /// Platform's principal-wide vault identity across conversations.
+    /// Bind caller context to verified tenant and principal. Context may be a
+    /// principal-wide vault identity shared across conversations.
     pub fn scope(&self, tenant: &str, principal: &str, context: &str) -> Result<Scope, Error> {
         if [tenant, principal, context]
             .iter()

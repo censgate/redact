@@ -102,13 +102,13 @@ packs:
 
 vault:                             # token map settings (name is historical)
   backend: "off"                   # off | memory | vault_kv2  (quote "off")
-  address: null                    # openbao-tokens SVC in AKS
+  address: null                    # dedicated token-map service URL
   auth: token                      # token (local-dev) | kubernetes (HPA)
   token: null                      # static token; local-dev only
   kubernetes_role: null            # redact-gateway; never external-secrets
   kubernetes_mount: kubernetes
   jwt_path: /var/run/secrets/kubernetes.io/serviceaccount/token
-  mount: secret                    # tokens on openbao-tokens
+  mount: secret                    # tokens mount on the token-map service
   path_prefix: redact-gateway
   namespace: null
   ttl_secs: 3600
@@ -202,13 +202,13 @@ Each setting has exactly one environment name under the `CENSGATE_` prefix. The 
 | `CENSGATE_NER_SESSION_POOL` | `2` | ONNX session pool (cap 4) |
 | `CENSGATE_NER_INTRA_THREADS` | `1` | ORT intra-op threads per session (cap 8). `pool × intra ≈` pod CPUs |
 | `CENSGATE_VAULT_BACKEND` | `off` | Token map backend (`off`, `memory`, `vault_kv2`) |
-| `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 address (`openbao-tokens` SVC in AKS) |
+| `CENSGATE_VAULT_ADDR` / `VAULT_ADDR` / `BAO_ADDR` | unset | KV v2 address (dedicated token-map service) |
 | `CENSGATE_VAULT_AUTH` | `token` | `token` (local-dev) or `kubernetes` (HPA) |
 | `CENSGATE_VAULT_TOKEN` / `VAULT_TOKEN` / `BAO_TOKEN` | unset | Static KV token (local-dev only) |
 | `CENSGATE_VAULT_K8S_ROLE` | unset | Kubernetes auth role (`redact-gateway`; never `external-secrets`) |
 | `CENSGATE_VAULT_K8S_MOUNT` | `kubernetes` | Kubernetes auth mount |
 | `CENSGATE_VAULT_JWT_PATH` | SA token path | Projected ServiceAccount JWT |
-| `CENSGATE_VAULT_MOUNT` | `secret` | KV v2 mount (`tokens` on openbao-tokens) |
+| `CENSGATE_VAULT_MOUNT` | `secret` | KV v2 mount (`tokens` on the token-map service) |
 | `CENSGATE_VAULT_PATH_PREFIX` | `redact-gateway` | Path prefix |
 | `CENSGATE_VAULT_NAMESPACE` / `VAULT_NAMESPACE` | unset | Namespace header |
 | `CENSGATE_TOKEN_TTL_SECS` | `3600` | Mapping TTL |

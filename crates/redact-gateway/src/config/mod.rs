@@ -181,7 +181,7 @@ impl std::str::FromStr for VaultBackend {
 pub enum VaultAuthMethod {
     /// Static `X-Vault-Token`. Local-dev and compose only.
     Token,
-    /// Kubernetes auth against `openbao-tokens`. Required for HPA.
+    /// Kubernetes auth against a dedicated token-map service. Required for HPA.
     Kubernetes,
 }
 
@@ -766,7 +766,7 @@ impl ResolvedConfig {
         {
             return Err(ConfigError::Invalid(
                 "vault_kv2 kubernetes auth requires vault.kubernetes_role \
-                 (dedicated redact-gateway role on openbao-tokens; never external-secrets)"
+                 (dedicated redact-gateway role on the token-map service; never external-secrets)"
                     .to_string(),
             ));
         }
@@ -1132,7 +1132,7 @@ mod tests {
     fn vault_kv2_kubernetes_auth_requires_a_role() {
         let mut config = ResolvedConfig::default();
         config.vault.backend = VaultBackend::VaultKv2;
-        config.vault.address = Some("http://openbao-tokens.openbao-tokens.svc:8200".into());
+        config.vault.address = Some("http://token-map.example.svc.cluster.local:8200".into());
         config.vault.auth = VaultAuthMethod::Kubernetes;
         let err = config.validate().unwrap_err().to_string();
         assert!(err.contains("kubernetes_role"), "{err}");

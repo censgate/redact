@@ -48,7 +48,7 @@ Startup refuses a key that is not valid base64, that does not decode to 32 bytes
 |---------|--------------------------|-----------|
 | Off | `off` (default) | No persistence. Tokens are minted and restored **within the request that created them**; they cannot be resumed by a later request, recovered through `/v1/restore`, or shared with another replica. |
 | Memory | `memory` | Process-local map with TTL. Tokens do not survive a restart or reach another replica. Suitable for development and single-node testing. |
-| KV v2 | `vault_kv2` | Speaks the HashiCorp Vault KV v2 HTTP API; works with both **HashiCorp Vault** and **OpenBao**. Production authenticates with **Kubernetes auth** against `openbao-tokens`. A static token is local-dev only. |
+| KV v2 | `vault_kv2` | Speaks the HashiCorp Vault KV v2 HTTP API; works with both **HashiCorp Vault** and **OpenBao**. Production authenticates with **Kubernetes auth** against a dedicated KV v2 token-map service. A static token is local-dev only. |
 
 Sealed-mapping property: stores hold only `sealed_value` ciphertext plus metadata (`token`, `entity_type`, `created_at`). Opening always requires the gateway DEK.
 
@@ -78,20 +78,20 @@ export CENSGATE_TOKEN_TTL_SECS=3600
 export CENSGATE_TOKEN_DEK="$(openssl rand -base64 32)"
 ```
 
-AKS / beta (Kubernetes auth against **openbao-tokens**, DEK from secrets OpenBao):
+Kubernetes (Kubernetes auth against a dedicated token-map service, DEK from the secrets store):
 
 ```bash
 export CENSGATE_VAULT_BACKEND=vault_kv2
-export CENSGATE_VAULT_ADDR=http://openbao-tokens.openbao-tokens.svc.cluster.local:8200
+export CENSGATE_VAULT_ADDR=http://token-map.example.svc.cluster.local:8200
 export CENSGATE_VAULT_AUTH=kubernetes
 export CENSGATE_VAULT_K8S_ROLE=redact-gateway   # never external-secrets
 export CENSGATE_VAULT_MOUNT=tokens
-export CENSGATE_TOKEN_DEK   # projected by ESO from the secrets cluster
+export CENSGATE_TOKEN_DEK   # projected by ESO from the secrets store
 ```
 
 Paths are `{prefix}/{tenant}/{session}` with tenant and session percent-encoded so `/` and `..` cannot escape the prefix. Writes merge with existing mappings using KV v2 check-and-set (`options.cas`) with up to eight jittered read-merge-write retries. An empty incoming mapping set skips the write. Under sustained contention on a single session a write can still exhaust those retries and fail the request. Expired sessions are treated as absent. `/readyz` caches OpenBao health for two seconds.
 
-OSS gateway `vault_kv2` on `openbao-tokens` is the supported multi-replica path. Platform may still seal display names locally with its own DEK; that is a different contract.
+OSS gateway `vault_kv2` on a dedicated token-map service is the supported multi-replica path. A consuming application may still seal display names locally with its own DEK; that is a different contract.
 
 Requires the `vault` Cargo feature (enabled by default).
 
