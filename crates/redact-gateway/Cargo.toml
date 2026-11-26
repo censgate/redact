@@ -71,7 +71,7 @@ tracing-opentelemetry = "0.34"
 opentelemetry-otlp = { version = "0.33", features = ["trace", "metrics", "logs", "grpc-tonic", "http-proto", "reqwest-blocking-client"], optional = true }
 opentelemetry-prometheus = { version = "0.33", optional = true }
 prometheus = { version = "0.14", optional = true }
-jsonwebtoken = { version = "11", optional = true, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", optional = true, features = ["aws_lc_rs"] }
 vaultrs = { version = "0.8", optional = true }
 
 [dev-dependencies]
