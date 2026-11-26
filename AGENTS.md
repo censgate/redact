@@ -211,6 +211,16 @@ Before committing:
 3. `cargo test --workspace` - All tests pass
 4. Commit messages follow Conventional Commits
 
+## Paused Work
+
+- An issue labelled `Paused`, or closed as Canceled or Duplicate, is off
+  limits. Do not start, claim, branch or open a PR for it, even when a
+  parent issue or another agent points at it.
+- Do not remove the label or reopen the issue. Reopening needs the OK of
+  the maintainer who paused it.
+- If in-flight work turns out to belong to a paused issue, stop and hand
+  it back with a comment on that issue.
+
 ## Environment
 
 - **Rust**: 1.93.0 (see `.tool-versions`)
