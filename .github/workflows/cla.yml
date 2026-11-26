@@ -3,6 +3,12 @@
 # The action creates signatures/version1/cla.json on first human sign-off.
 # Maintainer-run agents that cannot post a sign-off comment are allowlisted.
 #
+# The CLA applies to external contributors only. Censgate org members and
+# allowlisted accounts or bots skip the signature check. The required
+# "CLA Assistant" check is posted on the pull request head SHA for every
+# run, including comment retriggers and workflow_dispatch, so it is not
+# left on main.
+#
 # contributor-assistant/github-action is archived; v2.6.1 remains the
 # last release. Pin by SHA. If the action stops working, a maintainer
 # can add the GitHub username to `allowlist` or the signatures file.
@@ -12,7 +18,7 @@
 #
 # After this workflow is on main, require the "CLA Assistant" check on
 # the main ruleset. Do not protect cla-signatures in a way that blocks
-# GITHUB_TOKEN.
+# GITHUB_TOKEN. Do not change the ruleset in this change.
 
 name: CLA Assistant
 
@@ -20,21 +26,100 @@ on:
   issue_comment:
     types: [created]
   pull_request_target:
-    types: [opened, closed, synchronize]
+    types: [opened, closed, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request number to check
+        required: true
+        type: number
 
 permissions:
   actions: write
+  checks: write
   contents: write
   pull-requests: write
   statuses: write
 
+concurrency:
+  group: cla-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pull_request_number }}
+  cancel-in-progress: true
+
 jobs:
   CLAAssistant:
-    name: CLA Assistant
-    if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+    # Job name is not "CLA Assistant". The required check is created
+    # explicitly on the pull request head SHA in the report step.
+    name: CLA Assistant runner
+    if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch' || github.event.issue.pull_request
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve pull request head
+        id: resolve
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const allowlist = new Set([
+              'dependabot[bot]',
+              'github-actions[bot]',
+              'cursoragent',
+              'cursor[bot]',
+              'censgate-coder',
+              'censgate-qa',
+              'censgate-mark',
+              'censgate-rosie[bot]',
+            ]);
+
+            let prNumber;
+            if (context.eventName === 'workflow_dispatch') {
+              prNumber = Number(context.payload.inputs.pull_request_number);
+            } else if (context.payload.pull_request) {
+              prNumber = context.payload.pull_request.number;
+            } else if (context.issue && context.issue.number) {
+              prNumber = context.issue.number;
+            }
+
+            if (!Number.isInteger(prNumber) || prNumber < 1) {
+              core.setFailed('Could not resolve a valid pull request number.');
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const headSha = pr.head && pr.head.sha;
+            if (!headSha || !/^[0-9a-f]{40}$/.test(headSha)) {
+              core.setFailed('Refusing to continue without a valid pull request head SHA.');
+              return;
+            }
+
+            const author = (pr.user && pr.user.login) || '';
+            const association = pr.author_association || '';
+            const internal = (author && allowlist.has(author)) ||
+              association === 'MEMBER' ||
+              association === 'OWNER';
+
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('head_sha', headSha);
+            core.setOutput('author', author);
+            core.setOutput('association', association);
+            core.setOutput('internal', internal ? 'true' : 'false');
+            core.info(
+              'PR #' + prNumber +
+              ' head=' + headSha +
+              ' author=' + author +
+              ' association=' + association +
+              ' internal=' + internal
+            );
+
+      - name: Skip CLA for internal authors
+        if: steps.resolve.outputs.internal == 'true'
+        run: echo "PR author is a Censgate org member or allowlisted account; CLA applies to external contributors only."
+
       - name: CLA Assistant
+        if: steps.resolve.outputs.internal != 'true'
         uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,16 +143,16 @@ jobs:
 
       # The archived action only reads the first page of PR commits.
       # Paginate here and fail if any GitHub author is unsigned.
-      # Checkout cla-signatures only — never the pull-request HEAD.
+      # Checkout cla-signatures only, never the pull-request HEAD.
       - name: Checkout signature store
-        if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+        if: steps.resolve.outputs.internal != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: cla-signatures
           persist-credentials: false
 
       - name: Verify all PR commit authors are signed
-        if: github.event_name == 'pull_request_target' || github.event.issue.pull_request
+        if: steps.resolve.outputs.internal != 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -82,9 +167,27 @@ jobs:
               'censgate-mark',
               'censgate-rosie[bot]',
             ]);
-            const prNumber = context.payload.pull_request
-              ? context.payload.pull_request.number
-              : context.issue.number;
+            const prNumber = Number('${{ steps.resolve.outputs.pr_number }}');
+            if (!Number.isInteger(prNumber) || prNumber < 1) {
+              core.setFailed('Missing pull request number for commit author verification.');
+              return;
+            }
+
+            async function isCensgateMember(login) {
+              try {
+                const res = await github.rest.orgs.checkMembershipForUser({
+                  org: context.repo.owner,
+                  username: login,
+                });
+                return res.status === 204 || res.status === 200;
+              } catch (err) {
+                if (err.status === 404) {
+                  return false;
+                }
+                core.info('Org membership check for ' + login + ' returned ' + err.status + '; treating as external.');
+                return false;
+              }
+            }
 
             let signed = new Set();
             const claPath = 'signatures/version1/cla.json';
@@ -118,7 +221,8 @@ jobs:
                 continue;
               }
               const key = login.toLowerCase();
-              if (seen.has(key) || allowlist.has(login)) {
+              if (seen.has(key) || allowlist.has(login) || await isCensgateMember(login)) {
+                seen.add(key);
                 continue;
               }
               seen.add(key);
@@ -134,3 +238,40 @@ jobs:
                   '. Sign the Individual CLA or add the GitHub username to allowlist / signatures/version1/cla.json.'
               );
             }
+
+      - name: Report CLA Assistant check on PR head
+        if: always() && steps.resolve.outcome == 'success' && steps.resolve.outputs.head_sha != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CLA_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          CLA_INTERNAL: ${{ steps.resolve.outputs.internal }}
+          CLA_JOB_STATUS: ${{ job.status }}
+          CLA_PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
+        with:
+          script: |
+            const headSha = process.env.CLA_HEAD_SHA || '';
+            if (!/^[0-9a-f]{40}$/.test(headSha)) {
+              core.setFailed('Refusing to report a check without a valid PR head SHA.');
+              return;
+            }
+            const internal = process.env.CLA_INTERNAL === 'true';
+            const conclusion = (internal || process.env.CLA_JOB_STATUS === 'success') ? 'success' : 'failure';
+            const title = internal
+              ? 'Internal or allowlisted author; CLA not required'
+              : (conclusion === 'success' ? 'CLA satisfied' : 'CLA required for external contributors');
+            const summary = internal
+              ? 'The pull request author is a Censgate org member or an allowlisted account or bot. The CLA applies to external contributors only.'
+              : (conclusion === 'success'
+                ? 'External contributor CLA check passed for pull request #' + process.env.CLA_PR_NUMBER + '.'
+                : 'External contributor CLA check failed for pull request #' + process.env.CLA_PR_NUMBER + '.');
+
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'CLA Assistant',
+              head_sha: headSha,
+              status: 'completed',
+              conclusion,
+              output: { title, summary },
+            });
+            core.info('Posted CLA Assistant ' + conclusion + ' on ' + headSha);
