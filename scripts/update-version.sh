@@ -37,7 +37,7 @@ show_usage() {
     echo "  - every workspace-internal path dependency version"
     echo "    (scripts/ci/align-internal-versions.sh; a missed pin fails)"
     echo "  - README.md (library Cargo.toml example versions)"
-    echo "  - docs/benchmarks/README.md (current release link)"
+    echo "  - docs/benchmarks/README.md (current release link; fail-closed)"
     echo "  - CHANGELOG.md (moves Unreleased notes under the new version)"
 }
 
@@ -131,10 +131,20 @@ update_doc_versions() {
     fi
 
     # Benchmarks "current release" pointer
-    sed -i.bak -E \
-        "s|The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*|The **current** release is **[v${new_version}](https://github.com/censgate/redact/releases/tag/v${new_version})**|" \
-        docs/benchmarks/README.md
-    rm -f docs/benchmarks/README.md.bak
+    # Must match the live docs/benchmarks/README.md wording and the
+    # prepare-release.yml sed. Fail closed if the contract drifted.
+    if [[ -f docs/benchmarks/README.md ]]; then
+        if ! grep -qE 'The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*' docs/benchmarks/README.md; then
+            print_error "docs/benchmarks/README.md: expected 'current release' version link missing (prepare-release contract)"
+            exit 1
+        fi
+        sed -i.bak -E             "s|The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*|The **current** release is **[v${new_version}](https://github.com/censgate/redact/releases/tag/v${new_version})**|"             docs/benchmarks/README.md
+        rm -f docs/benchmarks/README.md.bak
+        if ! grep -qF "The **current** release is **[v${new_version}](https://github.com/censgate/redact/releases/tag/v${new_version})**" docs/benchmarks/README.md; then
+            print_error "docs/benchmarks/README.md: version bump to v${new_version} did not apply"
+            exit 1
+        fi
+    fi
 
     # Unsupported Go-era versions hint at bottom of CHANGELOG
     if grep -q "Please upgrade to v" CHANGELOG.md; then

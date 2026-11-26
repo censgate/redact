@@ -18,6 +18,7 @@ const CRATE_NAMES = [
   "redact-cli",
   "redact-wasm",
   "redact-gateway",
+  "redact-token-store",
   "redact-scan",
   "redact-verify",
 ];

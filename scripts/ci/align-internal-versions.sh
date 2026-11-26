@@ -928,6 +928,21 @@ EOF
     exit 1
   fi
 
+  # prepare-release.yml sed must match live docs/benchmarks/README.md.
+  # Drift left the 0.13.0 release on an old "latest tagged" line.
+  BM="docs/benchmarks/README.md"
+  PR=".github/workflows/prepare-release.yml"
+  BM_RE='The \*\*current\*\* release is \*\*\[v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\]\(https://github.com/censgate/redact/releases/tag/v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?\)\*\*'
+  if [[ ! -f "$BM" ]] || ! grep -qE "$BM_RE" "$BM"; then
+    echo "ERROR: $BM missing prepare-release 'current release' version link" >&2
+    exit 1
+  fi
+  if [[ ! -f "$PR" ]] || ! grep -q 'docs/benchmarks/README.md' "$PR" \
+    || ! grep -qF 'The **current** release is **[v${VERSION}]' "$PR"; then
+    echo "ERROR: $PR missing benchmarks current-release version substitution" >&2
+    exit 1
+  fi
+
   echo "OK: align-internal-versions.sh self-test"
 }
 

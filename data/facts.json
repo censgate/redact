@@ -114,6 +114,7 @@
     "redact-cli": "0.13.0",
     "redact-wasm": "0.13.0",
     "redact-gateway": "0.13.0",
+    "redact-token-store": "0.13.0",
     "redact-scan": "0.13.0",
     "redact-verify": "0.13.0"
   }
